@@ -8,6 +8,7 @@ resume.pdf
 
 # Runtime artifacts
 *.db
+applypilot-transfer*.zip
 tailored_resumes/
 cover_letters/
 chrome-workers/
@@ -22,10 +23,15 @@ logs/
 __pycache__/
 *.py[cod]
 *$py.class
+.venv/
+.venv*/
 *.egg-info/
 dist/
 build/
 *.egg
+
+# Windows oddities
+nul
 
 # IDE
 .vscode/

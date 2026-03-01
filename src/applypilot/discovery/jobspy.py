@@ -8,6 +8,7 @@ search configuration YAML (searches.yaml) rather than being hardcoded.
 """
 
 import logging
+import re
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -15,12 +16,13 @@ from datetime import datetime, timezone
 from jobspy import scrape_jobs
 
 from applypilot import config
-from applypilot.database import get_connection, init_db, store_jobs
+from applypilot.database import find_existing_job_url, get_connection, init_db, normalize_url
 
 log = logging.getLogger(__name__)
 
 
 # -- Proxy parsing -----------------------------------------------------------
+
 
 def parse_proxy(proxy_str: str) -> dict:
     """Parse host:port:user:pass into components."""
@@ -50,13 +52,11 @@ def parse_proxy(proxy_str: str) -> dict:
             "playwright": {"server": f"http://{host}:{port}"},
         }
     else:
-        raise ValueError(
-            f"Proxy format not recognized: {proxy_str}. "
-            f"Expected: host:port:user:pass or host:port"
-        )
+        raise ValueError(f"Proxy format not recognized: {proxy_str}. Expected: host:port:user:pass or host:port")
 
 
 # -- Retry wrapper -----------------------------------------------------------
+
 
 def _scrape_with_retry(kwargs: dict, max_retries: int = 2, backoff: float = 5.0):
     """Call scrape_jobs with retry on transient failures."""
@@ -76,6 +76,7 @@ def _scrape_with_retry(kwargs: dict, max_retries: int = 2, backoff: float = 5.0)
 
 # -- Location filtering ------------------------------------------------------
 
+
 def _load_location_config(search_cfg: dict) -> tuple[list[str], list[str]]:
     """Extract accept/reject location lists from search config.
 
@@ -83,7 +84,56 @@ def _load_location_config(search_cfg: dict) -> tuple[list[str], list[str]]:
     """
     accept = search_cfg.get("location_accept", [])
     reject = search_cfg.get("location_reject_non_remote", [])
+
+    # Also support the nested format used by searches.example.yaml:
+    #   location:
+    #     accept_patterns: [...]
+    #     reject_patterns: [...]
+    if (not accept) or (not reject):
+        loc_cfg = search_cfg.get("location", {}) or {}
+        if not accept:
+            accept = loc_cfg.get("accept_patterns", []) or []
+        if not reject:
+            reject = loc_cfg.get("reject_patterns", []) or []
+
     return accept, reject
+
+
+def _normalize_search_cfg(cfg: dict) -> dict:
+    """Normalize search config across historical formats.
+
+    This keeps the public YAML stable while allowing older/newer keys:
+    - `boards` is an alias of `sites`
+    - top-level `country` or defaults.country -> defaults.country_indeed
+    - nested location.accept_patterns/reject_patterns -> location_accept/location_reject_non_remote
+    """
+    if not cfg:
+        return {}
+
+    out = dict(cfg)
+
+    # boards -> sites alias
+    if out.get("sites") is None and out.get("boards") is not None:
+        out["sites"] = out.get("boards")
+
+    # defaults normalization
+    defaults = dict(out.get("defaults", {}) or {})
+
+    # Country mapping for JobSpy (country_indeed)
+    country = defaults.get("country_indeed") or defaults.get("country") or out.get("country")
+    if country and not defaults.get("country_indeed"):
+        defaults["country_indeed"] = str(country).strip().lower()
+    out["defaults"] = defaults
+
+    # Location filter aliases
+    if not out.get("location_accept") or not out.get("location_reject_non_remote"):
+        accept, reject = _load_location_config(out)
+        if accept and not out.get("location_accept"):
+            out["location_accept"] = accept
+        if reject and not out.get("location_reject_non_remote"):
+            out["location_reject_non_remote"] = reject
+
+    return out
 
 
 def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> bool:
@@ -97,15 +147,16 @@ def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> 
 
     loc = location.lower()
 
-    # Remote jobs always OK
-    if any(r in loc for r in ("remote", "anywhere", "work from home", "wfh", "distributed")):
-        return True
-
-    # Reject non-remote matches
+    # Reject patterns always win (including remote roles like "Remote (US)").
     for r in reject:
-        if r.lower() in loc:
+        if r and r.lower() in loc:
             return False
 
+    # If user didn't configure accept patterns, don't filter by location.
+    if not accept:
+        return True
+
+    # Require an accept match (including remote, if you included "Remote" in accept_patterns).
     # Accept matches
     for a in accept:
         if a.lower() in loc:
@@ -117,7 +168,14 @@ def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> 
 
 # -- DB storage (JobSpy DataFrame -> SQLite) ---------------------------------
 
-def store_jobspy_results(conn: sqlite3.Connection, df, source_label: str) -> tuple[int, int]:
+
+def store_jobspy_results(
+    conn: sqlite3.Connection,
+    df,
+    source_label: str,
+    *,
+    search_query: str | None = None,
+) -> tuple[int, int]:
     """Store JobSpy DataFrame results into the DB. Returns (new, existing)."""
     now = datetime.now(timezone.utc).isoformat()
     new = 0
@@ -128,8 +186,17 @@ def store_jobspy_results(conn: sqlite3.Connection, df, source_label: str) -> tup
         if not url or url == "nan":
             continue
 
+        # Respect user-level URL blocking.
+        try:
+            from applypilot.database import is_url_blocked
+
+            if is_url_blocked(url, conn=conn):
+                existing += 1
+                continue
+        except Exception:
+            pass
+
         title = str(row.get("title", "")) if str(row.get("title", "")) != "nan" else None
-        company = str(row.get("company", "")) if str(row.get("company", "")) != "nan" else None
         location_str = str(row.get("location", "")) if str(row.get("location", "")) != "nan" else None
 
         # Build salary string from min/max
@@ -166,23 +233,58 @@ def store_jobspy_results(conn: sqlite3.Connection, df, source_label: str) -> tup
         # Extract apply URL if JobSpy provided it
         apply_url = str(row.get("job_url_direct", "")) if str(row.get("job_url_direct", "")) != "nan" else None
 
+        canonical_url = normalize_url(url) or url
+        dup_url = find_existing_job_url(conn, canonical_url)
+        if dup_url:
+            existing += 1
+            if search_query:
+                try:
+                    conn.execute(
+                        "UPDATE jobs SET search_query = COALESCE(NULLIF(search_query, ''), ?) WHERE url = ?",
+                        (search_query, dup_url),
+                    )
+                except Exception:
+                    pass
+            continue
+
         try:
             conn.execute(
-                "INSERT INTO jobs (url, title, salary, description, location, site, strategy, discovered_at, "
+                "INSERT INTO jobs (url, title, search_query, salary, description, location, site, strategy, discovered_at, "
                 "full_description, application_url, detail_scraped_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (url, title, salary, description, location_str, site_label, strategy, now,
-                 full_description, apply_url, detail_scraped_at),
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    canonical_url,
+                    title,
+                    (search_query or None),
+                    salary,
+                    description,
+                    location_str,
+                    site_label,
+                    strategy,
+                    now,
+                    full_description,
+                    apply_url,
+                    detail_scraped_at,
+                ),
             )
             new += 1
         except sqlite3.IntegrityError:
             existing += 1
+            if search_query:
+                try:
+                    conn.execute(
+                        "UPDATE jobs SET search_query = COALESCE(NULLIF(search_query, ''), ?) WHERE url = ?",
+                        (search_query, canonical_url),
+                    )
+                except Exception:
+                    pass
 
     conn.commit()
     return new, existing
 
 
 # -- Single search execution -------------------------------------------------
+
 
 def _run_one_search(
     search: dict,
@@ -195,10 +297,11 @@ def _run_one_search(
     accept_locs: list[str],
     reject_locs: list[str],
     glassdoor_map: dict,
+    exclude_titles: list[str] | None = None,
 ) -> dict:
     """Run a single search query and store results in DB."""
     s = search
-    label = f"\"{s['query']}\" in {s['location']} {'(remote)' if s.get('remote') else ''}"
+    label = f'"{s["query"]}" in {s["location"]} {"(remote)" if s.get("remote") else ""}'
     if "tier" in s:
         label += f" [tier {s['tier']}]"
 
@@ -260,6 +363,7 @@ def _run_one_search(
 
     import pandas as pd
     import warnings
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", FutureWarning)
         df = pd.concat(all_dfs, ignore_index=True) if len(all_dfs) > 1 else all_dfs[0]
@@ -268,18 +372,37 @@ def _run_one_search(
         log.info("[%s] 0 results", label)
         return {"new": 0, "existing": 0, "errors": 0, "filtered": 0, "total": 0, "label": label}
 
+    # Filter by excluded titles (before storing)
+    excluded = 0
+    if exclude_titles and "title" in df.columns:
+        pats = [p.strip().lower() for p in exclude_titles if str(p).strip()]
+        if pats:
+            exclude_re = "|".join(re.escape(p) for p in pats)
+            mask = df["title"].astype(str).str.lower().str.contains(exclude_re, na=False)
+            excluded = int(mask.sum())
+            if excluded:
+                df = df[~mask]
+
     # Filter by location before storing
     before = len(df)
-    df = df[df.apply(lambda row: _location_ok(
-        str(row.get("location", "")) if str(row.get("location", "")) != "nan" else None,
-        accept_locs, reject_locs,
-    ), axis=1)]
+    df = df[
+        df.apply(
+            lambda row: _location_ok(
+                str(row.get("location", "")) if str(row.get("location", "")) != "nan" else None,
+                accept_locs,
+                reject_locs,
+            ),
+            axis=1,
+        )
+    ]
     filtered = before - len(df)
 
     conn = get_connection()
-    new, existing = store_jobspy_results(conn, df, s["query"])
+    new, existing = store_jobspy_results(conn, df, s["query"], search_query=s.get("query"))
 
     msg = f"[{label}] {before} results -> {new} new, {existing} dupes"
+    if excluded:
+        msg += f", {excluded} filtered (title)"
     if filtered:
         msg += f", {filtered} filtered (location)"
     log.info(msg)
@@ -288,6 +411,7 @@ def _run_one_search(
 
 
 # -- Single query search -----------------------------------------------------
+
 
 def search_jobs(
     query: str,
@@ -305,7 +429,7 @@ def search_jobs(
 
     proxy_config = parse_proxy(proxy) if proxy else None
 
-    log.info("Search: \"%s\" in %s | sites=%s | remote=%s", query, location, sites, remote_only)
+    log.info('Search: "%s" in %s | sites=%s | remote=%s', query, location, sites, remote_only)
 
     kwargs = {
         "site_name": sites,
@@ -345,7 +469,7 @@ def search_jobs(
             log.info("  %s: %d", site, count)
 
     conn = init_db()
-    new, existing = store_jobspy_results(conn, df, query)
+    new, existing = store_jobspy_results(conn, df, query, search_query=query)
     log.info("Stored: %d new, %d already in DB", new, existing)
 
     db_total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
@@ -356,6 +480,7 @@ def search_jobs(
 
 
 # -- Full crawl (all queries x all locations) --------------------------------
+
 
 def _full_crawl(
     search_cfg: dict,
@@ -377,6 +502,7 @@ def _full_crawl(
     defaults = search_cfg.get("defaults", {})
     glassdoor_map = search_cfg.get("glassdoor_location_map", {})
     accept_locs, reject_locs = _load_location_config(search_cfg)
+    exclude_titles = search_cfg.get("exclude_titles") or []
 
     if tiers:
         queries = [q for q in queries if q.get("tier") in tiers]
@@ -386,18 +512,19 @@ def _full_crawl(
     searches = []
     for q in queries:
         for loc in locs:
-            searches.append({
-                "query": q["query"],
-                "location": loc["location"],
-                "remote": loc.get("remote", False),
-                "tier": q.get("tier", 0),
-            })
+            searches.append(
+                {
+                    "query": q["query"],
+                    "location": loc["location"],
+                    "remote": loc.get("remote", False),
+                    "tier": q.get("tier", 0),
+                }
+            )
 
     proxy_config = parse_proxy(proxy) if proxy else None
 
     log.info("Full crawl: %d search combinations", len(searches))
-    log.info("Sites: %s | Results/site: %d | Hours old: %d",
-             ", ".join(sites), results_per_site, hours_old)
+    log.info("Sites: %s | Results/site: %d | Hours old: %d", ", ".join(sites), results_per_site, hours_old)
 
     # Ensure DB schema is ready
     init_db()
@@ -409,9 +536,17 @@ def _full_crawl(
 
     for s in searches:
         result = _run_one_search(
-            s, sites, results_per_site, hours_old,
-            proxy_config, defaults, max_retries,
-            accept_locs, reject_locs, glassdoor_map,
+            s,
+            sites,
+            results_per_site,
+            hours_old,
+            proxy_config,
+            defaults,
+            max_retries,
+            accept_locs,
+            reject_locs,
+            glassdoor_map,
+            exclude_titles=exclude_titles,
         )
         completed += 1
         total_new += result["new"]
@@ -419,15 +554,26 @@ def _full_crawl(
         total_errors += result["errors"]
 
         if completed % 5 == 0 or completed == len(searches):
-            log.info("Progress: %d/%d queries done (%d new, %d dupes, %d errors)",
-                     completed, len(searches), total_new, total_existing, total_errors)
+            log.info(
+                "Progress: %d/%d queries done (%d new, %d dupes, %d errors)",
+                completed,
+                len(searches),
+                total_new,
+                total_existing,
+                total_errors,
+            )
 
     # Final stats
     conn = get_connection()
     db_total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
 
-    log.info("Full crawl complete: %d new | %d dupes | %d errors | %d total in DB",
-             total_new, total_existing, total_errors, db_total)
+    log.info(
+        "Full crawl complete: %d new | %d dupes | %d errors | %d total in DB",
+        total_new,
+        total_existing,
+        total_errors,
+        db_total,
+    )
 
     return {
         "new": total_new,
@@ -439,6 +585,7 @@ def _full_crawl(
 
 
 # -- Public entry point ------------------------------------------------------
+
 
 def run_discovery(cfg: dict | None = None) -> dict:
     """Main entry point for JobSpy-based job discovery.
@@ -455,6 +602,8 @@ def run_discovery(cfg: dict | None = None) -> dict:
     """
     if cfg is None:
         cfg = config.load_search_config()
+
+    cfg = _normalize_search_cfg(cfg)
 
     if not cfg:
         log.warning("No search configuration found. Run `applypilot init` to create one.")

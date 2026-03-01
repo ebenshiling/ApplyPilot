@@ -35,10 +35,13 @@ IMPORTANT FACTORS:
 - Factor in the candidate's project experience
 - Be realistic about experience level vs. job requirements (years of experience, seniority)
 
-RESPOND IN EXACTLY THIS FORMAT (no other text):
-SCORE: [1-10]
-KEYWORDS: [comma-separated ATS keywords from the job description that match or could match the candidate]
-REASONING: [2-3 sentences explaining the score]"""
+RESPOND WITH JSON ONLY (no markdown):
+{
+  "score": 1-10,
+  "keywords": ["keyword 1", "keyword 2"],
+  "reasoning": "2-3 concise sentences",
+  "confidence": 0.0-1.0
+}"""
 
 
 def _parse_score_response(response: str) -> dict:
@@ -53,12 +56,49 @@ def _parse_score_response(response: str) -> dict:
     score = 0
     keywords = ""
     reasoning = response
+    confidence = 0.0
+
+    # First try strict JSON shape.
+    try:
+        txt = (response or "").strip()
+        if txt.startswith("```"):
+            txt = re.sub(r"^```[a-zA-Z]*\n?", "", txt)
+            txt = re.sub(r"\n?```$", "", txt)
+            txt = txt.strip()
+        data = json.loads(txt)
+        if isinstance(data, dict):
+            raw_score = data.get("score", 0)
+            try:
+                score = int(raw_score)
+            except Exception:
+                score = 0
+            score = max(1, min(10, score)) if score else 0
+
+            kws = data.get("keywords")
+            if isinstance(kws, list):
+                keywords = ", ".join(str(x).strip() for x in kws if str(x).strip())
+            elif isinstance(kws, str):
+                keywords = kws.strip()
+
+            reasoning = str(data.get("reasoning") or "").strip() or reasoning
+
+            try:
+                confidence = float(data.get("confidence", 0.0) or 0.0)
+            except Exception:
+                confidence = 0.0
+            confidence = max(0.0, min(1.0, confidence))
+
+            if score > 0:
+                return {"score": score, "keywords": keywords, "reasoning": reasoning, "confidence": confidence}
+    except Exception:
+        pass
 
     for line in response.split("\n"):
         line = line.strip()
         if line.startswith("SCORE:"):
             try:
-                score = int(re.search(r"\d+", line).group())
+                nums = re.findall(r"\d+", line)
+                score = int(nums[0]) if nums else 0
                 score = max(1, min(10, score))
             except (AttributeError, ValueError):
                 score = 0
@@ -66,8 +106,17 @@ def _parse_score_response(response: str) -> dict:
             keywords = line.replace("KEYWORDS:", "").strip()
         elif line.startswith("REASONING:"):
             reasoning = line.replace("REASONING:", "").strip()
+        elif line.startswith("CONFIDENCE:"):
+            try:
+                nums = re.findall(r"\d+(?:\.\d+)?", line)
+                confidence = float(nums[0]) if nums else 0.0
+            except Exception:
+                confidence = 0.0
 
-    return {"score": score, "keywords": keywords, "reasoning": reasoning}
+    if score > 0 and confidence <= 0.0:
+        confidence = 0.6
+
+    return {"score": score, "keywords": keywords, "reasoning": reasoning, "confidence": confidence}
 
 
 def score_job(resume_text: str, job: dict) -> dict:
@@ -98,7 +147,7 @@ def score_job(resume_text: str, job: dict) -> dict:
         return _parse_score_response(response)
     except Exception as e:
         log.error("LLM error scoring job '%s': %s", job.get("title", "?"), e)
-        return {"score": 0, "keywords": "", "reasoning": f"LLM error: {e}"}
+        return {"score": 0, "keywords": "", "reasoning": f"LLM error: {e}", "confidence": 0.0}
 
 
 def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
@@ -149,20 +198,25 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
 
         log.info(
             "[%d/%d] score=%d  %s",
-            completed, len(jobs), result["score"], job.get("title", "?")[:60],
+            completed,
+            len(jobs),
+            result["score"],
+            job.get("title", "?")[:60],
         )
 
     # Write scores to DB
     now = datetime.now(timezone.utc).isoformat()
     for r in results:
         conn.execute(
-            "UPDATE jobs SET fit_score = ?, score_reasoning = ?, scored_at = ? WHERE url = ?",
-            (r["score"], f"{r['keywords']}\n{r['reasoning']}", now, r["url"]),
+            "UPDATE jobs SET fit_score = ?, score_confidence = ?, score_reasoning = ?, scored_at = ? WHERE url = ?",
+            (r["score"], float(r.get("confidence") or 0.0), f"{r['keywords']}\n{r['reasoning']}", now, r["url"]),
         )
     conn.commit()
 
     elapsed = time.time() - t0
-    log.info("Done: %d scored in %.1fs (%.1f jobs/sec)", len(results), elapsed, len(results) / elapsed if elapsed > 0 else 0)
+    log.info(
+        "Done: %d scored in %.1fs (%.1f jobs/sec)", len(results), elapsed, len(results) / elapsed if elapsed > 0 else 0
+    )
 
     # Score distribution
     dist = conn.execute("""

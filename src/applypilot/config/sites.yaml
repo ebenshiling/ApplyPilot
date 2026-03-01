@@ -8,6 +8,7 @@
 # are flagged as "manual" during apply — bot skips, user applies by hand.
 manual_ats:
   - "ibegin.tcsapps.com"       # TCS iBegin — unsolvable CAPTCHA every time
+  - "adzuna.co.uk/jobs/apply-iq"  # Adzuna ApplyIQ promo page (not a real job apply flow)
 
 # ── Blocked sites — too problematic for automation ───────────────────────
 blocked:
@@ -40,6 +41,9 @@ base_urls:
   "CareerJet Canada": "https://www.careerjet.ca"
   "BuiltIn Remote": "https://builtin.com"
   "Hacker News Jobs": "https://news.ycombinator.com/"
+  "Adzuna UK": "https://www.adzuna.co.uk"
+  "Guardian Jobs": "https://jobs.theguardian.com"
+  "NHS Jobs": "https://www.jobs.nhs.uk"
   "RemoteOK": null
   "WelcomeToTheJungle": null
   "Workopolis": "https://www.workopolis.com"
@@ -178,4 +182,29 @@ sites:
 
   - name: "Otta"
     url: "https://otta.com/jobs/all?title=software+engineer&remote=true"
+    type: search
+
+  # UK-specific
+  - name: "GOV.UK Find a job"
+    url: "https://findajob.dwp.gov.uk/search?q={query_encoded}"
+    type: search
+
+  - name: "Reed"
+    url: "https://www.reed.co.uk/jobs/jobs?keywords={query_encoded}"
+    type: search
+
+  - name: "NHS Jobs"
+    url: "https://www.jobs.nhs.uk/candidate/search/results?keyword={query_encoded}&location={location_encoded}"
+    type: search
+
+  - name: "Adzuna UK"
+    url: "https://www.adzuna.co.uk/search?q={query_encoded}&w={location_encoded}"
+    type: search
+
+  - name: "Guardian Jobs"
+    url: "https://jobs.theguardian.com/searchjobs/?keywords={query_encoded}&location={location_encoded}"
+    type: search
+
+  - name: "jobs.ac.uk"
+    url: "https://www.jobs.ac.uk/search/?keywords={query_encoded}&location={location_encoded}"
     type: search

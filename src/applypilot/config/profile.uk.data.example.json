@@ -1,0 +1,111 @@
+{
+  "personal": {
+    "full_name": "YOUR_LEGAL_NAME",
+    "preferred_name": "",
+    "email": "your.email@example.com",
+    "phone": "",
+    "address": "",
+    "city": "",
+    "province_state": "",
+    "country": "United Kingdom",
+    "postal_code": "",
+    "linkedin_url": "",
+    "github_url": "",
+    "portfolio_url": "",
+    "website_url": ""
+  },
+  "work_authorization": {
+    "legally_authorized_to_work": "Yes",
+    "require_sponsorship": "No",
+    "work_permit_type": ""
+  },
+  "availability": {
+    "earliest_start_date": "Immediately",
+    "available_for_full_time": "Yes",
+    "available_for_contract": "No"
+  },
+  "compensation": {
+    "salary_expectation": "45000",
+    "salary_currency": "GBP",
+    "salary_range_min": "40000",
+    "salary_range_max": "55000",
+    "currency_conversion_note": "If a range is listed, use the midpoint. If asked hourly/day rate, convert from annual and keep consistent."
+  },
+  "experience": {
+    "years_of_experience_total": "3",
+    "education_level": "Master's Degree",
+    "current_job_title": "Data Analyst",
+    "current_company": "",
+    "target_role": "Data Analyst / Analytics Engineer"
+  },
+  "skills_boundary": {
+    "languages": ["SQL", "Python"],
+    "analytics": ["Power BI", "Excel", "Tableau"],
+    "data": ["ETL", "Data Quality", "Data Validation", "Data Cleaning"],
+    "databases": ["PostgreSQL"],
+    "tools": ["Power Query", "VBA", "Git"],
+    "governance": ["GDPR", "Data Governance"]
+  },
+  "resume_facts": {
+    "preserved_companies": [
+      "SIKE Property Maintenance Ltd",
+      "University of Derby",
+      "National Health Insurance Authority",
+      "Electricity Company of Ghana",
+      "Tech Gear"
+    ],
+    "preserved_projects": [
+      "Optimisation of Supply Chain Using Analytics and Visualisation in a Business Intelligence Environment"
+    ],
+    "preserved_school": "University of Derby",
+    "real_metrics": ["40%"]
+  },
+  "resume_sections": {
+    "education": [
+      "MSc Cybersecurity - University of Derby (Modules: <add key modules here>)",
+      "BSc Computer Science - Koforidua Technical University (Modules: <add key modules here>)",
+      "HND Computer Science - Koforidua Technical University"
+    ],
+    "certifications": [
+      "Google IT Support Professional Certificate",
+      "CompTIA Security+",
+      "CompTIA Cybersecurity Analyst (CySA+)"
+    ],
+    "technical_environment": [
+      "Operating Systems: Windows 10 / Windows 11",
+      "Applications: Microsoft Office 365 (Outlook, Word, Excel, PowerPoint, Teams)",
+      "Hardware: Desktops, laptops, printers, MFDs, peripherals",
+      "Networking: VPN, Remote Desktop Services",
+      "Tools: ITSM ticketing platforms, remote support tools"
+    ]
+  },
+  "resume_validation": {
+    "experience_bullets": {
+      "most_recent": {"min": 5, "max": 6},
+      "other": {"min": 3, "max": 4},
+      "enforce_most_recent_max": true
+    },
+    "project_bullets": {
+      "min": 1,
+      "max": 2
+    },
+    "required_sections": {
+      "projects": true,
+      "education": true
+    }
+  },
+  "tailoring": {
+    "role_pack_override": "auto",
+    "draft_candidates": 3,
+    "safe_synonyms": {
+      "sql": ["query optimization", "postgresql"],
+      "power bi": ["dashboarding", "dax"]
+    }
+  },
+  "eeo_voluntary": {
+    "gender": "Decline to self-identify",
+    "race_ethnicity": "Decline to self-identify",
+    "veteran_status": "Decline to self-identify",
+    "disability_status": "Decline to self-identify"
+  }
+}

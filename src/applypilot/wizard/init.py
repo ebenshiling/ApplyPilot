@@ -31,9 +31,38 @@ from applypilot.config import (
 console = Console()
 
 
+def _upsert_env_var(path: Path, key: str, value: str) -> None:
+    """Create or update a key in .env."""
+    k = (key or "").strip()
+    if not k:
+        return
+    v = (value or "").strip()
+
+    if not path.exists():
+        path.write_text(f"# ApplyPilot configuration\n{k}={v}\n", encoding="utf-8")
+        return
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    out: list[str] = []
+    updated = False
+    prefix = k + "="
+    for ln in lines:
+        if ln.startswith(prefix):
+            out.append(prefix + v)
+            updated = True
+        else:
+            out.append(ln)
+    if not updated:
+        if out and out[-1].strip():
+            out.append("")
+        out.append(prefix + v)
+    path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
+
+
 # ---------------------------------------------------------------------------
 # Resume
 # ---------------------------------------------------------------------------
+
 
 def _setup_resume() -> None:
     """Prompt for resume file and copy into APP_DIR."""
@@ -78,9 +107,14 @@ def _setup_resume() -> None:
 # Profile
 # ---------------------------------------------------------------------------
 
+
 def _setup_profile() -> dict:
     """Walk through profile questions and return a nested profile dict."""
-    console.print(Panel("[bold]Step 2: Profile[/bold]\nTell ApplyPilot about yourself. This powers scoring, tailoring, and auto-fill."))
+    console.print(
+        Panel(
+            "[bold]Step 2: Profile[/bold]\nTell ApplyPilot about yourself. This powers scoring, tailoring, and auto-fill."
+        )
+    )
 
     profile: dict = {}
 
@@ -93,14 +127,16 @@ def _setup_profile() -> dict:
         "city": Prompt.ask("City"),
         "country": Prompt.ask("Country"),
         "linkedin_url": Prompt.ask("LinkedIn URL", default=""),
-        "password": Prompt.ask("Job site password (used for login walls during auto-apply)", password=True, default=""),
     }
 
     # -- Work Authorization --
     console.print("\n[bold cyan]Work Authorization[/bold cyan]")
     profile["work_authorization"] = {
-        "legally_authorized": Confirm.ask("Are you legally authorized to work in your target country?"),
-        "needs_sponsorship": Confirm.ask("Will you now or in the future need sponsorship?"),
+        "legally_authorized_to_work": "Yes"
+        if Confirm.ask("Are you legally authorized to work in your target country?")
+        else "No",
+        "require_sponsorship": "Yes" if Confirm.ask("Will you now or in the future need sponsorship?") else "No",
+        "work_permit_type": Prompt.ask("Work permit type (optional)", default=""),
     }
 
     # -- Compensation --
@@ -121,7 +157,9 @@ def _setup_profile() -> dict:
     profile["experience"] = {
         "years_of_experience_total": Prompt.ask("Years of professional experience", default=""),
         "education_level": Prompt.ask("Highest education (e.g. Bachelor's, Master's, PhD, Self-taught)", default=""),
-        "current_title": Prompt.ask("Current/most recent job title", default=""),
+        "current_job_title": Prompt.ask("Current/most recent job title", default=""),
+        "current_company": Prompt.ask("Current/most recent company", default=""),
+        "target_role": Prompt.ask("Target role (used for AI + auto-apply tone)", default=""),
     }
 
     # -- Skills Boundary --
@@ -172,6 +210,7 @@ def _setup_profile() -> dict:
 # Search config
 # ---------------------------------------------------------------------------
 
+
 def _setup_searches() -> None:
     """Generate a searches.yaml from user input."""
     console.print(Panel("[bold]Step 3: Job Search Config[/bold]\nDefine what you're looking for."))
@@ -183,9 +222,7 @@ def _setup_searches() -> None:
     except ValueError:
         distance = 0
 
-    roles_raw = Prompt.ask(
-        "Target job titles (comma-separated, e.g. 'Backend Engineer, Full Stack Developer')"
-    )
+    roles_raw = Prompt.ask("Target job titles (comma-separated, e.g. 'Backend Engineer, Full Stack Developer')")
     roles = [r.strip() for r in roles_raw.split(",") if r.strip()]
 
     if not roles:
@@ -221,13 +258,16 @@ def _setup_searches() -> None:
 # AI Features
 # ---------------------------------------------------------------------------
 
+
 def _setup_ai_features() -> None:
     """Ask about AI scoring/tailoring — optional LLM configuration."""
-    console.print(Panel(
-        "[bold]Step 4: AI Features (optional)[/bold]\n"
-        "An LLM powers job scoring, resume tailoring, and cover letters.\n"
-        "Without this, you can still discover and enrich jobs."
-    ))
+    console.print(
+        Panel(
+            "[bold]Step 4: AI Features (optional)[/bold]\n"
+            "An LLM powers job scoring, resume tailoring, and cover letters.\n"
+            "Without this, you can still discover and enrich jobs."
+        )
+    )
 
     if not Confirm.ask("Enable AI scoring and resume tailoring?", default=True):
         console.print("[dim]Discovery-only mode. You can configure AI later with [bold]applypilot init[/bold].[/dim]")
@@ -267,13 +307,16 @@ def _setup_ai_features() -> None:
 # Auto-Apply
 # ---------------------------------------------------------------------------
 
+
 def _setup_auto_apply() -> None:
     """Configure autonomous job application (requires Claude Code CLI)."""
-    console.print(Panel(
-        "[bold]Step 5: Auto-Apply (optional)[/bold]\n"
-        "ApplyPilot can autonomously fill and submit job applications\n"
-        "using Claude Code as the browser agent."
-    ))
+    console.print(
+        Panel(
+            "[bold]Step 5: Auto-Apply (optional)[/bold]\n"
+            "ApplyPilot can autonomously fill and submit job applications\n"
+            "using Claude Code as the browser agent."
+        )
+    )
 
     if not Confirm.ask("Enable autonomous job applications?", default=True):
         console.print("[dim]You can apply manually using the tailored resumes ApplyPilot generates.[/dim]")
@@ -290,19 +333,20 @@ def _setup_auto_apply() -> None:
         )
 
     # Optional: CapSolver for CAPTCHAs
+    console.print(
+        "\n[dim]Optional: default employer-site login password (stored in .env only, not profile.json).[/dim]"
+    )
+    if Confirm.ask("Set default job-site login password?", default=False):
+        site_pw = Prompt.ask("Job-site login password", password=True, default="")
+        if site_pw.strip():
+            _upsert_env_var(ENV_PATH, "APPLYPILOT_SITE_PASSWORD", site_pw)
+            console.print("[green]Saved APPLYPILOT_SITE_PASSWORD to .env[/green]")
+
+    # Optional: CapSolver for CAPTCHAs
     console.print("\n[dim]Some job sites use CAPTCHAs. CapSolver can handle them automatically.[/dim]")
     if Confirm.ask("Configure CapSolver API key? (optional)", default=False):
         capsolver_key = Prompt.ask("CapSolver API key")
-        # Append to existing .env or create
-        if ENV_PATH.exists():
-            existing = ENV_PATH.read_text(encoding="utf-8")
-            if "CAPSOLVER_API_KEY" not in existing:
-                ENV_PATH.write_text(
-                    existing.rstrip() + f"\nCAPSOLVER_API_KEY={capsolver_key}\n",
-                    encoding="utf-8",
-                )
-        else:
-            ENV_PATH.write_text(f"# ApplyPilot configuration\nCAPSOLVER_API_KEY={capsolver_key}\n", encoding="utf-8")
+        _upsert_env_var(ENV_PATH, "CAPSOLVER_API_KEY", capsolver_key)
         console.print("[green]CapSolver key saved.[/green]")
     else:
         console.print("[dim]Skipped. Add CAPSOLVER_API_KEY to .env later if needed.[/dim]")
@@ -311,6 +355,7 @@ def _setup_auto_apply() -> None:
 # ---------------------------------------------------------------------------
 # Main entry
 # ---------------------------------------------------------------------------
+
 
 def run_wizard() -> None:
     """Run the full interactive setup wizard."""
@@ -373,9 +418,7 @@ def run_wizard() -> None:
     console.print(
         Panel.fit(
             "[bold green]Setup complete![/bold green]\n\n"
-            f"[bold]Your tier: Tier {tier} — {TIER_LABELS[tier]}[/bold]\n\n"
-            + "\n".join(tier_lines)
-            + unlock_hint,
+            f"[bold]Your tier: Tier {tier} — {TIER_LABELS[tier]}[/bold]\n\n" + "\n".join(tier_lines) + unlock_hint,
             border_style="green",
         )
     )

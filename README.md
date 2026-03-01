@@ -35,6 +35,13 @@ applypilot apply -w 3    # parallel apply (3 Chrome instances)
 applypilot apply --dry-run  # fill forms without submitting
 ```
 
+If you are running from a repo checkout (copied/cloned), bootstrap in one step:
+
+```bash
+python scripts/bootstrap.py
+# optional: python scripts/bootstrap.py --with-playwright-browsers
+```
+
 ---
 
 ## Two Paths
@@ -121,6 +128,30 @@ API keys and runtime config: `GEMINI_API_KEY`, `LLM_MODEL`, `CAPSOLVER_API_KEY` 
 
 ---
 
+## Move to Another Computer (Easy Mode)
+
+Use built-in workspace transfer commands.
+
+On your current computer:
+
+```bash
+applypilot workspace-export --out ~/applypilot-transfer.zip --include-env --include-generated
+```
+
+On the new computer:
+
+```bash
+python scripts/bootstrap.py
+applypilot workspace-import ~/applypilot-transfer.zip --overwrite
+```
+
+Notes:
+- `--include-env` copies API keys from `.env` (share archive carefully).
+- `--include-generated` copies `tailored_resumes/` and `cover_letters/`.
+- If you want a clean start without old job history, export with `--no-db`.
+
+---
+
 ## How Stages Work
 
 ### Discover
@@ -170,7 +201,22 @@ applypilot apply --headless             # Headless browser mode
 applypilot apply --url URL              # Apply to a specific job
 applypilot status                       # Pipeline statistics
 applypilot dashboard                    # Open HTML results dashboard
+applypilot workspace-export             # Create portable workspace zip
+applypilot workspace-import ARCHIVE.zip # Restore workspace zip
 ```
+
+---
+
+## AI Eval Gates
+
+ApplyPilot includes deterministic offline evals for scoring/tailoring logic:
+
+```bash
+python scripts/ai_regression_eval.py --strict      # fast guardrail checks
+python scripts/ai_eval_dataset.py --strict         # formal dataset suites + trend log
+```
+
+Formal eval trend history is written to `logs/ai_eval_history.jsonl` under your ApplyPilot workspace.
 
 ---
 

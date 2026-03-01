@@ -21,12 +21,13 @@ import yaml
 
 from applypilot import config
 from applypilot.config import CONFIG_DIR
-from applypilot.database import get_connection, init_db
+from applypilot.database import find_existing_job_url, get_connection, init_db, normalize_url
 
 log = logging.getLogger(__name__)
 
 
 # -- Employer registry from YAML --------------------------------------------
+
 
 def load_employers() -> dict:
     """Load Workday employer registry from config/employers.yaml."""
@@ -40,6 +41,7 @@ def load_employers() -> dict:
 
 # -- Location filtering from search config -----------------------------------
 
+
 def _load_location_filter(search_cfg: dict | None = None):
     """Load location accept/reject lists from search config."""
     if search_cfg is None:
@@ -47,6 +49,18 @@ def _load_location_filter(search_cfg: dict | None = None):
 
     accept = search_cfg.get("location_accept", [])
     reject = search_cfg.get("location_reject_non_remote", [])
+
+    # Also support the nested format used by searches.example.yaml:
+    #   location:
+    #     accept_patterns: [...]
+    #     reject_patterns: [...]
+    if (not accept) or (not reject):
+        loc_cfg = search_cfg.get("location", {}) or {}
+        if not accept:
+            accept = loc_cfg.get("accept_patterns", []) or []
+        if not reject:
+            reject = loc_cfg.get("reject_patterns", []) or []
+
     return accept, reject
 
 
@@ -57,12 +71,14 @@ def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> 
 
     loc = location.lower()
 
-    if any(r in loc for r in ("remote", "anywhere", "work from home", "wfh", "distributed")):
-        return True
-
+    # Reject patterns always win (including remote roles like "Remote (US)").
     for r in reject:
-        if r.lower() in loc:
+        if r and r.lower() in loc:
             return False
+
+    # If user didn't configure accept patterns, don't filter by location.
+    if not accept:
+        return True
 
     for a in accept:
         if a.lower() in loc:
@@ -72,6 +88,7 @@ def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> 
 
 
 # -- HTML stripper -----------------------------------------------------------
+
 
 class _HTMLStripper(HTMLParser):
     """Strip HTML tags, keep text content."""
@@ -136,10 +153,12 @@ def setup_proxy(proxy_str: str | None) -> None:
         _opener = urllib.request.build_opener()
         return
 
-    proxy_handler = urllib.request.ProxyHandler({
-        "http": proxy_url,
-        "https": proxy_url,
-    })
+    proxy_handler = urllib.request.ProxyHandler(
+        {
+            "http": proxy_url,
+            "https": proxy_url,
+        }
+    )
     _opener = urllib.request.build_opener(proxy_handler)
     log.info("Proxy configured: %s:%s", parts[0], parts[1])
 
@@ -153,15 +172,18 @@ def _urlopen(req, timeout=30):
 
 # -- Workday API -------------------------------------------------------------
 
+
 def workday_search(employer: dict, search_text: str, limit: int = 20, offset: int = 0) -> dict:
     """Search jobs via Workday CXS API. Returns JSON with total + jobPostings."""
     url = f"{employer['base_url']}/wday/cxs/{employer['tenant']}/{employer['site_id']}/jobs"
-    payload = json.dumps({
-        "appliedFacets": {},
-        "limit": limit,
-        "offset": offset,
-        "searchText": search_text,
-    }).encode()
+    payload = json.dumps(
+        {
+            "appliedFacets": {},
+            "limit": limit,
+            "offset": offset,
+            "searchText": search_text,
+        }
+    ).encode()
 
     req = urllib.request.Request(url, data=payload, method="POST")
     req.add_header("Content-Type", "application/json")
@@ -186,6 +208,7 @@ def workday_detail(employer: dict, external_path: str) -> dict:
 
 # -- Search + paginate -------------------------------------------------------
 
+
 def search_employer(
     employer_key: str,
     employer: dict,
@@ -196,7 +219,7 @@ def search_employer(
     reject_locs: list[str] | None = None,
 ) -> list[dict]:
     """Search an employer, paginate through all results, optionally filter by location."""
-    log.info("%s: searching \"%s\"...", employer["name"], search_text)
+    log.info('%s: searching "%s"...', employer["name"], search_text)
 
     all_jobs: list[dict] = []
     offset = 0
@@ -225,14 +248,16 @@ def search_employer(
                 if not _location_ok(loc, accept_locs, reject_locs):
                     continue
 
-            all_jobs.append({
-                "title": j.get("title", ""),
-                "location": loc,
-                "posted": j.get("postedOn", ""),
-                "external_path": j.get("externalPath", ""),
-                "employer_key": employer_key,
-                "employer_name": employer["name"],
-            })
+            all_jobs.append(
+                {
+                    "title": j.get("title", ""),
+                    "location": loc,
+                    "posted": j.get("postedOn", ""),
+                    "external_path": j.get("externalPath", ""),
+                    "employer_key": employer_key,
+                    "employer_name": employer["name"],
+                }
+            )
 
         offset += page_size
         page_num = offset // page_size
@@ -245,12 +270,12 @@ def search_employer(
             all_jobs = all_jobs[:max_results]
             break
 
-    log.info("%s: %d jobs found%s", employer["name"], len(all_jobs),
-             " (filtered)" if location_filter else "")
+    log.info("%s: %d jobs found%s", employer["name"], len(all_jobs), " (filtered)" if location_filter else "")
     return all_jobs
 
 
 # -- Fetch details -----------------------------------------------------------
+
 
 def _fetch_one_detail(employer: dict, job: dict) -> dict:
     """Fetch detail for a single job."""
@@ -290,8 +315,7 @@ def fetch_details(employer: dict, jobs: list[dict]) -> list[dict]:
         if completed % 20 == 0 or completed == len(jobs):
             elapsed = time.time() - t0
             rate = completed / elapsed if elapsed > 0 else 0
-            log.info("%s: %d/%d (%d errors) [%.1f jobs/sec]",
-                     employer["name"], completed, len(jobs), errors, rate)
+            log.info("%s: %d/%d (%d errors) [%.1f jobs/sec]", employer["name"], completed, len(jobs), errors, rate)
 
     elapsed = time.time() - t0
     log.info("%s: done in %.1fs (%.1f jobs/sec)", employer["name"], elapsed, len(jobs) / elapsed if elapsed > 0 else 0)
@@ -300,7 +324,14 @@ def fetch_details(employer: dict, jobs: list[dict]) -> list[dict]:
 
 # -- DB storage --------------------------------------------------------------
 
-def store_results(conn: sqlite3.Connection, jobs: list[dict], employers: dict) -> tuple[int, int]:
+
+def store_results(
+    conn: sqlite3.Connection,
+    jobs: list[dict],
+    employers: dict,
+    *,
+    search_query: str | None = None,
+) -> tuple[int, int]:
     """Store corporate jobs in DB. Returns (new, existing)."""
     now = datetime.now(timezone.utc).isoformat()
     new = 0
@@ -315,6 +346,31 @@ def store_results(conn: sqlite3.Connection, jobs: list[dict], employers: dict) -
         if not url:
             continue
 
+        canonical_url = normalize_url(url) or url
+
+        # Respect user-level URL blocking.
+        try:
+            from applypilot.database import is_url_blocked
+
+            if is_url_blocked(canonical_url, conn=conn):
+                existing += 1
+                continue
+        except Exception:
+            pass
+
+        dup_url = find_existing_job_url(conn, canonical_url)
+        if dup_url:
+            existing += 1
+            if search_query:
+                try:
+                    conn.execute(
+                        "UPDATE jobs SET search_query = COALESCE(NULLIF(search_query, ''), ?) WHERE url = ?",
+                        (search_query, dup_url),
+                    )
+                except Exception:
+                    pass
+            continue
+
         description = job.get("full_description", "")
         short_desc = description[:500] if description else None
         full_description = description if len(description) > 200 else None
@@ -326,15 +382,36 @@ def store_results(conn: sqlite3.Connection, jobs: list[dict], employers: dict) -
 
         try:
             conn.execute(
-                "INSERT INTO jobs (url, title, salary, description, location, site, strategy, "
+                "INSERT INTO jobs (url, title, search_query, salary, description, location, site, strategy, "
                 "discovered_at, full_description, application_url, detail_scraped_at, detail_error) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (url, job.get("title"), None, short_desc, job.get("location"),
-                 site, strategy, now, full_description, url, detail_scraped_at, detail_error),
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    canonical_url,
+                    job.get("title"),
+                    (search_query or None),
+                    None,
+                    short_desc,
+                    job.get("location"),
+                    site,
+                    strategy,
+                    now,
+                    full_description,
+                    canonical_url,
+                    detail_scraped_at,
+                    detail_error,
+                ),
             )
             new += 1
         except sqlite3.IntegrityError:
             existing += 1
+            if search_query:
+                try:
+                    conn.execute(
+                        "UPDATE jobs SET search_query = COALESCE(NULLIF(search_query, ''), ?) WHERE url = ?",
+                        (search_query, url),
+                    )
+                except Exception:
+                    pass
 
     conn.commit()
     return new, existing
@@ -353,19 +430,19 @@ def _process_one(
 
     try:
         jobs = search_employer(
-            employer_key, emp, search_text,
+            employer_key,
+            emp,
+            search_text,
             location_filter=location_filter,
             accept_locs=accept_locs,
             reject_locs=reject_locs,
         )
     except Exception as e:
         log.error("%s: ERROR searching '%s': %s", emp["name"], search_text, e)
-        return {"employer": emp["name"], "query": search_text,
-                "found": 0, "new": 0, "existing": 0, "error": str(e)}
+        return {"employer": emp["name"], "query": search_text, "found": 0, "new": 0, "existing": 0, "error": str(e)}
 
     if not jobs:
-        return {"employer": emp["name"], "query": search_text,
-                "found": 0, "new": 0, "existing": 0}
+        return {"employer": emp["name"], "query": search_text, "found": 0, "new": 0, "existing": 0}
 
     try:
         jobs = fetch_details(emp, jobs)
@@ -373,14 +450,14 @@ def _process_one(
         log.error("%s: ERROR fetching details for '%s': %s", emp["name"], search_text, e)
 
     conn = get_connection()
-    new, existing = store_results(conn, jobs, employers)
+    new, existing = store_results(conn, jobs, employers, search_query=search_text)
     log.info("%s: %d new, %d already in DB", emp["name"], new, existing)
 
-    return {"employer": emp["name"], "query": search_text,
-            "found": len(jobs), "new": new, "existing": existing}
+    return {"employer": emp["name"], "query": search_text, "found": len(jobs), "new": new, "existing": existing}
 
 
 # -- Main orchestrator -------------------------------------------------------
+
 
 def scrape_employers(
     search_text: str,
@@ -422,8 +499,13 @@ def scrape_employers(
         with ThreadPoolExecutor(max_workers=min(workers, len(valid_keys))) as pool:
             futures = {
                 pool.submit(
-                    _process_one, key, employers, search_text,
-                    location_filter, accept_locs, reject_locs,
+                    _process_one,
+                    key,
+                    employers,
+                    search_text,
+                    location_filter,
+                    accept_locs,
+                    reject_locs,
                 ): key
                 for key in valid_keys
             }
@@ -438,15 +520,27 @@ def scrape_employers(
 
                 if completed % 10 == 0 or completed == len(valid_keys):
                     elapsed = time.time() - t0
-                    log.info("[%s] Progress: %d/%d employers (%d new, %d dupes, %d errors) [%.0fs]",
-                             search_text, completed, len(valid_keys), total_new, total_existing, errors, elapsed)
+                    log.info(
+                        "[%s] Progress: %d/%d employers (%d new, %d dupes, %d errors) [%.0fs]",
+                        search_text,
+                        completed,
+                        len(valid_keys),
+                        total_new,
+                        total_existing,
+                        errors,
+                        elapsed,
+                    )
     else:
         # Sequential mode (default)
         completed = 0
         for key in valid_keys:
             result = _process_one(
-                key, employers, search_text,
-                location_filter, accept_locs, reject_locs,
+                key,
+                employers,
+                search_text,
+                location_filter,
+                accept_locs,
+                reject_locs,
             )
             completed += 1
             total_new += result["new"]
@@ -457,17 +551,27 @@ def scrape_employers(
 
             if completed % 10 == 0 or completed == len(valid_keys):
                 elapsed = time.time() - t0
-                log.info("[%s] Progress: %d/%d employers (%d new, %d dupes, %d errors) [%.0fs]",
-                         search_text, completed, len(valid_keys), total_new, total_existing, errors, elapsed)
+                log.info(
+                    "[%s] Progress: %d/%d employers (%d new, %d dupes, %d errors) [%.0fs]",
+                    search_text,
+                    completed,
+                    len(valid_keys),
+                    total_new,
+                    total_existing,
+                    errors,
+                    elapsed,
+                )
 
     elapsed = time.time() - t0
-    log.info("[%s] Done: %d found, %d new, %d dupes in %.0fs",
-             search_text, total_found, total_new, total_existing, elapsed)
+    log.info(
+        "[%s] Done: %d found, %d new, %d dupes in %.0fs", search_text, total_found, total_new, total_existing, elapsed
+    )
 
     return {"found": total_found, "new": total_new, "existing": total_existing}
 
 
 # -- Public entry point ------------------------------------------------------
+
 
 def run_workday_discovery(employers: dict | None = None, workers: int = 1) -> dict:
     """Main entry point for Workday-based corporate job discovery.
@@ -519,7 +623,7 @@ def run_workday_discovery(employers: dict | None = None, workers: int = 1) -> di
     grand_found = 0
 
     for i, query in enumerate(queries, 1):
-        log.info("Query %d/%d: \"%s\"", i, len(queries), query)
+        log.info('Query %d/%d: "%s"', i, len(queries), query)
         result = scrape_employers(
             search_text=query,
             employers=employers,
@@ -532,8 +636,14 @@ def run_workday_discovery(employers: dict | None = None, workers: int = 1) -> di
         grand_existing += result["existing"]
         grand_found += result["found"]
 
-    log.info("Workday crawl done: %d found, %d new, %d existing across %d queries x %d employers",
-             grand_found, grand_new, grand_existing, len(queries), len(employers))
+    log.info(
+        "Workday crawl done: %d found, %d new, %d existing across %d queries x %d employers",
+        grand_found,
+        grand_new,
+        grand_existing,
+        len(queries),
+        len(employers),
+    )
 
     return {
         "found": grand_found,

@@ -9,6 +9,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from applypilot.config import DB_PATH
 
@@ -31,7 +32,7 @@ def get_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
     """
     path = str(db_path or DB_PATH)
 
-    if not hasattr(_local, 'connections'):
+    if not hasattr(_local, "connections"):
         _local.connections = {}
 
     conn = _local.connections.get(path)
@@ -53,7 +54,7 @@ def get_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
 def close_connection(db_path: Path | str | None = None) -> None:
     """Close the cached connection for the current thread."""
     path = str(db_path or DB_PATH)
-    if hasattr(_local, 'connections'):
+    if hasattr(_local, "connections"):
         conn = _local.connections.pop(path, None)
         if conn is not None:
             conn.close()
@@ -92,6 +93,7 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             -- Discovery stage (smart_extract / job_search)
             url                   TEXT PRIMARY KEY,
             title                 TEXT,
+            search_query          TEXT,
             salary                TEXT,
             description           TEXT,
             location              TEXT,
@@ -107,6 +109,7 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
 
             -- Scoring stage (job_scorer)
             fit_score             INTEGER,
+            score_confidence      REAL,
             score_reasoning       TEXT,
             scored_at             TEXT,
 
@@ -132,12 +135,172 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             verification_confidence TEXT
         )
     """)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS blocked_urls (
+            prefix      TEXT PRIMARY KEY,
+            reason      TEXT,
+            created_at  TEXT
+        )
+        """
+    )
     conn.commit()
 
     # Run migrations for any columns added after initial schema
     ensure_columns(conn)
 
     return conn
+
+
+def normalize_url(url: str | None) -> str:
+    """Normalize a URL for prefix-based blocking.
+
+    Strips query string, fragment, and trailing slashes.
+    """
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    try:
+        p = urlsplit(raw)
+        if p.scheme and p.netloc:
+            path = (p.path or "").strip()
+            if path != "/":
+                path = path.rstrip("/")
+            base = urlunsplit((p.scheme.lower(), p.netloc.lower(), path, "", "")).strip()
+            return base
+    except Exception:
+        pass
+    base = raw.split("?")[0].split("#")[0].strip().rstrip("/")
+    return base
+
+
+def find_existing_job_url(conn: sqlite3.Connection, url: str | None) -> str | None:
+    """Best-effort duplicate matcher using canonical URL + apply URL variants."""
+    base = normalize_url(url)
+    if not base:
+        return None
+
+    exact = [base]
+    if not base.endswith("/"):
+        exact.append(base + "/")
+    else:
+        exact.append(base.rstrip("/"))
+
+    likes: list[str] = []
+    for e in exact:
+        if e:
+            likes.append(e + "?%")
+            likes.append(e + "#%")
+
+    ph_exact = ",".join("?" for _ in exact)
+    row = conn.execute(
+        f"SELECT url FROM jobs WHERE url IN ({ph_exact}) OR application_url IN ({ph_exact}) LIMIT 1",
+        tuple(exact + exact),
+    ).fetchone()
+    if row and row[0]:
+        return str(row[0])
+
+    for lp in likes:
+        r = conn.execute(
+            "SELECT url FROM jobs WHERE url LIKE ? OR application_url LIKE ? LIMIT 1",
+            (lp, lp),
+        ).fetchone()
+        if r and r[0]:
+            return str(r[0])
+    return None
+
+
+def add_blocked_url(
+    prefix: str,
+    reason: str | None = None,
+    *,
+    conn: sqlite3.Connection | None = None,
+) -> bool:
+    """Add a blocked URL prefix (best-effort; idempotent)."""
+    if conn is None:
+        conn = get_connection()
+    p = normalize_url(prefix)
+    if not p:
+        return False
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO blocked_urls (prefix, reason, created_at) VALUES (?, ?, ?)",
+            (p, (reason or "user")[:200], now),
+        )
+        return True
+    except Exception:
+        return False
+
+
+def get_blocked_url_prefixes(conn: sqlite3.Connection | None = None) -> list[str]:
+    """Return blocked URL prefixes."""
+    if conn is None:
+        conn = get_connection()
+    rows = conn.execute("SELECT prefix FROM blocked_urls").fetchall()
+    return [str(r[0]) for r in rows if r and r[0]]
+
+
+def is_url_blocked(
+    url: str | None,
+    *,
+    conn: sqlite3.Connection | None = None,
+    blocked_prefixes: list[str] | None = None,
+) -> bool:
+    """Check whether a URL is blocked by prefix."""
+    base = normalize_url(url)
+    if not base:
+        return False
+
+    if blocked_prefixes is not None:
+        b = base.lower()
+        for p in blocked_prefixes:
+            if not p:
+                continue
+            if b.startswith(p.lower()):
+                return True
+        return False
+
+    if conn is None:
+        conn = get_connection()
+    # SQLite-friendly prefix match.
+    row = conn.execute(
+        "SELECT 1 FROM blocked_urls WHERE ? LIKE prefix || '%' LIMIT 1",
+        (base,),
+    ).fetchone()
+    return bool(row)
+
+
+def block_job_by_id(job_id: int, reason: str = "user_deleted") -> int:
+    """Archive a job (mark skipped) and block its URLs."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT url, application_url FROM jobs WHERE rowid = ?",
+        (job_id,),
+    ).fetchone()
+    if not row:
+        return 0
+
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        add_blocked_url(str(row[0] or ""), reason, conn=conn)
+        add_blocked_url(str(row[1] or ""), reason, conn=conn)
+        conn.execute(
+            """
+            UPDATE jobs
+               SET apply_status = 'skipped',
+                   apply_error = ?,
+                   apply_attempts = 99,
+                   agent_id = NULL
+             WHERE rowid = ?
+            """,
+            (reason[:200], job_id),
+        )
+        conn.commit()
+        return 1
+    except Exception:
+        conn.rollback()
+        raise
 
 
 # Complete column registry: column_name -> SQL type with optional default.
@@ -147,6 +310,7 @@ _ALL_COLUMNS: dict[str, str] = {
     # Discovery
     "url": "TEXT PRIMARY KEY",
     "title": "TEXT",
+    "search_query": "TEXT",
     "salary": "TEXT",
     "description": "TEXT",
     "location": "TEXT",
@@ -160,6 +324,7 @@ _ALL_COLUMNS: dict[str, str] = {
     "detail_error": "TEXT",
     # Scoring
     "fit_score": "INTEGER",
+    "score_confidence": "REAL",
     "score_reasoning": "TEXT",
     "scored_at": "TEXT",
     # Tailoring
@@ -243,32 +408,23 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
     stats["total"] = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
 
     # By site breakdown
-    rows = conn.execute(
-        "SELECT site, COUNT(*) as cnt FROM jobs GROUP BY site ORDER BY cnt DESC"
-    ).fetchall()
+    rows = conn.execute("SELECT site, COUNT(*) as cnt FROM jobs GROUP BY site ORDER BY cnt DESC").fetchall()
     stats["by_site"] = [(row[0], row[1]) for row in rows]
 
     # Enrichment stage
-    stats["pending_detail"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE detail_scraped_at IS NULL"
-    ).fetchone()[0]
+    stats["pending_detail"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE detail_scraped_at IS NULL").fetchone()[0]
 
-    stats["with_description"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE full_description IS NOT NULL"
-    ).fetchone()[0]
+    stats["with_description"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE full_description IS NOT NULL").fetchone()[
+        0
+    ]
 
-    stats["detail_errors"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE detail_error IS NOT NULL"
-    ).fetchone()[0]
+    stats["detail_errors"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE detail_error IS NOT NULL").fetchone()[0]
 
     # Scoring stage
-    stats["scored"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE fit_score IS NOT NULL"
-    ).fetchone()[0]
+    stats["scored"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE fit_score IS NOT NULL").fetchone()[0]
 
     stats["unscored"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs "
-        "WHERE full_description IS NOT NULL AND fit_score IS NULL"
+        "SELECT COUNT(*) FROM jobs WHERE full_description IS NOT NULL AND fit_score IS NULL"
     ).fetchone()[0]
 
     # Score distribution
@@ -280,20 +436,17 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
     stats["score_distribution"] = [(row[0], row[1]) for row in dist_rows]
 
     # Tailoring stage
-    stats["tailored"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL"
-    ).fetchone()[0]
+    stats["tailored"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL").fetchone()[0]
 
     stats["untailored_eligible"] = conn.execute(
         "SELECT COUNT(*) FROM jobs "
         "WHERE fit_score >= 7 AND full_description IS NOT NULL "
-        "AND tailored_resume_path IS NULL"
+        "AND tailored_resume_path IS NULL "
+        "AND COALESCE(apply_status, '') != 'skipped'"
     ).fetchone()[0]
 
     stats["tailor_exhausted"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs "
-        "WHERE COALESCE(tailor_attempts, 0) >= 5 "
-        "AND tailored_resume_path IS NULL"
+        "SELECT COUNT(*) FROM jobs WHERE COALESCE(tailor_attempts, 0) >= 5 AND tailored_resume_path IS NULL"
     ).fetchone()[0]
 
     # Cover letter stage
@@ -308,13 +461,9 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
     ).fetchone()[0]
 
     # Application stage
-    stats["applied"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE applied_at IS NOT NULL"
-    ).fetchone()[0]
+    stats["applied"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE applied_at IS NOT NULL").fetchone()[0]
 
-    stats["apply_errors"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE apply_error IS NOT NULL"
-    ).fetchone()[0]
+    stats["apply_errors"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE apply_error IS NOT NULL").fetchone()[0]
 
     stats["ready_to_apply"] = conn.execute(
         "SELECT COUNT(*) FROM jobs "
@@ -326,8 +475,7 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
     return stats
 
 
-def store_jobs(conn: sqlite3.Connection, jobs: list[dict],
-               site: str, strategy: str) -> tuple[int, int]:
+def store_jobs(conn: sqlite3.Connection, jobs: list[dict], site: str, strategy: str) -> tuple[int, int]:
     """Store discovered jobs, skipping duplicates by URL.
 
     Args:
@@ -347,12 +495,38 @@ def store_jobs(conn: sqlite3.Connection, jobs: list[dict],
         url = job.get("url")
         if not url:
             continue
+        canonical = normalize_url(str(url))
+        if is_url_blocked(canonical or url, conn=conn):
+            existing += 1
+            continue
+        dup_url = find_existing_job_url(conn, canonical or url)
+        if dup_url:
+            existing += 1
+            sq = job.get("search_query")
+            if sq:
+                try:
+                    conn.execute(
+                        "UPDATE jobs SET search_query = COALESCE(NULLIF(search_query, ''), ?) WHERE url = ?",
+                        (sq, dup_url),
+                    )
+                except Exception:
+                    pass
+            continue
         try:
             conn.execute(
-                "INSERT INTO jobs (url, title, salary, description, location, site, strategy, discovered_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (url, job.get("title"), job.get("salary"), job.get("description"),
-                 job.get("location"), site, strategy, now),
+                "INSERT INTO jobs (url, title, search_query, salary, description, location, site, strategy, discovered_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    canonical or url,
+                    job.get("title"),
+                    job.get("search_query"),
+                    job.get("salary"),
+                    job.get("description"),
+                    job.get("location"),
+                    site,
+                    strategy,
+                    now,
+                ),
             )
             new += 1
         except sqlite3.IntegrityError:
@@ -362,10 +536,9 @@ def store_jobs(conn: sqlite3.Connection, jobs: list[dict],
     return new, existing
 
 
-def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
-                      stage: str = "discovered",
-                      min_score: int | None = None,
-                      limit: int = 100) -> list[dict]:
+def get_jobs_by_stage(
+    conn: sqlite3.Connection | None = None, stage: str = "discovered", min_score: int | None = None, limit: int = 100
+) -> list[dict]:
     """Fetch jobs filtered by pipeline stage.
 
     Args:
@@ -391,10 +564,7 @@ def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
             "AND tailored_resume_path IS NULL AND COALESCE(tailor_attempts, 0) < 5"
         ),
         "tailored": "tailored_resume_path IS NOT NULL",
-        "pending_apply": (
-            "tailored_resume_path IS NOT NULL AND applied_at IS NULL "
-            "AND application_url IS NOT NULL"
-        ),
+        "pending_apply": ("tailored_resume_path IS NOT NULL AND applied_at IS NULL AND application_url IS NOT NULL"),
         "applied": "applied_at IS NOT NULL",
     }
 

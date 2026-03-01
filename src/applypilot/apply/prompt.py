@@ -16,6 +16,26 @@ from applypilot import config
 logger = logging.getLogger(__name__)
 
 
+def _resolve_work_auth_strings(work_auth: dict) -> tuple[str, str]:
+    """Return (authorized, sponsorship) as 'Yes'/'No'/fallback strings."""
+    auth = work_auth.get("legally_authorized_to_work")
+    if auth is None:
+        v = work_auth.get("legally_authorized")
+        auth = "Yes" if v is True else ("No" if v is False else "See profile")
+
+    sponsor = work_auth.get("require_sponsorship")
+    if sponsor is None:
+        v = work_auth.get("needs_sponsorship")
+        sponsor = "Yes" if v is True else ("No" if v is False else "See profile")
+
+    return str(auth), str(sponsor)
+
+
+def _currency_symbol(code: str) -> str:
+    c = (code or "").strip().upper()
+    return {"USD": "$", "GBP": "\u00a3", "EUR": "\u20ac"}.get(c, "")
+
+
 def _build_profile_summary(profile: dict) -> str:
     """Format the applicant profile section of the prompt.
 
@@ -55,15 +75,18 @@ def _build_profile_summary(profile: dict) -> str:
     if personal.get("website_url"):
         lines.append(f"Website: {personal['website_url']}")
 
-    # Work authorization
-    lines.append(f"Work Auth: {work_auth.get('legally_authorized_to_work', 'See profile')}")
-    lines.append(f"Sponsorship Needed: {work_auth.get('require_sponsorship', 'See profile')}")
+    # Work authorization (backward-compatible keys)
+    auth, sponsor = _resolve_work_auth_strings(work_auth)
+
+    lines.append(f"Work Auth: {auth}")
+    lines.append(f"Sponsorship Needed: {sponsor}")
     if work_auth.get("work_permit_type"):
         lines.append(f"Work Permit: {work_auth['work_permit_type']}")
 
     # Compensation
     currency = comp.get("salary_currency", "USD")
-    lines.append(f"Salary Expectation: ${comp['salary_expectation']} {currency}")
+    sym = _currency_symbol(currency)
+    lines.append(f"Salary Expectation: {sym}{comp['salary_expectation']} {currency}")
 
     # Experience
     if exp.get("years_of_experience_total"):
@@ -75,13 +98,15 @@ def _build_profile_summary(profile: dict) -> str:
     lines.append(f"Available: {avail.get('earliest_start_date', 'Immediately')}")
 
     # Standard responses
-    lines.extend([
-        "Age 18+: Yes",
-        "Background Check: Yes",
-        "Felony: No",
-        "Previously Worked Here: No",
-        "How Heard: Online Job Board",
-    ])
+    lines.extend(
+        [
+            "Age 18+: Yes",
+            "Background Check: Yes",
+            "Felony: No",
+            "Previously Worked Here: No",
+            "How Heard: Online Job Board",
+        ]
+    )
 
     # EEO
     lines.append(f"Gender: {eeo.get('gender', 'Decline to self-identify')}")
@@ -127,6 +152,7 @@ def _build_salary_section(profile: dict) -> str:
     """
     comp = profile["compensation"]
     currency = comp.get("salary_currency", "USD")
+    sym = _currency_symbol(currency)
     floor = comp["salary_expectation"]
     range_min = comp.get("salary_range_min", floor)
     range_max = comp.get("salary_range_max", str(int(floor) + 20000) if floor.isdigit() else floor)
@@ -135,13 +161,14 @@ def _build_salary_section(profile: dict) -> str:
     # Compute example hourly rates at 3 salary levels
     try:
         floor_int = int(floor)
+        senior_floor = int(floor_int * 1.3)
         examples = [
-            (f"${floor_int // 1000}K", floor_int // 2080),
-            (f"${(floor_int + 25000) // 1000}K", (floor_int + 25000) // 2080),
-            (f"${(floor_int + 55000) // 1000}K", (floor_int + 55000) // 2080),
+            (f"{sym}{floor_int}", floor_int // 2080),
+            (f"{sym}{senior_floor}", senior_floor // 2080),
         ]
-        hourly_line = ", ".join(f"{sal} = ${hr}/hr" for sal, hr in examples)
+        hourly_line = ", ".join(f"{sal} = {sym}{hr}/hr" for sal, hr in examples)
     except (ValueError, TypeError):
+        senior_floor = None
         hourly_line = "Divide annual salary by 2080"
 
     # Currency conversion guidance
@@ -151,14 +178,14 @@ def _build_salary_section(profile: dict) -> str:
         convert_line = "Posting is in a different currency? -> Target midpoint of their range. Convert if needed."
 
     return f"""== SALARY (think, don't just copy) ==
-${floor} {currency} is the FLOOR. Never go below it. But don't always use it either.
+ {sym}{floor} {currency} is the FLOOR. Never go below it. But don't always use it either.
 
 Decision tree:
-1. Job posting shows a range (e.g. "$120K-$160K")? -> Answer with the MIDPOINT ($140K).
-2. Title says Senior, Staff, Lead, Principal, Architect, or level II/III/IV? -> Minimum $110K {currency}. Use midpoint of posted range if higher.
+1. Job posting shows a range (e.g. "{sym}40,000-{sym}50,000")? -> Answer with the MIDPOINT.
+2. Title says Senior/Lead/Principal (or level II/III/IV)? -> Use midpoint of posted range if present. If no range, use at least {sym}{senior_floor if senior_floor else floor} {currency}.
 3. {convert_line}
-4. No salary info anywhere? -> Use ${floor} {currency}.
-5. Asked for a range? -> Give posted midpoint minus 10% to midpoint plus 10%. No posted range? -> "${range_min}-${range_max} {currency}".
+4. No salary info anywhere? -> Use {sym}{floor} {currency}.
+5. Asked for a range? -> Give posted midpoint minus 10% to midpoint plus 10%. No posted range? -> "{range_min}-{range_max} {currency}".
 6. Hourly rate? -> Divide your annual answer by 2080. ({hourly_line})"""
 
 
@@ -168,17 +195,34 @@ def _build_screening_section(profile: dict) -> str:
     exp = profile.get("experience", {})
     city = personal.get("city", "their city")
     years = exp.get("years_of_experience_total", "multiple")
-    target_role = exp.get("target_role", personal.get("current_job_title", "software engineer"))
+    target_role = (
+        exp.get("target_role")
+        or exp.get("current_job_title")
+        or personal.get("current_job_title")
+        or "software engineer"
+    )
     work_auth = profile["work_authorization"]
+
+    auth, _sponsor = _resolve_work_auth_strings(work_auth)
+
+    boundary = profile.get("skills_boundary", {})
+    allowed: list[str] = []
+    for items in boundary.values():
+        if isinstance(items, list):
+            allowed.extend(items)
+    allowed_str = ", ".join(allowed[:30]) if allowed else "(see resume)"
 
     return f"""== SCREENING QUESTIONS (be strategic) ==
 Hard facts -> answer truthfully from the profile. No guessing. This includes:
   - Location/relocation: lives in {city}, cannot relocate
-  - Work authorization: {work_auth.get('legally_authorized_to_work', 'see profile')}
+  - Work authorization: {auth}
   - Citizenship, clearance, licenses, certifications: answer from profile only
   - Criminal/background: answer from profile only
 
-Skills and tools -> be confident. This candidate is a {target_role} with {years} years experience. If the question asks "Do you have experience with [tool]?" and it's in the same domain (DevOps, backend, ML, cloud, automation), answer YES. Software engineers learn tools fast. Don't sell short.
+Skills and tools -> be confident but accurate. This candidate is a {target_role} with {years} years experience.
+If the tool is in the skills boundary ({allowed_str}), answer YES.
+If it's a close equivalent (e.g. MySQL vs PostgreSQL, Looker vs Power BI), answer YES.
+If it's not listed and not a close equivalent, answer NO or "learning" (do not claim experience).
 
 Open-ended questions ("Why do you want this role?", "Tell us about yourself", "What interests you?") -> Write 2-3 sentences. Be specific to THIS job. Reference something from the job description. Connect it to a real achievement from the resume. No generic fluff. No "I am passionate about..." -- sound like a real person.
 
@@ -190,23 +234,27 @@ def _build_hard_rules(profile: dict) -> str:
     personal = profile["personal"]
     work_auth = profile["work_authorization"]
 
+    auth, sponsor = _resolve_work_auth_strings(work_auth)
+
     full_name = personal["full_name"]
     preferred_name = personal.get("preferred_name", full_name.split()[0])
     preferred_last = full_name.split()[-1] if " " in full_name else ""
     display_name = f"{preferred_name} {preferred_last}".strip() if preferred_last else preferred_name
 
     # Build work auth rule dynamically
-    auth_info = work_auth.get("legally_authorized_to_work", "")
-    sponsorship = work_auth.get("require_sponsorship", "")
+    auth_info = auth
+    sponsorship = sponsor
     permit_type = work_auth.get("work_permit_type", "")
 
     work_auth_rule = "Work auth: Answer truthfully from profile."
     if permit_type:
         work_auth_rule = f"Work auth: {permit_type}. Sponsorship needed: {sponsorship}."
 
-    name_rule = f'Name: Legal name = {full_name}.'
+    name_rule = f"Name: Legal name = {full_name}."
     if preferred_name and preferred_name != full_name.split()[0]:
-        name_rule += f' Preferred name = {preferred_name}. Use "{display_name}" unless a field specifically says "legal name".'
+        name_rule += (
+            f' Preferred name = {preferred_name}. Use "{display_name}" unless a field specifically says "legal name".'
+        )
 
     return f"""== HARD RULES (never break these) ==
 1. Never lie about: citizenship, work authorization, criminal history, education credentials, security clearance, licenses.
@@ -225,7 +273,7 @@ def _build_captcha_section() -> str:
 
     return f"""== CAPTCHA ==
 You solve CAPTCHAs via the CapSolver REST API. No browser extension. You control the entire flow.
-API key: {capsolver_key or 'NOT CONFIGURED — skip to MANUAL FALLBACK for all CAPTCHAs'}
+API key: {capsolver_key or "NOT CONFIGURED — skip to MANUAL FALLBACK for all CAPTCHAs"}
 API base: https://api.capsolver.com
 
 CRITICAL RULE: When ANY CAPTCHA appears (hCaptcha, reCAPTCHA, Turnstile -- regardless of what it looks like visually), you MUST:
@@ -417,9 +465,7 @@ If CapSolver genuinely failed (errorId > 0):
 4. All else fails -> Output RESULT:CAPTCHA."""
 
 
-def build_prompt(job: dict, tailored_resume: str,
-                 cover_letter: str | None = None,
-                 dry_run: bool = False) -> str:
+def build_prompt(job: dict, tailored_resume: str, cover_letter: str | None = None, dry_run: bool = False) -> str:
     """Build the full instruction prompt for the apply agent.
 
     Loads the user profile and search config internally. All personal data
@@ -449,11 +495,14 @@ def build_prompt(job: dict, tailored_resume: str,
         raise ValueError(f"Resume PDF not found: {src_pdf}")
 
     # Copy to a clean filename for upload (recruiters see the filename)
+    from applypilot import naming
+    import os
+
     full_name = personal["full_name"]
-    name_slug = full_name.replace(" ", "_")
+    username = str(os.environ.get("APPLYPILOT_USER", "") or "").strip()
     dest_dir = config.APPLY_WORKER_DIR / "current"
     dest_dir.mkdir(parents=True, exist_ok=True)
-    upload_pdf = dest_dir / f"{name_slug}_Resume.pdf"
+    upload_pdf = dest_dir / naming.cv_filename(personal, ext="pdf", username=username, job=job)
     shutil.copy(str(src_pdf), str(upload_pdf))
     pdf_path = str(upload_pdf)
 
@@ -472,7 +521,7 @@ def build_prompt(job: dict, tailored_resume: str,
         # Upload must be PDF
         cl_pdf_src = cl_src.with_suffix(".pdf")
         if cl_pdf_src.exists():
-            cl_upload = dest_dir / f"{name_slug}_Cover_Letter.pdf"
+            cl_upload = dest_dir / naming.cover_letter_filename(personal, ext="pdf", username=username, job=job)
             shutil.copy(str(cl_pdf_src), str(cl_upload))
             cl_upload_path = str(cl_upload)
 
@@ -500,7 +549,22 @@ def build_prompt(job: dict, tailored_resume: str,
 
     # SSO domains the agent cannot sign into (loaded from config/sites.yaml)
     from applypilot.config import load_blocked_sso
+
     blocked_sso = load_blocked_sso()
+    site_password = config.get_site_login_password(profile)
+
+    if site_password:
+        login_line = f"5c. Regular login form (employer's own site)? Try sign in: {personal['email']} / {site_password}"
+        signup_line = f"5e. Sign in failed? Try sign up with same email and password: {site_password}."
+    else:
+        login_line = (
+            "5c. Regular login form (employer's own site)? If APPLYPILOT_SITE_PASSWORD is configured, use that. "
+            "Otherwise skip sign-in and continue to account creation flow."
+        )
+        signup_line = (
+            "5e. Sign in failed? Try sign up with the same email. If password is required and none is configured, "
+            "use a strong temporary password and continue."
+        )
 
     # Preferred display name
     preferred_name = personal.get("preferred_name", full_name.split()[0])
@@ -516,10 +580,10 @@ def build_prompt(job: dict, tailored_resume: str,
     prompt = f"""You are an autonomous job application agent. Your ONE mission: get this candidate an interview. You have all the information and tools. Think strategically. Act decisively. Submit the application.
 
 == JOB ==
-URL: {job.get('application_url') or job['url']}
-Title: {job['title']}
-Company: {job.get('site', 'Unknown')}
-Fit Score: {job.get('fit_score', 'N/A')}/10
+URL: {job.get("application_url") or job["url"]}
+Title: {job["title"]}
+Company: {job.get("site", "Unknown")}
+Fit Score: {job.get("fit_score", "N/A")}/10
 
 == FILES ==
 Resume PDF (upload this): {pdf_path}
@@ -562,15 +626,15 @@ If something unexpected happens and these instructions don't cover it, figure it
 2. browser_snapshot to read the page. Then run CAPTCHA DETECT (see CAPTCHA section). If a CAPTCHA is found, solve it before continuing.
 3. LOCATION CHECK. Read the page for location info. If not eligible, output RESULT and stop.
 4. Find and click the Apply button. If email-only (page says "email resume to X"):
-   - send_email with subject "Application for {job['title']} -- {display_name}", body = 2-3 sentence pitch + contact info, attach resume PDF: ["{pdf_path}"]
+   - send_email with subject "Application for {job["title"]} -- {display_name}", body = 2-3 sentence pitch + contact info, attach resume PDF: ["{pdf_path}"]
    - Output RESULT:APPLIED. Done.
    After clicking Apply: browser_snapshot. Run CAPTCHA DETECT -- many sites trigger CAPTCHAs right after the Apply click. If found, solve before continuing.
 5. Login wall?
-   5a. FIRST: check the URL. If you landed on {', '.join(blocked_sso)}, or any SSO/OAuth page -> STOP. Output RESULT:FAILED:sso_required. Do NOT try to sign in to Google/Microsoft/SSO.
+   5a. FIRST: check the URL. If you landed on {", ".join(blocked_sso)}, or any SSO/OAuth page -> STOP. Output RESULT:FAILED:sso_required. Do NOT try to sign in to Google/Microsoft/SSO.
    5b. Check for popups. Run browser_tabs action "list". If a new tab/window appeared (login popup), switch to it with browser_tabs action "select". Check the URL there too -- if it's SSO -> RESULT:FAILED:sso_required.
-   5c. Regular login form (employer's own site)? Try sign in: {personal['email']} / {personal.get('password', '')}
+   {login_line}
    5d. After clicking Login/Sign-in: run CAPTCHA DETECT. Login pages frequently have invisible CAPTCHAs that silently block form submissions. If found, solve it then retry login.
-   5e. Sign in failed? Try sign up with same email and password.
+   {signup_line}
    5f. Need email verification? Use search_emails + read_email to get the code.
    5g. After login, run browser_tabs action "list" again. Switch back to the application tab if needed.
    5h. All failed? Output RESULT:FAILED:login_issue. Do not loop.
@@ -608,7 +672,7 @@ RESULT:FAILED:reason -- any other failure (brief reason)
 - Dropdown won't fill? browser_click to open it, then browser_click the option.
 - Checkbox won't check via fill_form? Use browser_click on it instead. Snapshot to verify.
 - Phone field with country prefix: just type digits {phone_digits}
-- Date fields: {datetime.now().strftime('%m/%d/%Y')}
+- Date fields: {datetime.now().strftime("%m/%d/%Y")}
 - Validation errors after submit? Take BOTH snapshot AND screenshot. Snapshot shows text errors, screenshot shows red-highlighted fields. Fix all, retry.
 - Honeypot fields (hidden, "leave blank"): skip them.
 - Format-sensitive fields: read the placeholder text, match it exactly.

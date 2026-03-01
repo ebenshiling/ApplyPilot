@@ -7,10 +7,13 @@ profile at runtime. No hardcoded personal information.
 
 import json
 import logging
+import os
 import re
 import time
+from pathlib import Path
 from datetime import datetime, timezone
 
+from applypilot import naming
 from applypilot.config import COVER_LETTER_DIR, RESUME_PATH, load_profile
 from applypilot.database import get_connection, get_jobs_by_stage
 from applypilot.llm import get_client
@@ -19,13 +22,106 @@ from applypilot.scoring.validator import (
     sanitize_text,
     validate_cover_letter,
 )
+from applypilot.scoring.keywords import build_keyword_bank
 
 log = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 5  # max cross-run retries before giving up
 
 
+def _sign_off_name(profile: dict) -> str:
+    personal = profile.get("personal", {})
+
+    # Prefer a full name for the final sign-off because the validator expects
+    # a name line with 2+ words. If preferred_name is single-word (e.g. first
+    # name only), fall back to full_name when available.
+    preferred = (personal.get("preferred_name") or "").strip()
+    full = (personal.get("full_name") or "").strip()
+
+    if preferred and len(preferred.split()) >= 2:
+        name = preferred
+    elif full:
+        name = full
+    else:
+        name = preferred
+
+    # If the resume uses an ALL-CAPS name header, keep resume formatting as-is,
+    # but normalize the cover-letter sign-off to Title Case.
+    letters_only = re.sub(r"[^A-Za-z]", "", name)
+    if letters_only and letters_only.isupper():
+        return name.title()
+    return name
+
+
+def _ensure_greeting_and_signoff(letter: str, name: str) -> str:
+    """Make the letter look complete even if the model forgets basics."""
+    text = (letter or "").strip()
+    if not text:
+        return text
+
+    # Greeting
+    if not text.lower().startswith("dear"):
+        text = "Dear Hiring Manager,\n\n" + text
+
+    if not name:
+        return text
+
+    lines = text.splitlines()
+    trimmed = list(lines)
+    while trimmed and not trimmed[-1].strip():
+        trimmed.pop()
+
+    non_empty = [ln.strip() for ln in trimmed if ln.strip()]
+    if not non_empty:
+        return text
+
+    closing_words = ("best", "regards", "sincerely", "thank you", "thanks")
+    last = non_empty[-1].strip()
+
+    # If the model already ended with the name, prefer inserting a closing line
+    # above it rather than appending a second signature.
+    if last.lower() == name.strip().lower():
+        if len(non_empty) >= 2 and any(w in non_empty[-2].lower() for w in closing_words):
+            return "\n".join(trimmed)
+
+        # Insert "Best," immediately before the last name line.
+        # Find the index of that last name line in the trimmed list.
+        idx = None
+        for i in range(len(trimmed) - 1, -1, -1):
+            if trimmed[i].strip():
+                idx = i
+                break
+        if idx is not None:
+            # Ensure a blank line before the closing.
+            if idx > 0 and trimmed[idx - 1].strip():
+                trimmed.insert(idx, "")
+                idx += 1
+            trimmed.insert(idx, "Best,")
+            return "\n".join(trimmed)
+
+        return text
+
+    # Canonical sign-off to satisfy validation reliably.
+    return "\n".join(trimmed) + f"\n\nBest,\n{name}"
+
+
+def _looks_truncated(text: str, signoff_name: str) -> bool:
+    s = (text or "").strip()
+    if not s:
+        return True
+
+    # If it ends with a sign-off name, it's not truncated.
+    if signoff_name:
+        non_empty = [ln.strip() for ln in s.splitlines() if ln.strip()]
+        if non_empty and non_empty[-1].lower() == signoff_name.strip().lower():
+            return False
+
+    # Otherwise require the final visible character to close a sentence.
+    return s[-1] not in (".", "!", "?")
+
+
 # ── Prompt Builder (profile-driven) ──────────────────────────────────────
+
 
 def _build_cover_letter_prompt(profile: dict) -> str:
     """Build the cover letter system prompt from the user's profile.
@@ -98,16 +194,20 @@ FABRICATION = INSTANT REJECTION:
 The candidate's real tools are ONLY: {skills_str}.
 Do NOT mention ANY tool not in this list. If the job asks for tools not listed, talk about the work you did, not the tools.
 
-Sign off: just "{sign_off_name}"
+Sign off: exactly 2 lines:
+Best,
+{sign_off_name}
 
-Output ONLY the letter. Start with "Dear Hiring Manager," end with the name."""
+Output ONLY the letter. Start with "Dear Hiring Manager," and end with:
+Best,
+{sign_off_name}
+"""
 
 
 # ── Core Generation ──────────────────────────────────────────────────────
 
-def generate_cover_letter(
-    resume_text: str, job: dict, profile: dict, max_retries: int = 3
-) -> str:
+
+def generate_cover_letter(resume_text: str, job: dict, profile: dict, max_retries: int = 3) -> str:
     """Generate a cover letter with fresh context on each retry + auto-sanitize.
 
     Same design as tailor_resume: fresh conversation per attempt, issues noted
@@ -133,35 +233,71 @@ def generate_cover_letter(
     letter = ""
     client = get_client()
     cl_prompt_base = _build_cover_letter_prompt(profile)
+    name = _sign_off_name(profile)
+
+    # Keyword bank derived from JD + (tailored) resume.
+    kw_bank = None
+    try:
+        kw_bank = build_keyword_bank(
+            job_description=(job.get("full_description") or ""),
+            profile=profile,
+            resume_text=resume_text,
+        )
+    except Exception:
+        kw_bank = None
 
     for attempt in range(max_retries + 1):
         # Fresh conversation every attempt
         prompt = cl_prompt_base
         if avoid_notes:
-            prompt += "\n\n## AVOID THESE ISSUES:\n" + "\n".join(
-                f"- {n}" for n in avoid_notes[-5:]
-            )
+            prompt += "\n\n## AVOID THESE ISSUES:\n" + "\n".join(f"- {n}" for n in avoid_notes[-5:])
+
+        if kw_bank and kw_bank.get("prompt_keywords"):
+            prompt += "\n\n## KEYWORD BANK (use only if truthful; do not stuff):\n"
+            prompt += ", ".join(str(k) for k in (kw_bank.get("prompt_keywords") or []) if str(k).strip())
 
         messages = [
             {"role": "system", "content": prompt},
-            {"role": "user", "content": (
-                f"RESUME:\n{resume_text}\n\n---\n\n"
-                f"TARGET JOB:\n{job_text}\n\n"
-                "Write the cover letter:"
-            )},
+            {
+                "role": "user",
+                "content": (f"RESUME:\n{resume_text}\n\n---\n\nTARGET JOB:\n{job_text}\n\nWrite the cover letter:"),
+            },
         ]
 
-        letter = client.chat(messages, max_tokens=1024, temperature=0.7)
-        letter = sanitize_text(letter)  # auto-fix em dashes, smart quotes
+        # Always enforce structure/length. Gemini can truncate, so be explicit.
+        messages[-1]["content"] += (
+            "\n\nHard requirements:\n"
+            "- Exactly 3 paragraphs\n"
+            "- 160-220 words\n"
+            "- Include at least 2 concrete numbers from the resume\n"
+            "- End with a closing line (e.g. Best,) then your name on its own line\n"
+            "- Output plain text only\n"
+            "- Do not stop early"
+        )
 
-        validation = validate_cover_letter(letter)
+        # Gemini can spend output budget on hidden thinking and truncate visible text.
+        thinking_budget = 0 if (client.provider or "").lower() == "gemini" else None
+        letter = client.chat(messages, max_tokens=1200, temperature=0.7, thinking_budget=thinking_budget)
+        letter = sanitize_text(letter)  # auto-fix em dashes, smart quotes
+        letter = _ensure_greeting_and_signoff(letter, name)
+        # If the model truncated mid-sentence, treat as failure and retry.
+        if _looks_truncated(letter, name):
+            avoid_notes.append("Output looked truncated. Do not stop early; end with closing + name.")
+            continue
+
+        # Ensure sign-off survives sanitize and truncation guard.
+        letter = _ensure_greeting_and_signoff(letter, name)
+
+        validation = validate_cover_letter(letter, profile=profile, resume_text=resume_text)
         if validation["passed"]:
             return letter
 
         avoid_notes.extend(validation["errors"])
         log.debug(
             "Cover letter attempt %d/%d failed: %s",
-            attempt + 1, max_retries + 1, validation["errors"],
+            attempt + 1,
+            max_retries + 1,
+            validation["errors"],
         )
 
     return letter  # last attempt even if failed
@@ -169,7 +305,8 @@ def generate_cover_letter(
 
 # ── Batch Entry Point ────────────────────────────────────────────────────
 
-def run_cover_letters(min_score: int = 7, limit: int = 20) -> dict:
+
+def run_cover_letters(min_score: int = 7, limit: int = 0) -> dict:
     """Generate cover letters for high-scoring jobs that have tailored resumes.
 
     Args:
@@ -190,8 +327,8 @@ def run_cover_letters(min_score: int = 7, limit: int = 20) -> dict:
         "AND full_description IS NOT NULL "
         "AND (cover_letter_path IS NULL OR cover_letter_path = '') "
         "AND COALESCE(cover_attempts, 0) < ? "
-        "ORDER BY fit_score DESC LIMIT ?",
-        (min_score, MAX_ATTEMPTS, limit),
+        "ORDER BY fit_score DESC" + ("" if limit <= 0 else " LIMIT ?"),
+        ((min_score, MAX_ATTEMPTS) if limit <= 0 else (min_score, MAX_ATTEMPTS, limit)),
     ).fetchall()
 
     if not jobs:
@@ -206,7 +343,8 @@ def run_cover_letters(min_score: int = 7, limit: int = 20) -> dict:
     COVER_LETTER_DIR.mkdir(parents=True, exist_ok=True)
     log.info(
         "Generating cover letters for %d jobs (score >= %d)...",
-        len(jobs), min_score,
+        len(jobs),
+        min_score,
     )
     t0 = time.time()
     completed = 0
@@ -216,12 +354,24 @@ def run_cover_letters(min_score: int = 7, limit: int = 20) -> dict:
     for job in jobs:
         completed += 1
         try:
-            letter = generate_cover_letter(resume_text, job, profile)
+            # Prefer the tailored resume for this specific job.
+            tailored_text = resume_text
+            trp = job.get("tailored_resume_path")
+            if trp:
+                try:
+                    tailored_text = Path(trp).read_text(encoding="utf-8")
+                except Exception:
+                    tailored_text = resume_text
 
-            # Build safe filename prefix
-            safe_title = re.sub(r"[^\w\s-]", "", job["title"])[:50].strip().replace(" ", "_")
-            safe_site = re.sub(r"[^\w\s-]", "", job["site"])[:20].strip().replace(" ", "_")
-            prefix = f"{safe_site}_{safe_title}"
+            letter = generate_cover_letter(tailored_text, job, profile)
+
+            username = str(os.environ.get("APPLYPILOT_USER", "") or "").strip()
+            stem = naming.cover_letter_filename(profile.get("personal", {}), ext="txt", username=username, job=job)
+            prefix = Path(stem).stem
+
+            validation = validate_cover_letter(letter, profile=profile, resume_text=tailored_text)
+            if not validation["passed"]:
+                raise RuntimeError("Cover letter failed validation: " + "; ".join(validation["errors"][:3]))
 
             cl_path = COVER_LETTER_DIR / f"{prefix}_CL.txt"
             cl_path.write_text(letter, encoding="utf-8")
@@ -230,6 +380,7 @@ def run_cover_letters(min_score: int = 7, limit: int = 20) -> dict:
             pdf_path = None
             try:
                 from applypilot.scoring.pdf import convert_to_pdf
+
                 pdf_path = str(convert_to_pdf(cl_path))
             except Exception:
                 log.debug("PDF generation failed for %s", cl_path, exc_info=True)
@@ -247,12 +398,19 @@ def run_cover_letters(min_score: int = 7, limit: int = 20) -> dict:
             rate = completed / elapsed if elapsed > 0 else 0
             log.info(
                 "%d/%d [OK] | %.1f jobs/min | %s",
-                completed, len(jobs), rate * 60, result["title"][:40],
+                completed,
+                len(jobs),
+                rate * 60,
+                result["title"][:40],
             )
         except Exception as e:
             result = {
-                "url": job["url"], "title": job["title"], "site": job["site"],
-                "path": None, "pdf_path": None, "error": str(e),
+                "url": job["url"],
+                "title": job["title"],
+                "site": job["site"],
+                "path": None,
+                "pdf_path": None,
+                "error": str(e),
             }
             error_count += 1
             results.append(result)
@@ -271,7 +429,7 @@ def run_cover_letters(min_score: int = 7, limit: int = 20) -> dict:
             saved += 1
         else:
             conn.execute(
-                "UPDATE jobs SET cover_attempts=COALESCE(cover_attempts,0)+1 WHERE url=?",
+                "UPDATE jobs SET cover_attempts=COALESCE(cover_attempts,0)+1, cover_letter_path=NULL WHERE url=?",
                 (r["url"],),
             )
     conn.commit()

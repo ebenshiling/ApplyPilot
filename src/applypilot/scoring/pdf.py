@@ -5,6 +5,8 @@ and exports to PDF using headless Chromium via Playwright.
 """
 
 import logging
+import json
+import re
 from pathlib import Path
 
 from applypilot.config import TAILORED_DIR
@@ -13,6 +15,7 @@ log = logging.getLogger(__name__)
 
 
 # ── Resume Parser ────────────────────────────────────────────────────────
+
 
 def parse_resume(text: str) -> dict:
     """Parse a structured text resume into sections.
@@ -53,17 +56,38 @@ def parse_resume(text: str) -> dict:
         else:
             location = header_lines[2]
 
-    # Split body into sections by ALL-CAPS headers
+    # Split body into sections by ALL-CAPS headers.
+    # IMPORTANT: only treat known section headers as section boundaries.
+    # Otherwise, an UPPERCASE project title can accidentally be parsed as a new
+    # section, which makes PROJECTS look empty in the PDF.
+    KNOWN_SECTION_HEADERS = {
+        "SUMMARY",
+        "PROFESSIONAL SUMMARY",
+        "CORE TECHNICAL SKILLS",
+        "TECHNICAL SKILLS",
+        "TECHNICAL PROFICIENCY",
+        "CORE SKILLS",
+        "TECHNICAL ENVIRONMENT",
+        "PROFESSIONAL EXPERIENCE",
+        "EXPERIENCE",
+        "WORK EXPERIENCE",
+        "PROJECTS",
+        "EDUCATION",
+        "CERTIFICATIONS",
+        "PROFESSIONAL STRENGTHS",
+    }
+
     sections: dict[str, str] = {}
     current_section: str | None = None
     current_lines: list[str] = []
 
     for line in lines[body_start:]:
         stripped = line.strip()
-        # Detect section headers (all caps, no leading dash/bullet, longer than 3 chars)
+        # Detect section headers (known all-caps headers only)
         if (
             stripped
             and stripped == stripped.upper()
+            and stripped in KNOWN_SECTION_HEADERS
             and not stripped.startswith("-")
             and len(stripped) > 3
             and not stripped.startswith("\u2022")
@@ -126,9 +150,7 @@ def parse_entries(text: str) -> list[dict]:
             if current:
                 current["bullets"].append(stripped[2:].strip())
         elif current is None or (
-            not stripped.startswith("-")
-            and not stripped.startswith("\u2022")
-            and len(current.get("bullets", [])) > 0
+            not stripped.startswith("-") and not stripped.startswith("\u2022") and len(current.get("bullets", [])) > 0
         ):
             # New entry
             if current:
@@ -148,6 +170,7 @@ def parse_entries(text: str) -> list[dict]:
 
 # ── HTML Template ────────────────────────────────────────────────────────
 
+
 def build_html(resume: dict) -> str:
     """Build professional resume HTML from parsed data.
 
@@ -159,25 +182,74 @@ def build_html(resume: dict) -> str:
     """
     sections = resume["sections"]
 
-    # Skills
-    skills_html = ""
-    if "TECHNICAL SKILLS" in sections:
+    keywords: list[str] = resume.get("keywords") or []
+
+    def _highlight_keywords(s: str, kws: list[str]) -> str:
+        out = _escape_html(s)
+        if not kws:
+            return out
+        # Longer first to reduce partial overlaps
+        uniq = [k.strip() for k in kws if str(k).strip()]
+        uniq = sorted(set(uniq), key=len, reverse=True)[:24]
+        for kw in uniq:
+            if len(kw) < 3:
+                continue
+            kw_e = _escape_html(kw)
+            pat = re.compile(r"(?i)(?<![A-Za-z0-9])(" + re.escape(kw_e) + r")(?![A-Za-z0-9])")
+            # Use \g<1> so backslashes are not emitted as literal text.
+            out = pat.sub(r"<strong>\g<1></strong>", out)
+        return out
+
+    def _render_simple_bullets(section_key: str, title: str, bold_label: bool = False) -> str:
+        if section_key not in sections:
+            return ""
+        items: list[str] = []
+        for line in sections[section_key].split("\n"):
+            s = line.strip()
+            if not s:
+                continue
+            if s.startswith("- "):
+                s = s[2:].strip()
+            if s.startswith("\u2022 "):
+                s = s[2:].strip()
+            if bold_label and ":" in s:
+                left, right = s.split(":", 1)
+                left_h = _escape_html(left.strip())
+                right_h = _escape_html(right.strip())
+                items.append(f"<strong>{left_h}:</strong> {right_h}" if right_h else f"<strong>{left_h}</strong>")
+            else:
+                items.append(_highlight_keywords(s, keywords))
+        if not items:
+            return ""
+        li = "".join(f"<li>{x}</li>" for x in items)
+        return f'<div class="section"><div class="section-title">{title}</div><ul>{li}</ul></div>'
+
+    # Core Technical Skills (list)
+    skills_html = _render_simple_bullets("CORE TECHNICAL SKILLS", "Core Technical Skills")
+
+    # Backwards-compat: if only TECHNICAL SKILLS exists, render as rows
+    if not skills_html and "TECHNICAL SKILLS" in sections:
         skills = parse_skills(sections["TECHNICAL SKILLS"])
         rows = ""
         for cat, val in skills:
-            rows += f'<div class="skill-row"><span class="skill-cat">{cat}:</span> {val}</div>\n'
+            rows += f'<div class="skill-row"><span class="skill-cat">{_escape_html(cat)}:</span> {_escape_html(val)}</div>\n'
         skills_html = f'<div class="section"><div class="section-title">Technical Skills</div>{rows}</div>'
+
+    tech_env_html = _render_simple_bullets("TECHNICAL ENVIRONMENT", "Technical Environment", bold_label=True)
+    certs_html = _render_simple_bullets("CERTIFICATIONS", "Certifications")
 
     # Experience
     exp_html = ""
-    if "EXPERIENCE" in sections:
-        entries = parse_entries(sections["EXPERIENCE"])
+    exp_key = "PROFESSIONAL EXPERIENCE" if "PROFESSIONAL EXPERIENCE" in sections else "EXPERIENCE"
+    if exp_key in sections:
+        entries = parse_entries(sections[exp_key])
         items = ""
         for e in entries:
-            bullets = "".join(f"<li>{b}</li>" for b in e["bullets"])
-            subtitle = f'<div class="entry-subtitle">{e["subtitle"]}</div>' if e["subtitle"] else ""
-            items += f'<div class="entry"><div class="entry-title">{e["title"]}</div>{subtitle}<ul>{bullets}</ul></div>'
-        exp_html = f'<div class="section"><div class="section-title">Experience</div>{items}</div>'
+            bullets = "".join(f"<li>{_highlight_keywords(b, keywords)}</li>" for b in e["bullets"])
+            subtitle = f'<div class="entry-subtitle">{_escape_html(e["subtitle"])}</div>' if e["subtitle"] else ""
+            title = _highlight_keywords(e["title"], keywords)
+            items += f'<div class="entry"><div class="entry-title">{title}</div>{subtitle}<ul>{bullets}</ul></div>'
+        exp_html = f'<div class="section"><div class="section-title">Professional Experience</div>{items}</div>'
 
     # Projects
     proj_html = ""
@@ -185,29 +257,32 @@ def build_html(resume: dict) -> str:
         entries = parse_entries(sections["PROJECTS"])
         items = ""
         for e in entries:
-            bullets = "".join(f"<li>{b}</li>" for b in e["bullets"])
-            subtitle = f'<div class="entry-subtitle">{e["subtitle"]}</div>' if e["subtitle"] else ""
-            items += f'<div class="entry"><div class="entry-title">{e["title"]}</div>{subtitle}<ul>{bullets}</ul></div>'
+            bullets = "".join(f"<li>{_highlight_keywords(b, keywords)}</li>" for b in e["bullets"])
+            subtitle = f'<div class="entry-subtitle">{_escape_html(e["subtitle"])}</div>' if e["subtitle"] else ""
+            title = _highlight_keywords(e["title"], keywords)
+            items += f'<div class="entry"><div class="entry-title">{title}</div>{subtitle}<ul>{bullets}</ul></div>'
         proj_html = f'<div class="section"><div class="section-title">Projects</div>{items}</div>'
 
     # Education
     edu_html = ""
     if "EDUCATION" in sections:
-        edu_text = sections["EDUCATION"].strip()
-        edu_html = f'<div class="section"><div class="section-title">Education</div><div class="edu">{edu_text}</div></div>'
+        edu_text = _escape_html(sections["EDUCATION"].strip()).replace("\n", "<br>")
+        edu_html = (
+            f'<div class="section"><div class="section-title">Education</div><div class="edu">{edu_text}</div></div>'
+        )
 
     # Summary
     summary_html = ""
     if "SUMMARY" in sections:
-        summary_html = f'<div class="section"><div class="section-title">Summary</div><div class="summary">{sections["SUMMARY"].strip()}</div></div>'
+        summary_html = f'<div class="section"><div class="section-title">Professional Summary</div><div class="summary">{_highlight_keywords(sections["SUMMARY"].strip(), keywords)}</div></div>'
 
     # Contact line parsing
     contact = resume["contact"]
     contact_parts = [p.strip() for p in contact.split("|")] if contact else []
-    contact_html = " &nbsp;|&nbsp; ".join(contact_parts)
+    contact_html = " &nbsp;|&nbsp; ".join(_escape_html(p) for p in contact_parts)
 
     # Location line (may be empty)
-    location_html = f'<div class="location">{resume["location"]}</div>' if resume["location"] else ""
+    location_html = f'<div class="location">{_escape_html(resume["location"])}</div>' if resume["location"] else ""
 
     return f"""<!DOCTYPE html>
 <html>
@@ -215,7 +290,7 @@ def build_html(resume: dict) -> str:
 <meta charset="utf-8">
 <style>
 @page {{
-    size: letter;
+    size: A4;
     margin: 0.35in 0.5in;
 }}
 * {{
@@ -317,21 +392,24 @@ li {{
 </head>
 <body>
 <div class="header">
-    <div class="name">{resume['name']}</div>
-    <div class="title">{resume['title']}</div>
+    <div class="name">{_escape_html(resume["name"])}</div>
+    <div class="title">{_escape_html(resume["title"])}</div>
     {location_html}
     <div class="contact">{contact_html}</div>
 </div>
 {summary_html}
 {skills_html}
+{tech_env_html}
 {exp_html}
 {proj_html}
+{certs_html}
 {edu_html}
 </body>
 </html>"""
 
 
 # ── PDF Renderer ─────────────────────────────────────────────────────────
+
 
 def render_pdf(html: str, output_path: str) -> None:
     """Render HTML to PDF using Playwright's headless Chromium.
@@ -348,7 +426,7 @@ def render_pdf(html: str, output_path: str) -> None:
         page.set_content(html, wait_until="networkidle")
         page.pdf(
             path=output_path,
-            format="Letter",
+            format="A4",
             margin={"top": "0", "right": "0", "bottom": "0", "left": "0"},
             print_background=True,
         )
@@ -357,9 +435,8 @@ def render_pdf(html: str, output_path: str) -> None:
 
 # ── Public API ───────────────────────────────────────────────────────────
 
-def convert_to_pdf(
-    text_path: Path, output_path: Path | None = None, html_only: bool = False
-) -> Path:
+
+def convert_to_pdf(text_path: Path, output_path: Path | None = None, html_only: bool = False) -> Path:
     """Convert a text resume/cover letter to PDF.
 
     Args:
@@ -373,7 +450,42 @@ def convert_to_pdf(
     """
     text_path = Path(text_path)
     text = text_path.read_text(encoding="utf-8")
+
+    # Cover letters are plain text and do not follow the resume section format.
+    # Render them with a minimal letter template to avoid "empty" PDFs.
+    if text_path.name.endswith("_CL.txt"):
+        html = build_letter_html(text)
+        if html_only:
+            out = output_path or text_path.with_suffix(".html")
+            out = Path(out)
+            out.write_text(html, encoding="utf-8")
+            log.info("HTML generated: %s", out)
+            return out
+
+        out = output_path or text_path.with_suffix(".pdf")
+        out = Path(out)
+        render_pdf(html, str(out))
+        log.info("PDF generated: %s", out)
+        return out
+
+    # Guard: don't generate blank PDFs for empty/invalid resume text.
+    if not text.strip():
+        raise ValueError(f"Empty input text: {text_path}")
+
     resume = parse_resume(text)
+
+    # Load highlight keywords from the tailoring report, if present.
+    try:
+        report_path = text_path.with_name(text_path.stem + "_REPORT.json")
+        if report_path.exists():
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            kws = report.get("keywords")
+            if isinstance(kws, list):
+                resume["keywords"] = [str(k).strip() for k in kws if str(k).strip()]
+    except Exception:
+        pass
+    if not resume.get("sections"):
+        raise ValueError(f"No resume sections parsed from: {text_path}")
     html = build_html(resume)
 
     if html_only:
@@ -385,9 +497,53 @@ def convert_to_pdf(
 
     out = output_path or text_path.with_suffix(".pdf")
     out = Path(out)
-    render_pdf(html, str(out))
-    log.info("PDF generated: %s", out)
-    return out
+    try:
+        render_pdf(html, str(out))
+        log.info("PDF generated: %s", out)
+        return out
+    except PermissionError:
+        # Common on Windows when the PDF is open in a viewer.
+        fresh = out.with_name(out.stem + "_fresh" + out.suffix)
+        render_pdf(html, str(fresh))
+        log.info("PDF generated (fresh): %s", fresh)
+        return fresh
+
+
+def build_letter_html(text: str) -> str:
+    """Render a cover letter (plain text) as a simple, readable PDF."""
+    # Keep it intentionally simple: preserve paragraph breaks, no resume parsing.
+    paragraphs = [p.strip() for p in text.strip().split("\n\n") if p.strip()]
+    body = "\n".join(f"<p>{_escape_html(p).replace('\n', '<br>')}</p>" for p in paragraphs)
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@page {{
+    size: A4;
+    margin: 0.8in 0.9in;
+}}
+body {{
+    font-family: 'Calibri', 'Segoe UI', Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.45;
+    color: #1a1a1a;
+}}
+p {{
+    margin: 0 0 12px 0;
+}}
+</style>
+</head>
+<body>
+{body}
+</body>
+</html>"""
+
+
+def _escape_html(s: str) -> str:
+    return (
+        s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
+    )
 
 
 def batch_convert(limit: int = 50) -> int:
@@ -406,19 +562,55 @@ def batch_convert(limit: int = 50) -> int:
         log.warning("Tailored directory does not exist: %s", TAILORED_DIR)
         return 0
 
-    txt_files = sorted(TAILORED_DIR.glob("*.txt"))
-    # Exclude _JOB.txt and _CL.txt files from resume conversion
-    # (they get their own conversion calls)
-    candidates = [
-        f for f in txt_files
-        if not f.name.endswith("_JOB.txt")
-    ]
+    def _is_approved_tailored_resume(txt_path: Path) -> bool:
+        """Only convert resumes that were approved by the tailoring stage.
 
-    # Filter to those without a corresponding PDF
+        Prevents generating blank/low-quality PDFs from failed or empty .txt
+        artifacts.
+        """
+        report_path = txt_path.with_name(txt_path.stem + "_REPORT.json")
+        if not report_path.exists():
+            # Backwards compatibility: if there is no report, allow conversion
+            # but still skip obviously empty files.
+            try:
+                return txt_path.stat().st_size > 100
+            except Exception:
+                return True
+
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            return str(report.get("status", "")).strip().lower() == "approved"
+        except Exception:
+            try:
+                return txt_path.stat().st_size > 200
+            except Exception:
+                return True
+
+    txt_files = sorted(TAILORED_DIR.glob("*.txt"))
+    # Exclude _JOB.txt files from resume conversion.
+    candidates = [f for f in txt_files if not f.name.endswith("_JOB.txt")]
+    candidates = [f for f in candidates if _is_approved_tailored_resume(f)]
+
+    # Filter to those without a corresponding PDF (or where PDF is stale)
     to_convert: list[Path] = []
     for f in candidates:
         pdf_path = f.with_suffix(".pdf")
-        if not pdf_path.exists():
+        report_path = f.with_name(f.stem + "_REPORT.json")
+        try:
+            txt_m = f.stat().st_mtime
+        except Exception:
+            txt_m = 0
+        try:
+            pdf_m = pdf_path.stat().st_mtime if pdf_path.exists() else -1
+        except Exception:
+            pdf_m = -1
+        try:
+            rep_m = report_path.stat().st_mtime if report_path.exists() else 0
+        except Exception:
+            rep_m = 0
+
+        stale = (not pdf_path.exists()) or (pdf_m < max(txt_m, rep_m))
+        if stale:
             to_convert.append(f)
         if len(to_convert) >= limit:
             break

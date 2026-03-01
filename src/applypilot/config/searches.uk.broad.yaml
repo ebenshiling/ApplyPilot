@@ -1,0 +1,161 @@
+# ApplyPilot search configuration (UK) — broader tech search
+#
+# Copy to your workspace:
+#   C:\Users\<you>\.applypilot-data\searches.yaml
+#
+# Notes:
+# - UK-only filtering is handled by location.accept_patterns / reject_patterns.
+# - Include "Remote" in accept_patterns if you want remote roles.
+
+queries:
+  # Tier 1 — highest precision
+  - query: "Software Engineer"
+    tier: 1
+  - query: "Backend Engineer"
+    tier: 1
+  - query: "Full Stack Engineer"
+    tier: 1
+  - query: "Data Analyst"
+    tier: 1
+  - query: "Data Engineer"
+    tier: 1
+
+  # Tier 2 — broader
+  - query: "Python Developer"
+    tier: 2
+  - query: "Django Developer"
+    tier: 2
+  - query: "API Engineer"
+    tier: 2
+  - query: "DevOps Engineer"
+    tier: 2
+  - query: "Site Reliability Engineer"
+    tier: 2
+  - query: "Analytics Engineer"
+    tier: 2
+  - query: "BI Analyst"
+    tier: 2
+
+  # Tier 3 — widest net
+  - query: "Developer"
+    tier: 3
+  - query: "Engineer"
+    tier: 3
+  - query: "Data"
+    tier: 3
+
+locations:
+  - location: "London, UK"
+    remote: false
+  - location: "Manchester, UK"
+    remote: false
+  - location: "Birmingham, UK"
+    remote: false
+  - location: "Leeds, UK"
+    remote: false
+  - location: "Bristol, UK"
+    remote: false
+  - location: "Edinburgh, UK"
+    remote: false
+  - location: "Glasgow, UK"
+    remote: false
+  - location: "Cardiff, UK"
+    remote: false
+  - location: "Belfast, UK"
+    remote: false
+  - location: "Remote"
+    remote: true
+
+# Location filtering (applies to JobSpy, Workday discovery, and smart extract)
+location:
+  accept_patterns:
+    - "United Kingdom"
+    - "UK"
+    - "England"
+    - "Scotland"
+    - "Wales"
+    - "Northern Ireland"
+    - "London"
+    - "Manchester"
+    - "Birmingham"
+    - "Leeds"
+    - "Liverpool"
+    - "Bristol"
+    - "Sheffield"
+    - "Nottingham"
+    - "Newcastle"
+    - "Leicester"
+    - "Glasgow"
+    - "Edinburgh"
+    - "Cardiff"
+    - "Belfast"
+    - "Remote"
+    - "Hybrid"
+    - "Work from home"
+    - "WFH"
+
+  reject_patterns:
+    - "United States"
+    - "USA"
+    - "U.S."
+    - "Canada"
+    - "India"
+    - "Philippines"
+    - "Nigeria"
+    - "Ghana"
+    - "Pakistan"
+    - "Kenya"
+    - "South Africa"
+    - "Sydney"
+    - "Melbourne"
+    - "Singapore"
+    - "Berlin"
+    - "Amsterdam"
+    - "Paris"
+    - "Madrid"
+    - "Onsite only"
+    - "On-site only"
+    - "in office only"
+
+country: "UK"
+
+boards:
+  - indeed
+  - linkedin
+  - glassdoor
+  - google
+  - zip_recruiter
+
+defaults:
+  results_per_site: 75
+  hours_old: 168
+
+# Keep Workday discovery reasonable when using broad tiers
+workday_max_tier: 2
+workday_location_filter: true
+
+exclude_titles:
+  - "senior"
+  - "snr"
+  - "sr "
+  - "lead"
+  - "principal"
+  - "staff"
+  - "head of"
+  - "director"
+  - "vp"
+  - "vice president"
+  - "manager"
+  - "chief"
+  - "architect"
+  - "intern"
+  - "internship"
+  - "graduate"
+  - "phd"
+  - "security clearance"
+  - "DV clearance"
+  - "SC clearance"
+
+# Titles to skip during apply (case-insensitive substring match).
+skip_titles:
+  - "bi engineer (mid-level)"

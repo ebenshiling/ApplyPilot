@@ -1,12 +1,96 @@
-"""ApplyPilot configuration: paths, platform detection, user data."""
+"""ApplyPilot configuration: paths, platform detection, user data.
+
+By default, ApplyPilot stores user data under the user's home directory.
+
+Directory selection order:
+1) APPLYPILOT_DIR environment variable (explicit override)
+2) ~/.applypilot (backwards compatible if it already contains data)
+3) ~/.applypilot-data (preferred new default if it already contains data)
+4) ~/.applypilot (fresh install default)
+"""
 
 import os
 import platform
 import shutil
 from pathlib import Path
 
+
+def _dir_has_user_data(p: Path) -> bool:
+    """Heuristic: does this dir look like an ApplyPilot workspace?"""
+    try:
+        return any(
+            (
+                (p / ".env").exists(),
+                (p / "applypilot.db").exists(),
+                (p / "profile.json").exists(),
+                (p / "searches.yaml").exists(),
+                (p / "resume.txt").exists(),
+            )
+        )
+    except Exception:
+        return False
+
+
+def _dir_completeness(p: Path) -> int:
+    """Prefer the directory with more actual user config present."""
+    score = 0
+    try:
+        if (p / ".env").exists():
+            score += 3
+        if (p / "profile.json").exists():
+            score += 3
+        if (p / "resume.txt").exists():
+            score += 2
+        if (p / "searches.yaml").exists():
+            score += 2
+        if (p / "applypilot.db").exists():
+            score += 1
+    except Exception:
+        return 0
+    return score
+
+
+def _select_app_dir() -> Path:
+    # Explicit override
+    env = (os.environ.get("APPLYPILOT_DIR", "") or "").strip()
+    if env:
+        return Path(env).expanduser()
+
+    home = Path.home()
+    legacy = home / ".applypilot"
+    preferred = home / ".applypilot-data"
+
+    # Backwards compatible: if legacy already holds data, keep using it.
+    legacy_has = _dir_has_user_data(legacy)
+    preferred_has = _dir_has_user_data(preferred)
+
+    if legacy_has and preferred_has:
+        # If both exist, pick the more complete workspace (common when the DB
+        # was created under ~/.applypilot but the config lives under
+        # ~/.applypilot-data).
+        return preferred if _dir_completeness(preferred) > _dir_completeness(legacy) else legacy
+
+    if legacy_has:
+        return legacy
+
+    # If preferred holds data (common on Windows setups), use it.
+    if preferred_has:
+        return preferred
+
+    # Fresh install: prefer the new workspace location.
+    if not legacy.exists() and not preferred.exists():
+        return preferred
+
+    # If someone created the preferred dir (but it's empty), prefer it
+    # when legacy doesn't exist yet.
+    if preferred.exists() and not legacy.exists():
+        return preferred
+
+    return legacy
+
+
 # User data directory — all user-specific files live here
-APP_DIR = Path(os.environ.get("APPLYPILOT_DIR", Path.home() / ".applypilot"))
+APP_DIR = _select_app_dir()
 
 # Core paths
 DB_PATH = APP_DIR / "applypilot.db"
@@ -44,7 +128,8 @@ def get_chrome_path() -> str:
     if system == "Windows":
         candidates = [
             Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Google/Chrome/Application/chrome.exe",
-            Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Google/Chrome/Application/chrome.exe",
+            Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"))
+            / "Google/Chrome/Application/chrome.exe",
             Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/Application/chrome.exe",
         ]
     elif system == "Darwin":
@@ -69,9 +154,7 @@ def get_chrome_path() -> str:
         if found:
             return found
 
-    raise FileNotFoundError(
-        "Chrome/Chromium not found. Install Chrome or set CHROME_PATH environment variable."
-    )
+    raise FileNotFoundError("Chrome/Chromium not found. Install Chrome or set CHROME_PATH environment variable.")
 
 
 def get_chrome_user_data() -> Path:
@@ -94,28 +177,36 @@ def ensure_dirs():
 def load_profile() -> dict:
     """Load user profile from ~/.applypilot/profile.json."""
     import json
+
     if not PROFILE_PATH.exists():
-        raise FileNotFoundError(
-            f"Profile not found at {PROFILE_PATH}. Run `applypilot init` first."
-        )
+        raise FileNotFoundError(f"Profile not found at {PROFILE_PATH}. Run `applypilot init` first.")
     return json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
 
 
 def load_search_config() -> dict:
     """Load search configuration from ~/.applypilot/searches.yaml."""
     import yaml
+
+    # Optional override: allow per-run / per-session search config.
+    override = (os.environ.get("APPLYPILOT_SEARCHES_PATH", "") or "").strip()
+    if override:
+        p = Path(override).expanduser()
+        if p.exists():
+            return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+
     if not SEARCH_CONFIG_PATH.exists():
         # Fall back to package-shipped example
         example = CONFIG_DIR / "searches.example.yaml"
         if example.exists():
             return yaml.safe_load(example.read_text(encoding="utf-8"))
         return {}
-    return yaml.safe_load(SEARCH_CONFIG_PATH.read_text(encoding="utf-8"))
+    return yaml.safe_load(SEARCH_CONFIG_PATH.read_text(encoding="utf-8")) or {}
 
 
 def load_sites_config() -> dict:
     """Load sites.yaml configuration (sites list, manual_ats, blocked, etc.)."""
     import yaml
+
     path = CONFIG_DIR / "sites.yaml"
     if not path.exists():
         return {}
@@ -164,6 +255,7 @@ def load_base_urls() -> dict[str, str | None]:
 DEFAULTS = {
     "min_score": 7,
     "max_apply_attempts": 3,
+    "apply_lock_ttl_minutes": 20,
     "max_tailor_attempts": 5,
     "poll_interval": 60,
     "apply_timeout": 300,
@@ -174,10 +266,25 @@ DEFAULTS = {
 def load_env():
     """Load environment variables from ~/.applypilot/.env if it exists."""
     from dotenv import load_dotenv
+
     if ENV_PATH.exists():
         load_dotenv(ENV_PATH)
     # Also try CWD .env as fallback
     load_dotenv()
+
+
+def get_site_login_password(profile: dict | None = None) -> str:
+    """Return default job-site login password from environment.
+
+    Source is `.env` via `APPLYPILOT_SITE_PASSWORD` (or legacy
+    `JOB_SITE_PASSWORD`). This deliberately does not read profile.json.
+    """
+    load_env()
+
+    env_pw = (os.environ.get("APPLYPILOT_SITE_PASSWORD") or os.environ.get("JOB_SITE_PASSWORD") or "").strip()
+    if env_pw:
+        return env_pw
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -235,18 +342,19 @@ def check_tier(required: int, feature: str) -> None:
         return
 
     from rich.console import Console
+
     _console = Console(stderr=True)
 
     missing: list[str] = []
     if required >= 2 and not any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL")):
-        missing.append("LLM API key — run [bold]applypilot init[/bold] or set GEMINI_API_KEY")
+        missing.append("LLM API key - run [bold]applypilot init[/bold] or set GEMINI_API_KEY")
     if required >= 3:
         if not shutil.which("claude"):
-            missing.append("Claude Code CLI — install from [bold]https://claude.ai/code[/bold]")
+            missing.append("Claude Code CLI - install from [bold]https://claude.ai/code[/bold]")
         try:
             get_chrome_path()
         except FileNotFoundError:
-            missing.append("Chrome/Chromium — install or set CHROME_PATH")
+            missing.append("Chrome/Chromium - install or set CHROME_PATH")
 
     _console.print(
         f"\n[red]'{feature}' requires {TIER_LABELS.get(required, f'Tier {required}')} (Tier {required}).[/red]\n"
