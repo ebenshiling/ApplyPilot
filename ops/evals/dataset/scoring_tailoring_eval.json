@@ -1,0 +1,241 @@
+{
+  "version": 1,
+  "relaxed_threshold": 0.9,
+  "profile_fixture": {
+    "skills_boundary": {
+      "languages": [
+        "SQL",
+        "Python"
+      ],
+      "analytics": [
+        "Power BI",
+        "Tableau"
+      ],
+      "tools": [
+        "Git"
+      ]
+    },
+    "resume_facts": {
+      "preserved_companies": [
+        "Acme Corp"
+      ],
+      "preserved_projects": [
+        "Sales Dashboard Revamp"
+      ],
+      "preserved_school": "Example University",
+      "real_metrics": [
+        "40%",
+        "12"
+      ]
+    },
+    "tailoring": {
+      "role_pack_override": "auto",
+      "draft_candidates": 3,
+      "safe_synonyms": {
+        "sql": [
+          "query optimization"
+        ]
+      }
+    }
+  },
+  "resume_text": "Built SQL reports that reduced errors by 40%. Improved pipeline latency by 12%.",
+  "suites": {
+    "score_parser": [
+      {
+        "name": "json_shape",
+        "raw": "{\"score\": 8, \"keywords\": [\"python\", \"sql\"], \"reasoning\": \"Strong overlap\", \"confidence\": 0.82}",
+        "expected": {
+          "score": 8,
+          "confidence": 0.82,
+          "keywords_contains": "python"
+        }
+      },
+      {
+        "name": "legacy_shape",
+        "raw": "SCORE: 7\nKEYWORDS: sql, tableau\nREASONING: Good fit\nCONFIDENCE: 0.55",
+        "expected": {
+          "score": 7,
+          "confidence": 0.55,
+          "keywords_contains": "sql"
+        }
+      },
+      {
+        "name": "json_clamping",
+        "raw": "{\"score\": 99, \"keywords\": [\"etl\"], \"reasoning\": \"ok\", \"confidence\": 2}",
+        "expected": {
+          "score": 10,
+          "confidence": 1.0,
+          "keywords_contains": "etl"
+        }
+      }
+    ],
+    "fact_citations": [
+      {
+        "name": "valid_citations",
+        "required_fact_ids": 2,
+        "data_template": {
+          "experience": [
+            {
+              "header": "Data Analyst at Acme Corp",
+              "subtitle": "2022-2025",
+              "bullets": [
+                "Built SQL reporting workflows and reduced manual effort by 40% [{fact1}]",
+                "Stabilized ETL checks with Python scripts [{fact2}]"
+              ]
+            }
+          ],
+          "projects": []
+        },
+        "should_pass": true
+      },
+      {
+        "name": "missing_citation",
+        "required_fact_ids": 1,
+        "data_template": {
+          "experience": [
+            {
+              "header": "Data Analyst at Acme Corp",
+              "subtitle": "2022-2025",
+              "bullets": [
+                "No source citation on this bullet"
+              ]
+            }
+          ],
+          "projects": []
+        },
+        "should_pass": false
+      }
+    ],
+    "role_pack": [
+      {
+        "name": "data_bi",
+        "job": {
+          "title": "Senior Data Analyst",
+          "full_description": "analytics dashboards reporting stakeholders"
+        },
+        "expected_pack": "data_bi"
+      },
+      {
+        "name": "support",
+        "job": {
+          "title": "IT Support Analyst",
+          "full_description": "service desk incident response and ticket handling"
+        },
+        "expected_pack": "support"
+      },
+      {
+        "name": "engineering",
+        "job": {
+          "title": "Platform Engineer",
+          "full_description": "backend architecture reliability and software delivery"
+        },
+        "expected_pack": "engineering"
+      }
+    ],
+    "jd_coverage": [
+      {
+        "name": "coverage_positive",
+        "job_description": "Looking for SQL, Power BI dashboarding, and data analysis experience.",
+        "keyword_bank": {
+          "prompt_keywords": [
+            "SQL",
+            "Power BI",
+            "stakeholder communication"
+          ]
+        },
+        "coverage_text": "Built SQL data models and Power BI dashboards for executive reporting.",
+        "min_ratio": 0.5
+      },
+      {
+        "name": "coverage_negative",
+        "job_description": "Looking for SQL and Tableau experience.",
+        "keyword_bank": {
+          "prompt_keywords": [
+            "SQL",
+            "Tableau"
+          ]
+        },
+        "coverage_text": "Focused on communication planning with no tooling details.",
+        "max_ratio": 0.4
+      }
+    ],
+    "quant_consistency": [
+      {
+        "name": "quant_valid",
+        "data": {
+          "summary": "Improved reporting reliability by 40%.",
+          "experience": [
+            {
+              "bullets": [
+                "Reduced errors by 40% [F1]"
+              ]
+            }
+          ],
+          "projects": [
+            {
+              "bullets": [
+                "Shipped dashboard updates in 12 days [F2]"
+              ]
+            }
+          ]
+        },
+        "evidence": [
+          "40",
+          "12",
+          "40%"
+        ],
+        "should_pass": true
+      },
+      {
+        "name": "quant_invalid",
+        "data": {
+          "summary": "Improved reporting reliability by 99%.",
+          "experience": [
+            {
+              "bullets": [
+                "Reduced errors by 99% [F1]"
+              ]
+            }
+          ],
+          "projects": []
+        },
+        "evidence": [
+          "40",
+          "12",
+          "40%"
+        ],
+        "should_pass": false
+      }
+    ],
+    "rank_order": [
+      {
+        "name": "higher_quality_ranked_first",
+        "good": {
+          "text": "Built SQL models and BI dashboards improving reporting quality with measurable impact.",
+          "coverage_ratio": 0.9,
+          "validator_errors": [],
+          "validator_warnings": [],
+          "citation_errors": [],
+          "quant_errors": []
+        },
+        "bad": {
+          "text": "Worked on things.",
+          "coverage_ratio": 0.1,
+          "validator_errors": [
+            "err1",
+            "err2"
+          ],
+          "validator_warnings": [
+            "warn1"
+          ],
+          "citation_errors": [
+            "cite"
+          ],
+          "quant_errors": [
+            "q"
+          ]
+        }
+      }
+    ]
+  }
+}
