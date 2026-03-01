@@ -1,0 +1,18 @@
+services:
+  applypilot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: applypilot-dashboard
+    ports:
+      - "8765:8765"
+    environment:
+      APPLYPILOT_DIR: /data/workspace
+      APPLYPILOT_MULTI_ROOT: /data/multi
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./docker-data/workspace:/data/workspace
+      - ./docker-data/multi:/data/multi
+      - ./docker-data/transfer:/transfer
+    command: ["applypilot", "dashboard-serve", "--host", "0.0.0.0", "--port", "8765", "--multi-user"]
+    restart: unless-stopped

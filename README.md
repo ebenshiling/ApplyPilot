@@ -42,6 +42,21 @@ python scripts/bootstrap.py
 # optional: python scripts/bootstrap.py --with-playwright-browsers
 ```
 
+If you want zero host dependency setup, run with Docker:
+
+```bash
+docker compose up --build
+# dashboard: http://127.0.0.1:8765
+```
+
+First build is heavier (installs Chromium + system deps) so browser-driven stages also work in-container.
+
+Windows PowerShell helper:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-docker.ps1 -Rebuild
+```
+
 ---
 
 ## Two Paths
@@ -149,6 +164,25 @@ Notes:
 - `--include-env` copies API keys from `.env` (share archive carefully).
 - `--include-generated` copies `tailored_resumes/` and `cover_letters/`.
 - If you want a clean start without old job history, export with `--no-db`.
+
+### Docker users
+
+Container data is persisted under `docker-data/` in this repo:
+- `docker-data/workspace` -> single-user workspace (`APPLYPILOT_DIR`)
+- `docker-data/multi` -> multi-user auth/workspaces (`APPLYPILOT_MULTI_ROOT`)
+- `docker-data/transfer` -> place transfer zip files here
+
+Import a transfer zip into Docker workspace:
+
+```bash
+docker compose run --rm applypilot applypilot workspace-import /transfer/applypilot-transfer-clean.zip --overwrite
+```
+
+Export from Docker workspace:
+
+```bash
+docker compose run --rm applypilot applypilot workspace-export --out /transfer/applypilot-transfer.zip --include-env --include-generated
+```
 
 ---
 
