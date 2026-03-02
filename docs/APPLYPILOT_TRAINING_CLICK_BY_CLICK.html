@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ApplyPilot Click-by-Click Training</title>
+  <style>
+    body { margin: 0; color: #0f172a; font-family: "Segoe UI", Arial, sans-serif; }
+    main { max-width: 980px; margin: 0 auto; padding: 24px 20px 40px; }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    h2 { margin: 24px 0 10px; border-top: 1px solid #cbd5e1; padding-top: 10px; font-size: 22px; }
+    h3 { margin: 14px 0 6px; font-size: 17px; }
+    p, li { font-size: 14px; line-height: 1.45; }
+    .lead { color: #475569; }
+    .step { border: 1px solid #cbd5e1; border-radius: 10px; padding: 12px; margin: 10px 0 14px; background: #f8fafc; }
+    .step strong { color: #0f766e; }
+    img { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; }
+    code { font-family: ui-monospace, Consolas, monospace; background: #eef2ff; border: 1px solid #dbeafe; padding: 1px 4px; border-radius: 4px; }
+    .note { background: #ecfeff; border-left: 4px solid #0f766e; padding: 10px 12px; margin: 10px 0; }
+    @media print {
+      main { padding: 8mm 6mm; }
+      .step { break-inside: avoid-page; }
+      h2 { break-after: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ApplyPilot Training: Click-by-Click</h1>
+    <p class="lead">Use this when onboarding new users. Follow each step exactly in dashboard mode.</p>
+
+    <div class="note">
+      Start dashboard first:<br>
+      <code>applypilot dashboard-serve --multi-user</code> or <code>docker compose up --build</code>
+    </div>
+
+    <h2>Step 1: Open Dashboard and Understand Main Areas</h2>
+    <div class="step">
+      <ol>
+        <li>Open <code>http://127.0.0.1:8765</code>.</li>
+        <li>Locate three key areas: job filters, pipeline controls, setup panel.</li>
+        <li>Use this screen as the main operating center.</li>
+      </ol>
+      <img src="screenshots/01_dashboard_overview.png" alt="Dashboard overview">
+    </div>
+
+    <h2>Step 2: Use Pipeline Controls Correctly</h2>
+    <div class="step">
+      <ol>
+        <li>Run stages in order: Discover -> Enrich -> Score.</li>
+        <li>Use toggles like <strong>Selected only</strong> when targeting specific jobs.</li>
+        <li>Use Stop if a run is taking too long.</li>
+      </ol>
+      <img src="screenshots/02_pipeline_controls.png" alt="Pipeline controls">
+    </div>
+
+    <h2>Step 3: Manage Jobs from Card Actions</h2>
+    <div class="step">
+      <ol>
+        <li>Click <strong>Pick</strong> on high-fit jobs you want to tailor/apply first.</li>
+        <li>Use <strong>Applied</strong>, <strong>Failed</strong>, <strong>Block</strong> as needed.</li>
+        <li>Avoid deleting jobs unless they are clearly irrelevant.</li>
+      </ol>
+      <img src="screenshots/03_job_card_actions.png" alt="Job card actions">
+    </div>
+
+    <h2>Step 4: Complete Full Profile Editor (Required)</h2>
+    <div class="step">
+      <ol>
+        <li>Open Setup -> <strong>Full Profile Editor</strong>.</li>
+        <li>Fill all critical fields: name/email, work authorization, compensation, experience.</li>
+        <li>Click <strong>Save full profile</strong>.</li>
+      </ol>
+      <img src="screenshots/04_full_profile_editor.png" alt="Full profile editor">
+    </div>
+
+    <h2>Step 5: Configure Tailoring Intelligence</h2>
+    <div class="step">
+      <ol>
+        <li>Keep Role Pack on <strong>Auto</strong> unless you are role-specific.</li>
+        <li>Use Resume Template Builder to add skills, certifications, education, metrics.</li>
+        <li>Click <strong>Save tailoring config</strong> after changes.</li>
+      </ol>
+      <img src="screenshots/05_tailoring_intelligence.png" alt="Tailoring intelligence panel">
+    </div>
+
+    <h2>Step 6: Build Search Config</h2>
+    <div class="step">
+      <ol>
+        <li>Use builder mode for non-technical users.</li>
+        <li>Set countries/locations/roles/results thoughtfully.</li>
+        <li>Save <code>searches.yaml</code> and run Discover again.</li>
+      </ol>
+      <img src="screenshots/06_search_config_builder.png" alt="Search config builder">
+    </div>
+
+    <h2>Step 7: Tailor Only Selected Jobs (Best Practice)</h2>
+    <div class="step">
+      <ol>
+        <li>Pick jobs first.</li>
+        <li>Tick <strong>Selected only</strong> in pipeline controls.</li>
+        <li>Run <strong>Tailor</strong> or click <strong>Regenerate tailored resumes now</strong>.</li>
+      </ol>
+      <p>This prevents wasting tokens on low-priority jobs and improves output quality.</p>
+    </div>
+
+    <h2>Step 8: Final QA Before Applying</h2>
+    <div class="step">
+      <ol>
+        <li>Open tailored resume and cover letter artifacts for top jobs.</li>
+        <li>Check factual accuracy (companies, dates, metrics).</li>
+        <li>Run apply stage (dry-run first if needed).</li>
+      </ol>
+    </div>
+
+    <h2>Trainer Checklist</h2>
+    <ul>
+      <li>User has unique account (multi-user mode) and isolated workspace.</li>
+      <li>User has <code>GEMINI_API_KEY</code> in their own workspace <code>.env</code>.</li>
+      <li>Profile, resume text, and searches are saved successfully.</li>
+      <li>User can run discover/enrich/score and tailor selected jobs.</li>
+      <li>User understands Applied/Failed/Block lifecycle actions.</li>
+    </ul>
+
+    <p class="lead">Training complete.</p>
+  </main>
+</body>
+</html>

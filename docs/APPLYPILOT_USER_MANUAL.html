@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ApplyPilot User Manual</title>
+  <style>
+    :root {
+      --fg: #0f172a;
+      --muted: #475569;
+      --line: #cbd5e1;
+      --accent: #0f766e;
+      --bg-soft: #f8fafc;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      color: var(--fg);
+      font-family: "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      line-height: 1.45;
+      background: #fff;
+    }
+    .page {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 28px 24px 56px;
+    }
+    h1, h2, h3, h4 { margin: 0 0 10px; }
+    h1 { font-size: 34px; letter-spacing: -0.02em; }
+    h2 { font-size: 23px; margin-top: 30px; padding-top: 10px; border-top: 1px solid var(--line); }
+    h3 { font-size: 18px; margin-top: 20px; }
+    h4 { font-size: 15px; margin-top: 14px; }
+    p { margin: 8px 0; }
+    ul, ol { margin: 8px 0 8px 20px; }
+    li { margin: 4px 0; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: #eef2ff;
+      border: 1px solid #dbeafe;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: 0.92em;
+    }
+    pre {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: var(--bg-soft);
+      margin: 10px 0 12px;
+    }
+    pre code {
+      border: 0;
+      background: transparent;
+      padding: 0;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 10px 0 12px;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      padding: 8px;
+    }
+    th {
+      background: #ecfeff;
+    }
+    .lead {
+      color: var(--muted);
+      font-size: 16px;
+      margin-bottom: 8px;
+    }
+    .note {
+      border-left: 4px solid var(--accent);
+      background: #f0fdfa;
+      padding: 10px 12px;
+      margin: 10px 0;
+    }
+    .toc {
+      background: var(--bg-soft);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      margin: 14px 0 18px;
+    }
+    .muted { color: var(--muted); }
+    @media print {
+      .page { padding: 8mm 6mm 12mm; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <h1>ApplyPilot User Manual</h1>
+    <p class="lead">Complete setup and usage guide for dashboard + CLI, including multi-user, Docker, tailoring, workspace transfer, and troubleshooting.</p>
+    <p class="muted">Manual scope: repository build with Full Profile Editor, Resume Template Builder, Regenerate Tailored Resumes action, workspace export/import, and Docker runtime.</p>
+
+    <div class="toc">
+      <strong>Table of Contents</strong>
+      <ol>
+        <li>What ApplyPilot Does</li>
+        <li>Architecture and Data Model</li>
+        <li>Installation Paths (Pip, Repo, Docker)</li>
+        <li>First-Time Setup</li>
+        <li>Dashboard Guide (End-to-End)</li>
+        <li>Full Profile Editor Field Mapping</li>
+        <li>Tailoring and Resume Generation Logic</li>
+        <li>Pipeline Controls and Selective Runs</li>
+        <li>CLI Command Reference</li>
+        <li>Multi-User Operations</li>
+        <li>Workspace Transfer / Backup / Restore</li>
+        <li>Environment Variables</li>
+        <li>Recommended Daily Workflows</li>
+        <li>Troubleshooting Playbook</li>
+        <li>Security and Data Hygiene</li>
+      </ol>
+    </div>
+
+    <h2>1) What ApplyPilot Does</h2>
+    <p>ApplyPilot is an autonomous job pipeline. It discovers jobs, enriches descriptions, scores fit, tailors your resume, drafts cover letters, and can automate browser-based applications.</p>
+    <table>
+      <thead><tr><th>Stage</th><th>Purpose</th><th>Main Output</th></tr></thead>
+      <tbody>
+        <tr><td>Discover</td><td>Find jobs from configured sources</td><td>Rows in <code>applypilot.db</code></td></tr>
+        <tr><td>Enrich</td><td>Fetch complete job descriptions</td><td><code>full_description</code> populated</td></tr>
+        <tr><td>Score</td><td>Assign fit score vs your profile</td><td><code>fit_score</code>, reasoning</td></tr>
+        <tr><td>Tailor</td><td>Create per-job resume content</td><td><code>tailored_resumes/*</code></td></tr>
+        <tr><td>Cover</td><td>Generate per-job cover letters</td><td><code>cover_letters/*</code></td></tr>
+        <tr><td>PDF</td><td>Produce polished PDFs</td><td>PDF artifacts per job</td></tr>
+        <tr><td>Apply</td><td>Browser submission automation</td><td>Applied/failed status updates</td></tr>
+      </tbody>
+    </table>
+
+    <h2>2) Architecture and Data Model</h2>
+    <h3>Workspace basics</h3>
+    <ul>
+      <li><code>profile.json</code>: your profile data (personal, work auth, experience, skills boundaries, resume facts, tailoring controls, EEO defaults).</li>
+      <li><code>searches.yaml</code>: query, locations, boards, exclusions, defaults.</li>
+      <li><code>resume.txt</code>: source resume text used by scorer/tailor.</li>
+      <li><code>.env</code>: secrets and runtime settings (<code>GEMINI_API_KEY</code>, etc.).</li>
+      <li><code>applypilot.db</code>: jobs, scoring, pipeline state, status.</li>
+      <li><code>tailored_resumes/</code>, <code>cover_letters/</code>: generated artifacts.</li>
+    </ul>
+
+    <h3>Workspace location resolution</h3>
+    <ol>
+      <li>If <code>APPLYPILOT_DIR</code> is set, that path is used.</li>
+      <li>Otherwise the app auto-picks between <code>~/.applypilot</code> and <code>~/.applypilot-data</code> based on existing data completeness.</li>
+    </ol>
+
+    <h3>Tier gating</h3>
+    <ul>
+      <li>Tier 1 (Discovery): no LLM key required.</li>
+      <li>Tier 2 (AI scoring/tailoring): requires <code>GEMINI_API_KEY</code> (or OpenAI/local provider config).</li>
+      <li>Tier 3 (Auto-apply): requires Claude CLI + Chrome.</li>
+    </ul>
+
+    <h2>3) Installation Paths</h2>
+    <h3>Path A: Pip install (quick local)</h3>
+    <pre><code>pip install applypilot
+pip install --no-deps python-jobspy
+pip install pydantic tls-client requests markdownify regex
+applypilot init</code></pre>
+
+    <h3>Path B: Repo checkout + bootstrap</h3>
+    <pre><code>python scripts/bootstrap.py
+# optional browser binaries
+python scripts/bootstrap.py --with-playwright-browsers</code></pre>
+
+    <h3>Path C: Docker (no host dependency drift)</h3>
+    <pre><code>docker compose up --build
+# Dashboard: http://127.0.0.1:8765</code></pre>
+    <p>PowerShell helper:</p>
+    <pre><code>powershell -ExecutionPolicy Bypass -File .\scripts\run-docker.ps1 -Rebuild</code></pre>
+
+    <h2>4) First-Time Setup</h2>
+    <h3>Minimum required to tailor</h3>
+    <ol>
+      <li>Add <code>GEMINI_API_KEY</code> to workspace <code>.env</code>.</li>
+      <li>Save profile data (quick profile or full profile editor).</li>
+      <li>Paste/upload resume content (at least <code>resume.txt</code>).</li>
+      <li>Configure <code>searches.yaml</code>.</li>
+      <li>Run <code>discover -&gt; enrich -&gt; score -&gt; tailor</code>.</li>
+    </ol>
+
+    <div class="note">
+      <strong>Docker multi-user note:</strong> each user has their own workspace. User secrets go in<br>
+      <code>docker-data/multi/workspaces/&lt;username&gt;/.env</code>.
+    </div>
+
+    <h2>5) Dashboard Guide (End-to-End)</h2>
+    <h3>A) Top controls and filtering</h3>
+    <ul>
+      <li>Score quick filters: 7+, 8+, 9+.</li>
+      <li>Text filters for role/site/status.</li>
+      <li>Bulk delete shown or role subset.</li>
+    </ul>
+
+    <h3>B) Job cards</h3>
+    <ul>
+      <li><strong>Pick/Unpick</strong>: mark jobs as selected for targeted pipeline runs.</li>
+      <li><strong>Applied / Failed / Block / Delete</strong> actions.</li>
+      <li>Copy helper CLI commands per job.</li>
+      <li>Expandable full job description panel.</li>
+    </ul>
+
+    <h3>C) Pipeline Controls</h3>
+    <ul>
+      <li>One-click stage groups: <code>All</code>, <code>Prep-only</code>, <code>Apply-only</code>.</li>
+      <li>Single stages: discover, enrich, score, tailor, cover, pdf.</li>
+      <li>Runtime toggles: stream, dry-run, selected-only, skip discovery engines.</li>
+      <li>Stop and clear run controls.</li>
+      <li>Pipeline Console: recent runs, logs, status polling.</li>
+    </ul>
+
+    <h3>D) Setup panel</h3>
+    <h4>Diagnostics</h4>
+    <ul>
+      <li>Health ping, Setup API, Pipeline API checks.</li>
+      <li>Copy debug payload for support/debugging.</li>
+    </ul>
+
+    <h4>Quick Profile card</h4>
+    <ul>
+      <li>Fast fields: name/email/phone/city/country/linkedin/target role/years.</li>
+      <li>Use for quick edits only.</li>
+    </ul>
+
+    <h4>Full Profile Editor card</h4>
+    <ul>
+      <li>Comprehensive structured editing for all major profile sections.</li>
+      <li>Includes dropdowns and yes/no checkboxes for consistency.</li>
+      <li>Advanced JSON area for direct patch editing.</li>
+      <li>Buttons: Apply form to JSON, Apply JSON to form, Sync from loaded profile, Save full profile.</li>
+    </ul>
+
+    <h4>Resume card</h4>
+    <ul>
+      <li>Save <code>resume.txt</code> (primary input for scoring/tailoring).</li>
+      <li>Upload <code>resume.pdf</code> (optional reference).</li>
+    </ul>
+
+    <h4>Tailoring Intelligence card</h4>
+    <ul>
+      <li><code>Role pack</code>: auto/data_bi/engineering/support.</li>
+      <li><code>Draft candidates</code>: 2-3.</li>
+      <li>Resume Template Builder (non-JSON editing for skills/facts/sections).</li>
+      <li>Raw JSON editors for skills boundary, facts, sections, validation, synonyms.</li>
+      <li><strong>Regenerate tailored resumes now</strong>: persists settings and runs tailor stage.</li>
+    </ul>
+
+    <h4>Job Search Config card</h4>
+    <ul>
+      <li>Builder mode: country/locations/roles/boards/smart sites/exclusions.</li>
+      <li>Advanced YAML mode for full direct editing of <code>searches.yaml</code>.</li>
+      <li>Validation guardrails for board names and numeric limits.</li>
+    </ul>
+
+    <h2>6) Full Profile Editor Field Mapping</h2>
+    <table>
+      <thead><tr><th>Editor Section</th><th>Fields</th><th>Writes To</th></tr></thead>
+      <tbody>
+        <tr><td>Identity &amp; Contact</td><td>Name, preferred name, email, phone, address, city/state/country, postal, LinkedIn/GitHub/portfolio/site</td><td><code>profile.personal.*</code></td></tr>
+        <tr><td>Work Authorization</td><td>Authorized to work, sponsorship, permit type</td><td><code>profile.work_authorization.*</code></td></tr>
+        <tr><td>Availability</td><td>Start date, full-time checkbox, contract checkbox</td><td><code>profile.availability.*</code></td></tr>
+        <tr><td>Compensation</td><td>Expectation, currency, min/max, conversion note</td><td><code>profile.compensation.*</code></td></tr>
+        <tr><td>Experience</td><td>Years, education level, title, company, target role</td><td><code>profile.experience.*</code></td></tr>
+        <tr><td>EEO Voluntary</td><td>Gender, race/ethnicity, veteran, disability</td><td><code>profile.eeo_voluntary.*</code></td></tr>
+      </tbody>
+    </table>
+
+    <h2>7) Tailoring and Resume Generation Logic</h2>
+    <h3>How tailoring decides content</h3>
+    <ol>
+      <li>Reads each job description and extracts required terms/signals.</li>
+      <li>Uses your profile boundaries/facts to keep claims grounded.</li>
+      <li>Rewrites summary + bullets + projects per job context.</li>
+      <li>Outputs per-job artifacts, not one generic resume.</li>
+    </ol>
+
+    <h3>Current hardening behavior</h3>
+    <ul>
+      <li>Filename prefers human name over username where possible.</li>
+      <li>Projects section gets fallback content if model output is empty.</li>
+      <li>Education section preserves key school/education-level context when sparse.</li>
+      <li>Resume sections accept list and legacy newline-string inputs.</li>
+    </ul>
+
+    <h3>Selective tailoring (important)</h3>
+    <ol>
+      <li>Pick desired jobs on cards.</li>
+      <li>Enable <code>Selected only</code> in Pipeline Controls.</li>
+      <li>Run <code>Tailor</code> stage (or Regenerate tailored resumes now).</li>
+    </ol>
+
+    <h2>8) Pipeline Controls and Safe Execution</h2>
+    <h3>Recommended default</h3>
+    <ul>
+      <li>Discover -&gt; Enrich -&gt; Score first (validate quality and fit).</li>
+      <li>Then tailor selected high-fit jobs only.</li>
+      <li>Use dry-run for apply stage before full submission.</li>
+    </ul>
+
+    <h3>Stage combos</h3>
+    <pre><code># Dashboard equivalents (CLI)
+applypilot run discover enrich score
+applypilot run tailor cover pdf
+applypilot run all</code></pre>
+
+    <h2>9) CLI Command Reference</h2>
+    <h3>Core</h3>
+    <pre><code>applypilot init
+applypilot run [discover enrich score tailor cover pdf all]
+applypilot apply
+applypilot status
+applypilot jobs
+applypilot dashboard
+applypilot dashboard-serve --multi-user</code></pre>
+
+    <h3>Run options</h3>
+    <pre><code>applypilot run --min-score 7 --workers 1 --stream --dry-run</code></pre>
+
+    <h3>Apply options</h3>
+    <pre><code>applypilot apply --workers 2 --min-score 8 --dry-run
+applypilot apply --url "https://..."
+applypilot apply --mark-applied "https://..."
+applypilot apply --mark-failed "https://..." --fail-reason "captcha"
+applypilot apply --reset-failed</code></pre>
+
+    <h3>Utility commands</h3>
+    <pre><code>applypilot score --limit 25 --rescore
+applypilot reset --all --min-score 7
+applypilot profile-sync
+applypilot workspace-export --out ~/applypilot-transfer.zip --include-env --include-generated
+applypilot workspace-import ~/applypilot-transfer.zip --overwrite</code></pre>
+
+    <h2>10) Multi-User Operations</h2>
+    <h3>What isolation means</h3>
+    <ul>
+      <li>Each account gets an isolated workspace folder and DB artifacts.</li>
+      <li>User A profile/searches/resume do not overwrite User B data.</li>
+      <li>In Docker multi-user mode, per-user roots are under <code>docker-data/multi/workspaces/&lt;username&gt;</code>.</li>
+    </ul>
+
+    <h3>Important operational rule</h3>
+    <p>API keys and site passwords are per-user in <code>.env</code>. If tailoring says key missing, check the logged-in user workspace.</p>
+
+    <h2>11) Workspace Transfer / Backup / Restore</h2>
+    <h3>Backup current workspace</h3>
+    <pre><code>applypilot workspace-export --out ~/applypilot-transfer.zip --include-env --include-generated
+# clean export (no db, no generated):
+applypilot workspace-export --out ~/applypilot-transfer-clean.zip --no-db --no-generated --include-env</code></pre>
+
+    <h3>Restore on another machine</h3>
+    <pre><code>applypilot workspace-import ~/applypilot-transfer.zip --overwrite</code></pre>
+
+    <h3>Docker transfer commands</h3>
+    <pre><code>docker compose run --rm applypilot applypilot workspace-import /transfer/applypilot-transfer-clean.zip --overwrite
+docker compose run --rm applypilot applypilot workspace-export --out /transfer/applypilot-transfer.zip --include-env --include-generated</code></pre>
+
+    <h2>12) Environment Variables (Most Used)</h2>
+    <table>
+      <thead><tr><th>Variable</th><th>Purpose</th><th>Typical Value</th></tr></thead>
+      <tbody>
+        <tr><td><code>GEMINI_API_KEY</code></td><td>LLM for scoring/tailoring/cover</td><td>your key</td></tr>
+        <tr><td><code>OPENAI_API_KEY</code></td><td>Alternative LLM provider</td><td>optional</td></tr>
+        <tr><td><code>LLM_URL</code></td><td>Local/hosted custom LLM endpoint</td><td>optional</td></tr>
+        <tr><td><code>LLM_MODEL</code></td><td>Model override</td><td><code>gemini-2.5-flash</code></td></tr>
+        <tr><td><code>CAPSOLVER_API_KEY</code></td><td>Captcha solving for apply</td><td>optional</td></tr>
+        <tr><td><code>APPLYPILOT_SITE_PASSWORD</code></td><td>Default site login password</td><td>optional</td></tr>
+        <tr><td><code>APPLYPILOT_DIR</code></td><td>Workspace override</td><td>path</td></tr>
+        <tr><td><code>APPLYPILOT_MULTI_ROOT</code></td><td>Multi-user root (server)</td><td>path</td></tr>
+        <tr><td><code>SMARTE_ENABLED</code></td><td>Enable smart extractor discover source</td><td><code>0</code> or <code>1</code></td></tr>
+        <tr><td><code>SMARTE_JUDGE</code></td><td>Smart extract LLM judge switch</td><td><code>0</code> / <code>1</code></td></tr>
+        <tr><td><code>SMARTE_MAX_TARGETS</code></td><td>Cap smart extract targets/run</td><td><code>20</code></td></tr>
+        <tr><td><code>LLM_MIN_INTERVAL</code></td><td>Global LLM throttle (sec)</td><td><code>2</code></td></tr>
+        <tr><td><code>LLM_COOLDOWN</code></td><td>Extra pause before strategy calls</td><td><code>2</code></td></tr>
+      </tbody>
+    </table>
+
+    <h2>13) Recommended Daily Workflows</h2>
+    <h3>Workflow A: High-volume search + selective tailoring</h3>
+    <ol>
+      <li>Run discover/enrich/score on broad queries.</li>
+      <li>Filter by score 7+ and role keywords.</li>
+      <li>Pick only best-matching jobs.</li>
+      <li>Run tailor on selected only.</li>
+      <li>Review outputs, then apply.</li>
+    </ol>
+
+    <h3>Workflow B: Daily maintenance</h3>
+    <ol>
+      <li>Refresh searches and run discover.</li>
+      <li>Block noise domains/jobs aggressively.</li>
+      <li>Keep profile facts and metrics up to date.</li>
+      <li>Archive backups weekly with workspace-export.</li>
+    </ol>
+
+    <h2>14) Troubleshooting Playbook</h2>
+    <table>
+      <thead><tr><th>Symptom</th><th>Likely Cause</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr><td><code>csrf_failed</code> in dashboard action</td><td>POST action not carrying/validating session csrf token (or stale cookies)</td><td>Hard refresh + re-login; ensure latest build; restart server/container</td></tr>
+        <tr><td>"requires Tier 2" / missing key</td><td>No LLM key in active workspace</td><td>Add <code>GEMINI_API_KEY</code> to that user workspace <code>.env</code></td></tr>
+        <tr><td>Dashboard buttons dead</td><td>JS load/runtime issue or stale cached page</td><td>Rebuild/restart, Ctrl+F5, check browser console</td></tr>
+        <tr><td>Docker build snapshot error</td><td>Corrupted Docker BuildKit cache</td><td><code>docker builder prune -af</code>, restart Docker, rebuild with <code>--no-cache</code></td></tr>
+        <tr><td>No remote jobs in city searches</td><td>Those location entries have <code>remote: false</code></td><td>Add dedicated remote location entries or set desired entries to <code>remote: true</code></td></tr>
+        <tr><td>Tailor output too generic</td><td>Weak profile facts/metrics boundaries</td><td>Strengthen <code>resume_facts</code>, <code>skills_boundary</code>, and resume text evidence</td></tr>
+      </tbody>
+    </table>
+
+    <h2>15) Security and Data Hygiene</h2>
+    <ul>
+      <li>Never commit real <code>.env</code> keys or transfer zips to git.</li>
+      <li>Use <code>workspace-export --no-db --no-generated</code> for clean handoff.</li>
+      <li>Only share archives with <code>--include-env</code> when absolutely necessary.</li>
+      <li>Use multi-user mode for shared deployments to isolate users safely.</li>
+      <li>Regularly review blocked sites and archived/skipped jobs.</li>
+    </ul>
+
+    <h2>Appendix A: Quick Command Cookbook</h2>
+    <pre><code># Start dashboard with login/accounts
+applypilot dashboard-serve --multi-user
+
+# Full prep run
+applypilot run discover enrich score tailor cover pdf
+
+# Just tailor for high-fit jobs
+applypilot run tailor --min-score 7
+
+# Dry-run apply check
+applypilot apply --dry-run --min-score 8
+
+# Mark by URL
+applypilot apply --mark-applied "https://job-url"
+
+# Export/Import workspace
+applypilot workspace-export --out ~/applypilot-transfer.zip --include-env --include-generated
+applypilot workspace-import ~/applypilot-transfer.zip --overwrite</code></pre>
+
+    <p class="muted">End of manual.</p>
+  </main>
+</body>
+</html>

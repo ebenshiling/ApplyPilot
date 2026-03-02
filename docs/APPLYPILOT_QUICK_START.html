@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ApplyPilot Quick Start</title>
+  <style>
+    body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; color: #0f172a; }
+    main { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
+    h1 { margin: 0 0 8px; font-size: 34px; }
+    h2 { margin: 24px 0 8px; font-size: 22px; border-top: 1px solid #cbd5e1; padding-top: 10px; }
+    h3 { margin: 14px 0 6px; font-size: 17px; }
+    p, li { font-size: 14px; line-height: 1.45; }
+    .lead { color: #475569; }
+    pre { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px; overflow-x: auto; }
+    code { font-family: ui-monospace, Consolas, monospace; }
+    .box { background: #ecfeff; border-left: 4px solid #0f766e; padding: 10px 12px; margin: 10px 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; vertical-align: top; }
+    th { background: #eff6ff; }
+    @media print { main { padding: 8mm 6mm; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ApplyPilot Quick Start</h1>
+    <p class="lead">Simple guide for non-technical users: setup, run, and get tailored resumes fast.</p>
+
+    <h2>1) Pick Your Setup</h2>
+    <h3>Option A (Recommended): Docker</h3>
+    <pre><code>docker compose up --build</code></pre>
+    <p>Open: <code>http://127.0.0.1:8765</code></p>
+
+    <h3>Option B: Python install</h3>
+    <pre><code>python scripts/bootstrap.py
+applypilot dashboard-serve --multi-user</code></pre>
+
+    <div class="box">
+      If you share this system with multiple people, always run <code>dashboard-serve --multi-user</code>.
+    </div>
+
+    <h2>2) Sign In and Complete Setup</h2>
+    <ol>
+      <li>Open dashboard and login/register.</li>
+      <li>Go to <strong>Setup</strong>.</li>
+      <li>In <strong>Full Profile Editor</strong>, fill your real details.</li>
+      <li>Save your profile.</li>
+      <li>Paste your resume into <code>resume.txt</code> field and save.</li>
+      <li>Set job search options in Search Config builder or advanced YAML.</li>
+    </ol>
+
+    <h2>3) Add API Key (Required for Tailoring)</h2>
+    <p>Add your key in your workspace <code>.env</code>:</p>
+    <pre><code>GEMINI_API_KEY=your_real_key_here</code></pre>
+    <p>Docker multi-user path pattern:</p>
+    <pre><code>docker-data/multi/workspaces/&lt;your-username&gt;/.env</code></pre>
+
+    <h2>4) Run the Pipeline</h2>
+    <p>Use Pipeline Controls in dashboard:</p>
+    <ol>
+      <li>Run <strong>Discover</strong></li>
+      <li>Run <strong>Enrich</strong></li>
+      <li>Run <strong>Score</strong></li>
+      <li>Review jobs with score 7+</li>
+      <li>Pick the jobs you want</li>
+      <li>Enable <strong>Selected only</strong></li>
+      <li>Run <strong>Tailor</strong> (or use Regenerate tailored resumes now)</li>
+    </ol>
+
+    <h2>5) Daily Use Pattern</h2>
+    <table>
+      <thead><tr><th>Step</th><th>What to do</th></tr></thead>
+      <tbody>
+        <tr><td>Morning</td><td>Discover + Enrich + Score</td></tr>
+        <tr><td>Midday</td><td>Pick best jobs and tailor selected only</td></tr>
+        <tr><td>Afternoon</td><td>Apply (manual or auto-apply mode)</td></tr>
+        <tr><td>Evening</td><td>Backup with workspace-export</td></tr>
+      </tbody>
+    </table>
+
+    <h2>6) Most Useful Commands</h2>
+    <pre><code>applypilot status
+applypilot jobs --limit 50
+applypilot run discover enrich score
+applypilot run tailor cover pdf
+applypilot apply --dry-run
+applypilot workspace-export --out ~/applypilot-transfer.zip --include-env --include-generated</code></pre>
+
+    <h2>7) Common Issues (Fast Fix)</h2>
+    <ul>
+      <li><strong>"requires Tier 2"</strong>: missing API key in user workspace <code>.env</code>.</li>
+      <li><strong>"csrf_failed"</strong>: refresh/login again, then retry; ensure latest dashboard build.</li>
+      <li><strong>No jobs returned</strong>: widen locations, roles, and results per site.</li>
+      <li><strong>Tailoring too generic</strong>: improve Full Profile + Resume Facts with real metrics/projects.</li>
+    </ul>
+
+    <h2>8) Safety Rules</h2>
+    <ul>
+      <li>Never commit or share real API keys publicly.</li>
+      <li>Use separate user accounts in multi-user mode.</li>
+      <li>Keep profile facts truthful; do not fabricate experience.</li>
+    </ul>
+
+    <p class="lead">Done. For deep details, use <code>docs/APPLYPILOT_USER_MANUAL.pdf</code>.</p>
+  </main>
+</body>
+</html>
