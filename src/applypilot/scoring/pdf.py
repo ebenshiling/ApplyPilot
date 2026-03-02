@@ -513,7 +513,11 @@ def build_letter_html(text: str) -> str:
     """Render a cover letter (plain text) as a simple, readable PDF."""
     # Keep it intentionally simple: preserve paragraph breaks, no resume parsing.
     paragraphs = [p.strip() for p in text.strip().split("\n\n") if p.strip()]
-    body = "\n".join(f"<p>{_escape_html(p).replace('\n', '<br>')}</p>" for p in paragraphs)
+    rendered_paragraphs: list[str] = []
+    for p in paragraphs:
+        safe = _escape_html(p).replace("\n", "<br>")
+        rendered_paragraphs.append(f"<p>{safe}</p>")
+    body = "\n".join(rendered_paragraphs)
     return f"""<!DOCTYPE html>
 <html>
 <head>
