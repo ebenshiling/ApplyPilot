@@ -1049,6 +1049,152 @@ def generate_dashboard(
           <div class="job-desc" style="margin-top:0.5rem">Saved into `profile.json` and used by scoring/tailoring/apply. Passwords/API keys stay in `.env` (not here).</div>
         </div>
 
+        <div class="job-card" style="padding:0.85rem;grid-column:1 / -1">
+          <div class="job-title" style="margin-bottom:0.35rem">Full Profile Editor</div>
+          <div class="job-meta" style="margin-bottom:0.55rem">
+            <span class="meta-tag">profile.json</span>
+            <span class="meta-tag">personal</span>
+            <span class="meta-tag">work_authorization</span>
+            <span class="meta-tag">availability</span>
+            <span class="meta-tag">compensation</span>
+            <span class="meta-tag">experience</span>
+            <span class="meta-tag">eeo_voluntary</span>
+          </div>
+
+          <details class="panel" open style="margin:0 0 0.55rem 0">
+            <summary>Identity & Contact</summary>
+            <div class="panel-body" style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+              <input id="setup-full-name" class="search-input" placeholder="Full name">
+              <input id="setup-pref-name" class="search-input" placeholder="Preferred name">
+              <input id="setup-full-email" class="search-input" placeholder="Email">
+              <input id="setup-full-phone" class="search-input" placeholder="Phone">
+              <input id="setup-address" class="search-input" placeholder="Address">
+              <input id="setup-postal" class="search-input" placeholder="Postal code">
+              <input id="setup-city2" class="search-input" placeholder="City">
+              <input id="setup-state" class="search-input" placeholder="Province / State">
+              <input id="setup-country2" class="search-input" placeholder="Country">
+              <input id="setup-linkedin2" class="search-input" placeholder="LinkedIn URL">
+              <input id="setup-github" class="search-input" placeholder="GitHub URL">
+              <input id="setup-portfolio" class="search-input" placeholder="Portfolio URL">
+              <input id="setup-website" class="search-input" style="grid-column:1 / -1" placeholder="Website URL">
+            </div>
+          </details>
+
+          <details class="panel" style="margin:0 0 0.55rem 0">
+            <summary>Work Authorization & Availability</summary>
+            <div class="panel-body" style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+              <label class="job-desc" style="margin:0">Legally authorized to work
+                <select id="setup-auth-legal" class="select-input" style="width:100%;margin-top:0.3rem">
+                  <option value="">Select</option>
+                  <option value="Yes">Yes</option>
+                  <option value="No">No</option>
+                  <option value="Decline to answer">Decline to answer</option>
+                </select>
+              </label>
+              <label class="job-desc" style="margin:0">Require sponsorship
+                <select id="setup-auth-sponsor" class="select-input" style="width:100%;margin-top:0.3rem">
+                  <option value="">Select</option>
+                  <option value="Yes">Yes</option>
+                  <option value="No">No</option>
+                  <option value="Unknown">Unknown</option>
+                </select>
+              </label>
+              <input id="setup-auth-permit" class="search-input" placeholder="Work permit type" style="grid-column:1 / -1">
+              <input id="setup-availability-start" class="search-input" placeholder="Earliest start date (e.g. Immediately)" style="grid-column:1 / -1">
+              <label class="toggle" style="grid-column:1 / 2"><input id="setup-avail-fulltime" type="checkbox"> Available for full-time</label>
+              <label class="toggle" style="grid-column:2 / 3"><input id="setup-avail-contract" type="checkbox"> Available for contract</label>
+            </div>
+          </details>
+
+          <details class="panel" style="margin:0 0 0.55rem 0">
+            <summary>Compensation & Experience</summary>
+            <div class="panel-body" style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+              <input id="setup-comp-salary" class="search-input" placeholder="Salary expectation (annual)">
+              <label class="job-desc" style="margin:0">Salary currency
+                <select id="setup-comp-currency" class="select-input" style="width:100%;margin-top:0.3rem">
+                  <option value="">Select</option>
+                  <option value="GBP">GBP</option>
+                  <option value="USD">USD</option>
+                  <option value="CAD">CAD</option>
+                  <option value="EUR">EUR</option>
+                </select>
+              </label>
+              <input id="setup-comp-min" class="search-input" placeholder="Salary range min">
+              <input id="setup-comp-max" class="search-input" placeholder="Salary range max">
+              <textarea id="setup-comp-note" class="full-desc" style="min-height:70px;max-height:120px;grid-column:1 / -1" placeholder="Currency conversion note (optional)"></textarea>
+
+              <input id="setup-exp-years" class="search-input" placeholder="Years of experience" inputmode="decimal">
+              <label class="job-desc" style="margin:0">Education level
+                <select id="setup-exp-edu-level" class="select-input" style="width:100%;margin-top:0.3rem">
+                  <option value="">Select</option>
+                  <option value="High School">High School</option>
+                  <option value="Associate Degree">Associate Degree</option>
+                  <option value="Bachelor's Degree">Bachelor's Degree</option>
+                  <option value="Master's Degree">Master's Degree</option>
+                  <option value="PhD">PhD</option>
+                </select>
+              </label>
+              <input id="setup-exp-title" class="search-input" placeholder="Current job title">
+              <input id="setup-exp-company" class="search-input" placeholder="Current company">
+              <input id="setup-exp-target-role" class="search-input" style="grid-column:1 / -1" placeholder="Target role">
+            </div>
+          </details>
+
+          <details class="panel" style="margin:0 0 0.55rem 0">
+            <summary>EEO Voluntary</summary>
+            <div class="panel-body" style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+              <label class="job-desc" style="margin:0">Gender
+                <select id="setup-eeo-gender" class="select-input" style="width:100%;margin-top:0.3rem">
+                  <option value="">Select</option>
+                  <option value="Female">Female</option>
+                  <option value="Male">Male</option>
+                  <option value="Non-binary">Non-binary</option>
+                  <option value="Decline to self-identify">Decline to self-identify</option>
+                </select>
+              </label>
+              <label class="job-desc" style="margin:0">Race/Ethnicity
+                <select id="setup-eeo-race" class="select-input" style="width:100%;margin-top:0.3rem">
+                  <option value="">Select</option>
+                  <option value="White">White</option>
+                  <option value="Black or African American">Black or African American</option>
+                  <option value="Hispanic or Latino">Hispanic or Latino</option>
+                  <option value="Asian">Asian</option>
+                  <option value="Two or more races">Two or more races</option>
+                  <option value="Decline to self-identify">Decline to self-identify</option>
+                </select>
+              </label>
+              <label class="job-desc" style="margin:0">Veteran status
+                <select id="setup-eeo-veteran" class="select-input" style="width:100%;margin-top:0.3rem">
+                  <option value="">Select</option>
+                  <option value="I am not a protected veteran">I am not a protected veteran</option>
+                  <option value="I am a protected veteran">I am a protected veteran</option>
+                  <option value="Decline to self-identify">Decline to self-identify</option>
+                </select>
+              </label>
+              <label class="job-desc" style="margin:0">Disability status
+                <select id="setup-eeo-disability" class="select-input" style="width:100%;margin-top:0.3rem">
+                  <option value="">Select</option>
+                  <option value="No, I do not have a disability">No, I do not have a disability</option>
+                  <option value="Yes, I have a disability">Yes, I have a disability</option>
+                  <option value="Decline to self-identify">Decline to self-identify</option>
+                </select>
+              </label>
+            </div>
+          </details>
+
+          <label class="job-desc" style="margin:0">Full profile JSON (advanced)
+            <textarea id="setup-full-profile-json" class="full-desc" style="min-height:140px;max-height:220px;margin-top:0.35rem" placeholder="Full profile patch JSON"></textarea>
+          </label>
+
+          <div style="margin-top:0.65rem;display:flex;gap:0.45rem;flex-wrap:wrap">
+            <button type="button" class="apply-link copy-btn" onclick="setupFullProfileToJson(false)">Apply form to JSON</button>
+            <button type="button" class="apply-link copy-btn" onclick="setupFullProfileFromJson(false)">Apply JSON to form</button>
+            <button type="button" class="apply-link copy-btn" onclick="setupFullProfileFromLoaded(false)">Sync from loaded profile</button>
+            <button type="button" class="apply-link copy-btn" data-live="1" onclick="setupSaveFullProfile(this)">Save full profile</button>
+          </div>
+          <div class="job-desc" style="margin-top:0.5rem">Use this for complete profile control across all sections. Quick Profile is still available for fast edits.</div>
+        </div>
+
         <div class="job-card" style="padding:0.85rem">
           <div class="job-title" style="margin-bottom:0.35rem">Resume</div>
           <div class="job-meta" style="margin-bottom:0.55rem">
@@ -1276,6 +1422,7 @@ let _pipeStatusTimer = null;
 let _pipeRunning = false;
 let _pipeApiOk = true;
 let _pipePollWarned = false;
+let _setupLoadedProfile = {{}};
 
 // Setup action UX helpers
 function _btnBusy(btn, on, label) {{
@@ -1968,6 +2115,177 @@ function _parseJsonField(id, label, fallback) {{
   return out;
 }}
 
+function _getVal(id) {{
+  const el = document.getElementById(id);
+  return ((el || {{}}).value || '').toString().trim();
+}}
+
+function _setChecked(id, on) {{
+  const el = document.getElementById(id);
+  if (!el) return;
+  try {{ el.checked = !!on; }} catch (e) {{}}
+}}
+
+function _getChecked(id) {{
+  const el = document.getElementById(id);
+  return !!((el || {{}}).checked);
+}}
+
+function _yesNo(v, dflt) {{
+  const s = (v == null ? '' : ('' + v)).trim().toLowerCase();
+  if (!s) return dflt || '';
+  if (['yes', 'y', 'true', '1'].includes(s)) return 'Yes';
+  if (['no', 'n', 'false', '0'].includes(s)) return 'No';
+  return dflt || '';
+}}
+
+function setupFullProfileFromObject(profileObj, quiet) {{
+  const p = (profileObj && typeof profileObj === 'object') ? profileObj : {{}};
+  const personal = p.personal || {{}};
+  const auth = p.work_authorization || {{}};
+  const availability = p.availability || {{}};
+  const comp = p.compensation || {{}};
+  const exp = p.experience || {{}};
+  const eeo = p.eeo_voluntary || {{}};
+
+  _setVal('setup-full-name', personal.full_name || '');
+  _setVal('setup-pref-name', personal.preferred_name || '');
+  _setVal('setup-full-email', personal.email || '');
+  _setVal('setup-full-phone', personal.phone || '');
+  _setVal('setup-address', personal.address || '');
+  _setVal('setup-postal', personal.postal_code || '');
+  _setVal('setup-city2', personal.city || '');
+  _setVal('setup-state', personal.province_state || '');
+  _setVal('setup-country2', personal.country || '');
+  _setVal('setup-linkedin2', personal.linkedin_url || '');
+  _setVal('setup-github', personal.github_url || '');
+  _setVal('setup-portfolio', personal.portfolio_url || '');
+  _setVal('setup-website', personal.website_url || '');
+
+  _setVal('setup-auth-legal', auth.legally_authorized_to_work || '');
+  _setVal('setup-auth-sponsor', auth.require_sponsorship || '');
+  _setVal('setup-auth-permit', auth.work_permit_type || '');
+
+  _setVal('setup-availability-start', availability.earliest_start_date || '');
+  _setChecked('setup-avail-fulltime', _yesNo(availability.available_for_full_time, 'Yes') === 'Yes');
+  _setChecked('setup-avail-contract', _yesNo(availability.available_for_contract, 'No') === 'Yes');
+
+  _setVal('setup-comp-salary', comp.salary_expectation || '');
+  _setVal('setup-comp-currency', comp.salary_currency || '');
+  _setVal('setup-comp-min', comp.salary_range_min || '');
+  _setVal('setup-comp-max', comp.salary_range_max || '');
+  _setVal('setup-comp-note', comp.currency_conversion_note || '');
+
+  _setVal('setup-exp-years', exp.years_of_experience_total || '');
+  _setVal('setup-exp-edu-level', exp.education_level || '');
+  _setVal('setup-exp-title', exp.current_job_title || '');
+  _setVal('setup-exp-company', exp.current_company || '');
+  _setVal('setup-exp-target-role', exp.target_role || '');
+
+  _setVal('setup-eeo-gender', eeo.gender || '');
+  _setVal('setup-eeo-race', eeo.race_ethnicity || '');
+  _setVal('setup-eeo-veteran', eeo.veteran_status || '');
+  _setVal('setup-eeo-disability', eeo.disability_status || '');
+
+  // Keep quick profile fields aligned with full editor values.
+  _setVal('setup-name', personal.full_name || '');
+  _setVal('setup-email', personal.email || '');
+  _setVal('setup-phone', personal.phone || '');
+  _setVal('setup-city', personal.city || '');
+  _setVal('setup-country', personal.country || '');
+  _setVal('setup-linkedin', personal.linkedin_url || '');
+  _setVal('setup-target-role', exp.target_role || '');
+  _setVal('setup-years', exp.years_of_experience_total || '');
+
+  if (!quiet) toast('Full profile form synced', 'success', 2600);
+}}
+
+function _collectFullProfilePatchFromForm() {{
+  return {{
+    personal: {{
+      full_name: _getVal('setup-full-name'),
+      preferred_name: _getVal('setup-pref-name'),
+      email: _getVal('setup-full-email'),
+      phone: _getVal('setup-full-phone'),
+      address: _getVal('setup-address'),
+      city: _getVal('setup-city2'),
+      province_state: _getVal('setup-state'),
+      country: _getVal('setup-country2'),
+      postal_code: _getVal('setup-postal'),
+      linkedin_url: _getVal('setup-linkedin2'),
+      github_url: _getVal('setup-github'),
+      portfolio_url: _getVal('setup-portfolio'),
+      website_url: _getVal('setup-website')
+    }},
+    work_authorization: {{
+      legally_authorized_to_work: _getVal('setup-auth-legal'),
+      require_sponsorship: _getVal('setup-auth-sponsor'),
+      work_permit_type: _getVal('setup-auth-permit')
+    }},
+    availability: {{
+      earliest_start_date: _getVal('setup-availability-start'),
+      available_for_full_time: _getChecked('setup-avail-fulltime') ? 'Yes' : 'No',
+      available_for_contract: _getChecked('setup-avail-contract') ? 'Yes' : 'No'
+    }},
+    compensation: {{
+      salary_expectation: _getVal('setup-comp-salary'),
+      salary_currency: _getVal('setup-comp-currency'),
+      salary_range_min: _getVal('setup-comp-min'),
+      salary_range_max: _getVal('setup-comp-max'),
+      currency_conversion_note: _getVal('setup-comp-note')
+    }},
+    experience: {{
+      years_of_experience_total: _getVal('setup-exp-years'),
+      education_level: _getVal('setup-exp-edu-level'),
+      current_job_title: _getVal('setup-exp-title'),
+      current_company: _getVal('setup-exp-company'),
+      target_role: _getVal('setup-exp-target-role')
+    }},
+    eeo_voluntary: {{
+      gender: _getVal('setup-eeo-gender'),
+      race_ethnicity: _getVal('setup-eeo-race'),
+      veteran_status: _getVal('setup-eeo-veteran'),
+      disability_status: _getVal('setup-eeo-disability')
+    }}
+  }};
+}}
+
+function setupFullProfileToJson(quiet) {{
+  const patch = _collectFullProfilePatchFromForm();
+  _setVal('setup-full-profile-json', _prettyJson(patch));
+  if (!quiet) toast('Full profile form applied to JSON', 'success', 2600);
+}}
+
+function setupFullProfileFromJson(quiet) {{
+  const obj = _parseJsonField('setup-full-profile-json', 'full profile', {{}});
+  setupFullProfileFromObject(obj, true);
+  if (!quiet) toast('Full profile JSON applied to form', 'success', 2600);
+}}
+
+function setupFullProfileFromLoaded(quiet) {{
+  setupFullProfileFromObject(_setupLoadedProfile || {{}}, true);
+  setupFullProfileToJson(true);
+  if (!quiet) toast('Full profile synced from loaded workspace', 'success', 2600);
+}}
+
+async function setupSaveFullProfile(btn) {{
+  return await _withAction(btn, {{ working: 'Saving full profile...', success: 'Full profile saved', fail: 'Save failed' }}, async () => {{
+    setupFullProfileToJson(true);
+    const patch = _parseJsonField('setup-full-profile-json', 'full profile', {{}});
+    const personal = patch.personal || {{}};
+    if (!String(personal.full_name || '').trim() || !String(personal.email || '').trim()) {{
+      throw new Error('Full profile requires personal.full_name and personal.email');
+    }}
+    const email = String(personal.email || '').trim();
+    if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {{
+      throw new Error('personal.email is invalid');
+    }}
+    await _apiJson('/api/setup/profile', {{ profile: patch }});
+    await setupLoadWorkspace(true, null);
+    await setupRefresh(null);
+  }});
+}}
+
 async function setupSaveProfile(btn) {{
   const name = ((document.getElementById('setup-name') || {{}}).value || '').trim();
   const email = ((document.getElementById('setup-email') || {{}}).value || '').trim();
@@ -2021,6 +2339,7 @@ async function setupSaveProfile(btn) {{
       }}
     }};
     await _apiJson('/api/setup/profile', payload);
+    await setupLoadWorkspace(true, null);
     await setupRefresh(null);
   }});
 }}
@@ -2147,6 +2466,7 @@ async function setupLoadWorkspace(quiet, btn) {{
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     const p = (data && data.profile) || {{}};
+    _setupLoadedProfile = p;
     const personal = (p.personal || {{}});
     const exp = (p.experience || {{}});
     _setVal('setup-name', personal.full_name || '');
@@ -2157,6 +2477,8 @@ async function setupLoadWorkspace(quiet, btn) {{
     _setVal('setup-linkedin', personal.linkedin_url || '');
     _setVal('setup-target-role', exp.target_role || '');
     _setVal('setup-years', exp.years_of_experience_total || '');
+    setupFullProfileFromObject(p, true);
+    setupFullProfileToJson(true);
 
     const tailoring = (p.tailoring || {{}});
     _setVal('setup-role-pack', (tailoring.role_pack_override || 'auto'));
@@ -2432,81 +2754,36 @@ async function apiMark(id, status, reason) {{
      throw new Error('Live actions require `applypilot dashboard-serve`');
   }}
   const payload = {{ id: parseInt(id), status: status, reason: reason || '' }};
-   const res = await fetch('/api/jobs/mark', {{
-     method: 'POST',
-     headers: {{ 'Content-Type': 'application/json' }},
-     body: JSON.stringify(payload)
-   }});
-   if (!res.ok) {{
-     const t = await res.text();
-     throw new Error(t || ('HTTP ' + res.status));
-   }}
-    return await res.json();
-  }}
+  return await _apiJson('/api/jobs/mark', payload);
+}}
 
 async function apiBlock(id) {{
   if (window.location.protocol === 'file:') {{
      throw new Error('Live actions require `applypilot dashboard-serve`');
   }}
-  const res = await fetch('/api/jobs/block', {{
-     method: 'POST',
-     headers: {{ 'Content-Type': 'application/json' }},
-     body: JSON.stringify({{ id: parseInt(id) }})
-    }});
-    if (!res.ok) {{
-      const t = await res.text();
-      throw new Error(t || ('HTTP ' + res.status));
-    }}
-      return await res.json();
-   }}
+  return await _apiJson('/api/jobs/block', {{ id: parseInt(id) }});
+}}
 
 async function apiSelect(id, selected) {{
   if (window.location.protocol === 'file:') {{
      throw new Error('Live actions require `applypilot dashboard-serve`');
   }}
-  const res = await fetch('/api/jobs/select', {{
-     method: 'POST',
-     headers: {{ 'Content-Type': 'application/json' }},
-     body: JSON.stringify({{ id: parseInt(id), selected: !!selected }})
-    }});
-    if (!res.ok) {{
-      const t = await res.text();
-      throw new Error(t || ('HTTP ' + res.status));
-    }}
-     return await res.json();
-   }}
+  return await _apiJson('/api/jobs/select', {{ id: parseInt(id), selected: !!selected }});
+}}
 
 async function apiDeleteJob(id) {{
   if (window.location.protocol === 'file:') {{
      throw new Error('Live actions require `applypilot dashboard-serve`');
   }}
-  const res = await fetch('/api/jobs/delete', {{
-     method: 'POST',
-     headers: {{ 'Content-Type': 'application/json' }},
-     body: JSON.stringify({{ id: parseInt(id) }})
-    }});
-    if (!res.ok) {{
-      const t = await res.text();
-      throw new Error(t || ('HTTP ' + res.status));
-    }}
-     return await res.json();
-   }}
+  return await _apiJson('/api/jobs/delete', {{ id: parseInt(id) }});
+}}
 
 async function apiDeleteJobsBulk(ids) {{
   if (window.location.protocol === 'file:') {{
      throw new Error('Live actions require `applypilot dashboard-serve`');
   }}
-  const res = await fetch('/api/jobs/delete-bulk', {{
-     method: 'POST',
-     headers: {{ 'Content-Type': 'application/json' }},
-     body: JSON.stringify({{ ids: ids || [] }})
-    }});
-    if (!res.ok) {{
-      const t = await res.text();
-      throw new Error(t || ('HTTP ' + res.status));
-    }}
-     return await res.json();
-   }}
+  return await _apiJson('/api/jobs/delete-bulk', {{ ids: ids || [] }});
+}}
 
 function _visibleJobIds() {{
   const ids = [];
@@ -2570,29 +2847,11 @@ async function apiPipelineRun(stages, opts) {{
     discover_skip_workday: !!(opts && opts.discover_skip_workday),
     discover_skip_smarte: !!(opts && opts.discover_skip_smarte)
   }};
-  const res = await fetch('/api/pipeline/run', {{
-    method: 'POST',
-    headers: {{ 'Content-Type': 'application/json' }},
-    body: JSON.stringify(payload)
-  }});
-  if (!res.ok) {{
-    const t = await res.text();
-    throw new Error(t || ('HTTP ' + res.status));
-  }}
-  return await res.json();
+  return await _apiJson('/api/pipeline/run', payload);
 }}
 
 async function apiPipelineStop() {{
-  const res = await fetch('/api/pipeline/stop', {{
-    method: 'POST',
-    headers: {{ 'Content-Type': 'application/json' }},
-    body: JSON.stringify({{}})
-  }});
-  if (!res.ok) {{
-    const t = await res.text();
-    throw new Error(t || ('HTTP ' + res.status));
-  }}
-  return await res.json();
+  return await _apiJson('/api/pipeline/stop', {{}});
 }}
 
 async function apiPipelineLogs(since) {{
