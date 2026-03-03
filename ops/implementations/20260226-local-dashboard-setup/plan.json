@@ -1,0 +1,31 @@
+{
+  "implementation_id": "20260226-local-dashboard-setup",
+  "title": "Local dashboard onboarding: profile + resume + searches",
+  "created_at": "2026-02-26T00:00:00Z",
+  "phases": [
+    {
+      "name": "plan",
+      "goals": [
+        "When a user opens the dashboard, guide them through creating profile, uploading resume (PDF + plain text), and configuring searches",
+        "Avoid guessing: require explicit answers for required fields",
+        "Keep existing CLI flows working"
+      ]
+    },
+    {
+      "name": "implementation",
+      "steps": [
+        "Add /setup page served by dashboard-serve when config is missing",
+        "Add localhost JSON APIs for profile/searches/resume persistence",
+        "Add validation and safe merging (do not wipe unknown fields)",
+        "Add minimal UI for editing required fields"
+      ]
+    },
+    {
+      "name": "verification",
+      "steps": [
+        "Add API/flow smoke tests with temp APPLYPILOT_DIR",
+        "Run agent verify script (compile + pytest)"
+      ]
+    }
+  ]
+}

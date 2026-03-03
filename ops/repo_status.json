@@ -1,0 +1,28 @@
+{
+  "repo": "ApplyPilot",
+  "updated_at": "2026-02-26T00:00:00Z",
+  "current_state": {
+    "dashboard": {
+      "generator": "src/applypilot/view.py",
+      "server": "src/applypilot/dashboard_server.py",
+      "notes": "Dashboard is self-contained HTML with embedded CSS/JS; live actions via dashboard-serve."
+    },
+    "pipeline": {
+      "stages": ["discover", "enrich", "score", "tailor", "cover", "pdf"],
+      "notes": "Stages are run via `applypilot run` and can be driven from dashboard server."
+    },
+    "tests": {
+      "framework": "pytest",
+      "notes": "Smoke tests live under tests/."
+    }
+  },
+  "active_implementation_id": "20260226-dashboard-panels-scroll",
+  "history": [
+    {
+      "implementation_id": "20260226-dashboard-panels-scroll",
+      "title": "Dashboard: collapsible + scrollable panels",
+      "status": "completed",
+      "updated_at": "2026-02-26T00:00:00Z"
+    }
+  ]
+}

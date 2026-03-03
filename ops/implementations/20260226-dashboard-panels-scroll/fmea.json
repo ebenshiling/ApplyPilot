@@ -1,0 +1,33 @@
+{
+  "change_id": "20260226-dashboard-panels-scroll",
+  "scope": ["dashboard"],
+  "failure_modes": [
+    {
+      "mode": "Dashboard HTML generation crashes",
+      "cause": "Invalid f-string braces or malformed embedded CSS/HTML",
+      "effect": "Dashboard not generated/served",
+      "severity": 6,
+      "occurrence": 3,
+      "detection": "python -m compileall; pytest smoke test",
+      "mitigation": "Add smoke tests that generate dashboard from temp DB; keep changes localized"
+    },
+    {
+      "mode": "Dashboard server starts but UI missing critical hooks",
+      "cause": "Renamed or removed IDs/classes relied on by JS",
+      "effect": "Live controls or pipeline console break",
+      "severity": 7,
+      "occurrence": 2,
+      "detection": "pytest smoke test checks for required ids",
+      "mitigation": "Do not change IDs; add tests asserting presence"
+    },
+    {
+      "mode": "Panel scrolling hides content unexpectedly",
+      "cause": "Max-height too small on some viewports",
+      "effect": "User cannot see full list without scrolling",
+      "severity": 3,
+      "occurrence": 4,
+      "detection": "Manual visual check",
+      "mitigation": "Responsive max-height; keep overflow auto only inside panels"
+    }
+  ]
+}

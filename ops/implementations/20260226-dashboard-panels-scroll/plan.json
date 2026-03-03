@@ -1,0 +1,28 @@
+{
+  "implementation_id": "20260226-dashboard-panels-scroll",
+  "title": "Dashboard: collapsible + scrollable Score Distribution / By Source",
+  "created_at": "2026-02-26T00:00:00Z",
+  "phases": [
+    {
+      "name": "design",
+      "goals": [
+        "Make Score Distribution and By Source sections collapsible",
+        "Prevent long By Source lists from stretching the page"
+      ]
+    },
+    {
+      "name": "implementation",
+      "steps": [
+        "Wrap both sections in <details> with summary title",
+        "Add scroll container styling for panel body"
+      ]
+    },
+    {
+      "name": "verification",
+      "steps": [
+        "Add a smoke test that generates dashboard HTML from a temp DB",
+        "Run compileall and pytest"
+      ]
+    }
+  ]
+}

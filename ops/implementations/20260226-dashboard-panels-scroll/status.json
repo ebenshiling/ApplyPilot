@@ -1,0 +1,33 @@
+{
+  "implementation_id": "20260226-dashboard-panels-scroll",
+  "title": "Dashboard: collapsible + scrollable Score Distribution / By Source",
+  "status": "completed",
+  "owner": "ai-agent",
+  "created_at": "2026-02-26T00:00:00Z",
+  "updated_at": "2026-02-26T00:00:00Z",
+  "phases": [
+    {
+      "name": "plan",
+      "status": "completed",
+      "notes": "Use <details> panels and constrain height with overflow auto."
+    },
+    {
+      "name": "implementation",
+      "status": "completed",
+      "notes": "Added .panel + .panel-body styles; wrapped score/site sections in details panels."
+    },
+    {
+      "name": "verification",
+      "status": "completed",
+      "notes": "Added pytest smoke tests; ran pytest successfully."
+    }
+  ],
+  "files_changed": [
+    "src/applypilot/view.py",
+    "tests/test_dashboard_smoke.py"
+  ],
+  "verification": {
+    "commands": ["pytest -q", "python -m compileall -q src"],
+    "result": "pass"
+  }
+}

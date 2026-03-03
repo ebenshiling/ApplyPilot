@@ -1,0 +1,31 @@
+{
+  "cases": [
+    {
+      "name": "json_shape",
+      "raw": "{\"score\": 8, \"keywords\": [\"python\", \"sql\"], \"reasoning\": \"Strong overlap\", \"confidence\": 0.82}",
+      "expected": {
+        "score": 8,
+        "confidence": 0.82,
+        "keywords_contains": "python"
+      }
+    },
+    {
+      "name": "legacy_shape",
+      "raw": "SCORE: 7\nKEYWORDS: sql, tableau\nREASONING: Good fit\nCONFIDENCE: 0.55",
+      "expected": {
+        "score": 7,
+        "confidence": 0.55,
+        "keywords_contains": "sql"
+      }
+    },
+    {
+      "name": "fenced_json_clamped",
+      "raw": "```json\n{\"score\": 99, \"keywords\": [\"etl\"], \"reasoning\": \"ok\", \"confidence\": 2}\n```",
+      "expected": {
+        "score": 10,
+        "confidence": 1.0,
+        "keywords_contains": "etl"
+      }
+    }
+  ]
+}
