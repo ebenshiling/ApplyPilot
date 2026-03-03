@@ -9,6 +9,7 @@ resume.pdf
 # Runtime artifacts
 *.db
 applypilot-transfer*.zip
+docker-data/
 tailored_resumes/
 cover_letters/
 chrome-workers/
