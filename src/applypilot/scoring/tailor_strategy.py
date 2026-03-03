@@ -45,7 +45,8 @@ _DEFAULT_SAFE_SYNONYMS: dict[str, list[str]] = {
 }
 
 
-_CITATION_RE = re.compile(r"\[(F\d+(?:\s*,\s*F\d+)*)\]\s*$", re.IGNORECASE)
+_CITATION_RE = re.compile(r"\[(F\d+(?:\s*,\s*F\d+)*)\]\s*[\.,;:!?)]?\s*$", re.IGNORECASE)
+_CITATION_BLOCK_RE = re.compile(r"\s*\[(?:\s*F\d+\s*(?:,\s*F\d+\s*)*)\](?=[\s\.,;:!?)]|$)", re.IGNORECASE)
 
 
 def _normalize_space(text: str) -> str:
@@ -288,7 +289,12 @@ def validate_fact_citations(data: dict[str, Any], valid_fact_ids: set[str]) -> d
 
 def strip_fact_citations(text: str) -> str:
     s = str(text or "")
-    return re.sub(r"\s*\[(?:F\d+\s*,\s*)*F\d+\]\s*$", "", s, flags=re.IGNORECASE).strip()
+    # Remove citation blocks like [F1] / [F2, F7] even when punctuation follows.
+    s = re.sub(_CITATION_BLOCK_RE, "", s)
+    # Normalize spacing around punctuation after block removal.
+    s = re.sub(r"\s+([\.,;:!?])", r"\1", s)
+    s = re.sub(r"\s{2,}", " ", s)
+    return s.strip()
 
 
 def build_safe_synonyms(profile: dict[str, Any]) -> dict[str, list[str]]:

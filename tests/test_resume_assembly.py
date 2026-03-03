@@ -88,5 +88,6 @@ def test_assemble_resume_accepts_string_resume_sections() -> None:
 
     assert "MSc Data Science - Example University" in out
     assert "BSc Computer Science - City College" in out
+    assert "Masters Degree" not in out
     assert "CERTIFICATIONS" in out
     assert "PL-300 Data Analyst Associate" in out

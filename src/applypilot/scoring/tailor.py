@@ -682,27 +682,31 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
 
     # Education (prefer profile-driven entries so courses/certs are preserved)
     lines.append("EDUCATION")
-    education_lines = _section_lines(extras.get("education"))
+    profile_education_lines = _section_lines(extras.get("education"))
+    education_lines = list(profile_education_lines)
     if not education_lines:
         raw_edu = str(data.get("education", "") or "")
         education_lines = [sanitize_text(x) for x in raw_edu.splitlines() if sanitize_text(x)]
 
-    # Ensure key education context survives even when model output is sparse.
+    # Ensure key education context survives when model output is sparse.
+    # If the user provided explicit profile education lines, trust those and
+    # avoid auto-appending generic degree/school fallbacks.
     resume_facts = profile.get("resume_facts", {}) or {}
     exp_ctx = profile.get("experience", {}) or {}
     preserved_school = sanitize_text(str(resume_facts.get("preserved_school", "") or ""))
     education_level = sanitize_text(str(exp_ctx.get("education_level", "") or ""))
-    edu_blob = " ".join(education_lines).lower()
-    if preserved_school and preserved_school.lower() not in edu_blob:
-        education_lines.append(preserved_school)
+    if not profile_education_lines:
         edu_blob = " ".join(education_lines).lower()
-    if education_level and education_level.lower() not in edu_blob:
-        if preserved_school and preserved_school.lower() in edu_blob:
-            education_lines.append(education_level)
-        elif preserved_school:
-            education_lines.append(f"{preserved_school} | {education_level}")
-        else:
-            education_lines.append(education_level)
+        if preserved_school and preserved_school.lower() not in edu_blob:
+            education_lines.append(preserved_school)
+            edu_blob = " ".join(education_lines).lower()
+        if education_level and education_level.lower() not in edu_blob:
+            if preserved_school and preserved_school.lower() in edu_blob:
+                education_lines.append(education_level)
+            elif preserved_school:
+                education_lines.append(f"{preserved_school} | {education_level}")
+            else:
+                education_lines.append(education_level)
 
     for s in education_lines:
         if s:

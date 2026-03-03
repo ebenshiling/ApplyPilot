@@ -77,6 +77,9 @@ def test_fact_citations_and_strip() -> None:
     ck = validate_fact_citations(data, fact_ids)
     assert ck["passed"] is True
     assert strip_fact_citations("Delivered KPI dashboards [F3]") == "Delivered KPI dashboards"
+    assert strip_fact_citations("Delivered KPI dashboards [F3].") == "Delivered KPI dashboards."
+    assert strip_fact_citations("Managed incidents [F2, F7].") == "Managed incidents."
+    assert strip_fact_citations("Built ETL [F1] and reporting [F2].") == "Built ETL and reporting."
 
 
 def test_jd_targets_coverage_and_quant_consistency() -> None:
