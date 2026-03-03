@@ -940,6 +940,7 @@ def generate_dashboard(
   <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['discover'])">Discover</button>
   <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['enrich'])">Enrich</button>
   <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['score'])">Score</button>
+  <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineScoreRepair()">Score repair</button>
   <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['tailor'])">Tailor</button>
   <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['cover'])">Cover</button>
   <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['pdf'])">PDF</button>
@@ -954,8 +955,11 @@ def generate_dashboard(
   <label class="toggle" title="Preview stages without executing">
     <input id="pipe-dry-run" type="checkbox"> Dry run
   </label>
-  <label class="toggle" title="Apply stage only processes picked jobs">
+  <label class="toggle" title="Tailor/Cover/Apply only process picked jobs">
     <input id="pipe-selected-only" type="checkbox"> Selected only
+  </label>
+  <label class="toggle" title="Reduce strict tailor validation blockers for faster approvals">
+    <input id="pipe-tailor-lenient" type="checkbox"> Lenient tailor mode
   </label>
   <span class="filter-label" style="margin-left:0.5rem;opacity:0.85">Discover config:</span>
   <input id="pipe-search-query" class="search-input" style="width:220px" placeholder="Role/query override (optional)">
@@ -1183,8 +1187,13 @@ def generate_dashboard(
           </details>
 
           <label class="job-desc" style="margin:0">Full profile JSON (advanced)
-            <textarea id="setup-full-profile-json" class="full-desc" style="min-height:140px;max-height:220px;margin-top:0.35rem" placeholder="Full profile patch JSON"></textarea>
+            <textarea id="setup-full-profile-json" class="full-desc" style="min-height:140px;max-height:220px;margin-top:0.35rem" placeholder="Paste profile.json here, then click Apply JSON to form"></textarea>
           </label>
+
+          <div style="margin-top:0.55rem;display:flex;gap:0.45rem;flex-wrap:wrap;align-items:center">
+            <input id="setup-profile-json-file" type="file" accept="application/json,.json" style="max-width:100%">
+            <button type="button" class="apply-link copy-btn" onclick="setupImportProfileJsonFile(this)">Import profile.json file</button>
+          </div>
 
           <div style="margin-top:0.65rem;display:flex;gap:0.45rem;flex-wrap:wrap">
             <button type="button" class="apply-link copy-btn" onclick="setupFullProfileToJson(false)">Apply form to JSON</button>
@@ -1289,6 +1298,7 @@ def generate_dashboard(
                 <button type="button" class="apply-link copy-btn" onclick="setupTemplateToJson(false)">Apply builder to JSON</button>
                 <button type="button" class="apply-link copy-btn" data-live="1" onclick="setupRegenerateTailoredResumes(this)">Regenerate tailored resumes now</button>
                 <span class="meta-tag">Auto-applied on Validate/Save</span>
+                <span class="meta-tag" id="setup-template-summary">changes: none</span>
               </div>
             </div>
 
@@ -1730,15 +1740,19 @@ function setupToggleAdvancedYaml(on) {{
 }}
 
 function setupInitSearchBuilderDefaults() {{
-  const set = (id, v) => _setVal(id, v);
-  set('search-country', 'USA');
-  set('search-location', 'Remote');
-  set('search-cities', '');
-  set('search-roles', 'Software Engineer');
-  set('search-hours-old', '72');
-  set('search-results', '50');
-  set('search-boards', 'indeed,linkedin,glassdoor,zip_recruiter,google');
-  if (SMART_UK_DEFAULTS && SMART_UK_DEFAULTS.length) set('search-smart-sites', SMART_UK_DEFAULTS.join(', '));
+  const setIfEmpty = (id, v) => {{
+    const el = document.getElementById(id);
+    const cur = ((el || {{}}).value || '').toString().trim();
+    if (!cur) _setVal(id, v);
+  }};
+  setIfEmpty('search-country', 'USA');
+  setIfEmpty('search-location', 'Remote');
+  setIfEmpty('search-cities', '');
+  setIfEmpty('search-roles', 'Software Engineer');
+  setIfEmpty('search-hours-old', '72');
+  setIfEmpty('search-results', '50');
+  setIfEmpty('search-boards', 'indeed,linkedin,glassdoor,zip_recruiter,google');
+  if (SMART_UK_DEFAULTS && SMART_UK_DEFAULTS.length) setIfEmpty('search-smart-sites', SMART_UK_DEFAULTS.join(', '));
   const ex = document.getElementById('search-exclude');
   if (ex && !(ex.value || '').trim()) {{
     ex.value = ['intern', 'internship', 'principal', 'vp ', 'vice president', 'chief', 'clearance required'].join('\\n');
@@ -1790,7 +1804,9 @@ function setupClearSmartSites() {{
 }}
 
 function setupGenerateSearchesYaml() {{
-  const country = ((document.getElementById('search-country') || {{}}).value || '').trim() || 'USA';
+  const country = ((document.getElementById('search-country') || {{}}).value || '').trim()
+    || ((document.getElementById('setup-country') || {{}}).value || '').trim()
+    || 'USA';
   const location = ((document.getElementById('search-location') || {{}}).value || '').trim() || 'Remote';
   const cities = _csv(((document.getElementById('search-cities') || {{}}).value || '').trim());
   const roles = _csv(((document.getElementById('search-roles') || {{}}).value || '').trim());
@@ -1932,6 +1948,39 @@ function _templateItemsFromAny(v) {{
   return [];
 }}
 
+function _templateItemsFromKeys(obj, keys) {{
+  const out = [];
+  for (const k of (keys || [])) {{
+    try {{ out.push(..._templateItemsFromAny((obj || {{}})[k])); }} catch (e) {{}}
+  }}
+  return _splitTemplateItems(out.join('\\n'));
+}}
+
+function _mergeTemplateItems(existingItems, incomingItems) {{
+  const out = [];
+  const seen = new Set();
+  for (const src of [existingItems || [], incomingItems || []]) {{
+    for (const item of src) {{
+      const s = (item || '').toString().trim();
+      if (!s) continue;
+      const key = s.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(s);
+    }}
+  }}
+  return out;
+}}
+
+function _pickTemplateTargetKey(obj, preferred, aliases) {{
+  const o = obj || {{}};
+  if (Object.prototype.hasOwnProperty.call(o, preferred)) return preferred;
+  for (const k of (aliases || [])) {{
+    if (Object.prototype.hasOwnProperty.call(o, k)) return k;
+  }}
+  return preferred;
+}}
+
 function _readJsonFieldOrEmpty(id) {{
   const raw = ((document.getElementById(id) || {{}}).value || '').trim();
   if (!raw) return {{}};
@@ -1957,24 +2006,12 @@ function setupTemplateFromJson(quiet) {{
   const resumeFacts = _readJsonFieldOrEmpty('setup-resume-facts');
   const resumeSections = _readJsonFieldOrEmpty('setup-resume-sections');
 
-  const langs = [];
-  langs.push(..._templateItemsFromAny(skillsBoundary.languages));
-  langs.push(..._templateItemsFromAny(skillsBoundary.programming_languages));
-  _setTemplateItems('setup-tpl-languages', langs);
-  _setTemplateItems('setup-tpl-frameworks', skillsBoundary.frameworks);
-  _setTemplateItems('setup-tpl-analytics', skillsBoundary.analytics);
-
-  const dataMerged = [];
-  dataMerged.push(..._templateItemsFromAny(skillsBoundary.data));
-  dataMerged.push(..._templateItemsFromAny(skillsBoundary.databases));
-  _setTemplateItems('setup-tpl-data', dataMerged);
-
-  const toolsMerged = [];
-  toolsMerged.push(..._templateItemsFromAny(skillsBoundary.tools));
-  toolsMerged.push(..._templateItemsFromAny(skillsBoundary.devops));
-  _setTemplateItems('setup-tpl-tools', toolsMerged);
-
-  _setTemplateItems('setup-tpl-governance', skillsBoundary.governance);
+  _setTemplateItems('setup-tpl-languages', _templateItemsFromKeys(skillsBoundary, ['languages', 'programming_languages']));
+  _setTemplateItems('setup-tpl-frameworks', _templateItemsFromKeys(skillsBoundary, ['frameworks', 'libraries']));
+  _setTemplateItems('setup-tpl-analytics', _templateItemsFromKeys(skillsBoundary, ['analytics', 'business_intelligence', 'bi', 'reporting']));
+  _setTemplateItems('setup-tpl-data', _templateItemsFromKeys(skillsBoundary, ['data', 'databases', 'data_engineering']));
+  _setTemplateItems('setup-tpl-tools', _templateItemsFromKeys(skillsBoundary, ['tools', 'platforms', 'devops', 'cloud', 'infrastructure']));
+  _setTemplateItems('setup-tpl-governance', _templateItemsFromKeys(skillsBoundary, ['governance', 'compliance', 'security']));
   _setTemplateItems('setup-tpl-education', resumeSections.education);
   _setTemplateItems('setup-tpl-certifications', resumeSections.certifications);
   _setTemplateItems('setup-tpl-techenv', resumeSections.technical_environment);
@@ -1992,55 +2029,104 @@ function setupTemplateToJson(quiet) {{
   const resumeFacts = _readJsonFieldOrEmpty('setup-resume-facts');
   const resumeSections = _readJsonFieldOrEmpty('setup-resume-sections');
 
-  const keepProgrammingKey = (
-    Object.prototype.hasOwnProperty.call(skillsBoundary, 'programming_languages')
-    && !Object.prototype.hasOwnProperty.call(skillsBoundary, 'languages')
-  );
-
-  for (const k of ['languages', 'programming_languages', 'frameworks', 'analytics', 'data', 'databases', 'tools', 'governance', 'devops']) {{
-    if (Object.prototype.hasOwnProperty.call(skillsBoundary, k)) delete skillsBoundary[k];
-  }}
-
   const languages = _getTemplateItems('setup-tpl-languages');
   const frameworks = _getTemplateItems('setup-tpl-frameworks');
   const analytics = _getTemplateItems('setup-tpl-analytics');
   const data = _getTemplateItems('setup-tpl-data');
   const tools = _getTemplateItems('setup-tpl-tools');
   const governance = _getTemplateItems('setup-tpl-governance');
+  const summary = [];
 
-  if (languages.length) skillsBoundary[keepProgrammingKey ? 'programming_languages' : 'languages'] = languages;
-  if (frameworks.length) skillsBoundary.frameworks = frameworks;
-  if (analytics.length) skillsBoundary.analytics = analytics;
-  if (data.length) skillsBoundary.data = data;
-  if (tools.length) skillsBoundary.tools = tools;
-  if (governance.length) skillsBoundary.governance = governance;
-
-  for (const k of ['education', 'certifications', 'technical_environment']) {{
-    if (Object.prototype.hasOwnProperty.call(resumeSections, k)) delete resumeSections[k];
+  const langKey = _pickTemplateTargetKey(skillsBoundary, 'languages', ['programming_languages']);
+  const curLang = _templateItemsFromKeys(skillsBoundary, ['languages', 'programming_languages']);
+  if (languages.length) {{
+    const merged = _mergeTemplateItems(curLang, languages);
+    skillsBoundary[langKey] = merged;
+    summary.push((curLang.length ? ('languages updated (+' + Math.max(0, merged.length - curLang.length) + ')') : ('languages added (' + merged.length + ')')));
+  }} else if (curLang.length) {{
+    summary.push('languages kept (' + curLang.length + ')');
   }}
+
+  const fwKey = _pickTemplateTargetKey(skillsBoundary, 'frameworks', ['libraries']);
+  const curFw = _templateItemsFromKeys(skillsBoundary, ['frameworks', 'libraries']);
+  if (frameworks.length) {{
+    const merged = _mergeTemplateItems(curFw, frameworks);
+    skillsBoundary[fwKey] = merged;
+    summary.push((curFw.length ? ('frameworks updated (+' + Math.max(0, merged.length - curFw.length) + ')') : ('frameworks added (' + merged.length + ')')));
+  }} else if (curFw.length) {{
+    summary.push('frameworks kept (' + curFw.length + ')');
+  }}
+
+  const anKey = _pickTemplateTargetKey(skillsBoundary, 'analytics', ['business_intelligence', 'bi', 'reporting']);
+  const curAn = _templateItemsFromKeys(skillsBoundary, ['analytics', 'business_intelligence', 'bi', 'reporting']);
+  if (analytics.length) {{
+    const merged = _mergeTemplateItems(curAn, analytics);
+    skillsBoundary[anKey] = merged;
+    summary.push((curAn.length ? ('analytics updated (+' + Math.max(0, merged.length - curAn.length) + ')') : ('analytics added (' + merged.length + ')')));
+  }} else if (curAn.length) {{
+    summary.push('analytics kept (' + curAn.length + ')');
+  }}
+
+  const dataKey = _pickTemplateTargetKey(skillsBoundary, 'data', ['databases', 'data_engineering']);
+  const curData = _templateItemsFromKeys(skillsBoundary, ['data', 'databases', 'data_engineering']);
+  if (data.length) {{
+    const merged = _mergeTemplateItems(curData, data);
+    skillsBoundary[dataKey] = merged;
+    summary.push((curData.length ? ('data updated (+' + Math.max(0, merged.length - curData.length) + ')') : ('data added (' + merged.length + ')')));
+  }} else if (curData.length) {{
+    summary.push('data kept (' + curData.length + ')');
+  }}
+
+  const toolKey = _pickTemplateTargetKey(skillsBoundary, 'tools', ['platforms', 'devops', 'cloud', 'infrastructure']);
+  const curTools = _templateItemsFromKeys(skillsBoundary, ['tools', 'platforms', 'devops', 'cloud', 'infrastructure']);
+  if (tools.length) {{
+    const merged = _mergeTemplateItems(curTools, tools);
+    skillsBoundary[toolKey] = merged;
+    summary.push((curTools.length ? ('tools/platforms updated (+' + Math.max(0, merged.length - curTools.length) + ')') : ('tools/platforms added (' + merged.length + ')')));
+  }} else if (curTools.length) {{
+    summary.push('tools/platforms kept (' + curTools.length + ')');
+  }}
+
+  const govKey = _pickTemplateTargetKey(skillsBoundary, 'governance', ['compliance', 'security']);
+  const curGov = _templateItemsFromKeys(skillsBoundary, ['governance', 'compliance', 'security']);
+  if (governance.length) {{
+    const merged = _mergeTemplateItems(curGov, governance);
+    skillsBoundary[govKey] = merged;
+    summary.push((curGov.length ? ('governance updated (+' + Math.max(0, merged.length - curGov.length) + ')') : ('governance added (' + merged.length + ')')));
+  }} else if (curGov.length) {{
+    summary.push('governance kept (' + curGov.length + ')');
+  }}
+
   const education = _getTemplateItems('setup-tpl-education');
   const certifications = _getTemplateItems('setup-tpl-certifications');
   const techEnv = _getTemplateItems('setup-tpl-techenv');
-  if (education.length) resumeSections.education = education;
-  if (certifications.length) resumeSections.certifications = certifications;
-  if (techEnv.length) resumeSections.technical_environment = techEnv;
+  const curEdu = _templateItemsFromAny(resumeSections.education);
+  const curCerts = _templateItemsFromAny(resumeSections.certifications);
+  const curTech = _templateItemsFromAny(resumeSections.technical_environment);
+  if (education.length) resumeSections.education = _mergeTemplateItems(curEdu, education);
+  if (certifications.length) resumeSections.certifications = _mergeTemplateItems(curCerts, certifications);
+  if (techEnv.length) resumeSections.technical_environment = _mergeTemplateItems(curTech, techEnv);
 
-  for (const k of ['preserved_projects', 'preserved_companies', 'preserved_school', 'real_metrics']) {{
-    if (Object.prototype.hasOwnProperty.call(resumeFacts, k)) delete resumeFacts[k];
-  }}
   const preservedProjects = _getTemplateItems('setup-tpl-preserved-projects');
   const preservedCompanies = _getTemplateItems('setup-tpl-preserved-companies');
   const realMetrics = _getTemplateItems('setup-tpl-real-metrics');
   const preservedSchool = (((document.getElementById('setup-tpl-preserved-school') || {{}}).value || '') + '').trim();
 
-  if (preservedProjects.length) resumeFacts.preserved_projects = preservedProjects;
-  if (preservedCompanies.length) resumeFacts.preserved_companies = preservedCompanies;
+  const curProjects = _templateItemsFromAny(resumeFacts.preserved_projects);
+  const curCompanies = _templateItemsFromAny(resumeFacts.preserved_companies);
+  const curMetrics = _templateItemsFromAny(resumeFacts.real_metrics);
+
+  if (preservedProjects.length) resumeFacts.preserved_projects = _mergeTemplateItems(curProjects, preservedProjects);
+  if (preservedCompanies.length) resumeFacts.preserved_companies = _mergeTemplateItems(curCompanies, preservedCompanies);
   if (preservedSchool) resumeFacts.preserved_school = preservedSchool;
-  if (realMetrics.length) resumeFacts.real_metrics = realMetrics;
+  if (realMetrics.length) resumeFacts.real_metrics = _mergeTemplateItems(curMetrics, realMetrics);
 
   _setVal('setup-skills-boundary', _prettyJson(skillsBoundary));
   _setVal('setup-resume-sections', _prettyJson(resumeSections));
   _setVal('setup-resume-facts', _prettyJson(resumeFacts));
+
+  const sumEl = document.getElementById('setup-template-summary');
+  if (sumEl) sumEl.textContent = summary.length ? ('changes: ' + summary.slice(0, 4).join(' | ')) : 'changes: none';
 
   if (!quiet) toast('Template builder applied to JSON', 'success', 2600);
 }}
@@ -2260,6 +2346,41 @@ function setupFullProfileFromJson(quiet) {{
   const obj = _parseJsonField('setup-full-profile-json', 'full profile', {{}});
   setupFullProfileFromObject(obj, true);
   if (!quiet) toast('Full profile JSON applied to form', 'success', 2600);
+}}
+
+async function setupImportProfileJsonFile(btn) {{
+  return await _withAction(btn, {{ working: 'Importing profile...', success: 'Profile imported', fail: 'Import failed' }}, async () => {{
+    const input = document.getElementById('setup-profile-json-file');
+    const file = input && input.files && input.files.length ? input.files[0] : null;
+    if (!file) throw new Error('Pick a profile.json file first');
+
+    const text = await file.text();
+    let obj = {{}};
+    try {{
+      obj = JSON.parse(text || '{{}}');
+    }} catch (e) {{
+      throw new Error('Invalid JSON file');
+    }}
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {{
+      throw new Error('profile.json must be an object');
+    }}
+
+    setupFullProfileFromObject(obj, true);
+    _setVal('setup-full-profile-json', _prettyJson(obj));
+
+    const tailoring = (obj.tailoring || {{}});
+    _setVal('setup-role-pack', (tailoring.role_pack_override || 'auto'));
+    _setVal('setup-draft-count', (tailoring.draft_candidates != null ? tailoring.draft_candidates : '3'));
+    _setVal('setup-skills-boundary', _prettyJson(obj.skills_boundary || {{}}));
+    _setVal('setup-resume-facts', _prettyJson(obj.resume_facts || {{}}));
+    _setVal('setup-resume-sections', _prettyJson(obj.resume_sections || {{}}));
+    _setVal('setup-resume-validation', _prettyJson(obj.resume_validation || {{}}));
+    _setVal('setup-safe-synonyms', _prettyJson(tailoring.safe_synonyms || {{}}));
+    setupTemplateFromJson(true);
+
+    const country = (((obj.personal || {{}}).country || '') + '').trim();
+    if (country) _setVal('search-country', country);
+  }});
 }}
 
 function setupFullProfileFromLoaded(quiet) {{
@@ -2503,8 +2624,8 @@ async function setupLoadWorkspace(quiet, btn) {{
       const queries = Array.isArray(s.queries) ? s.queries : [];
       const boards = Array.isArray(s.boards) ? s.boards : (Array.isArray(s.sites) ? s.sites : []);
       const smartSites = Array.isArray(s.smart_sites) ? s.smart_sites : [];
-      const country = (s.country || '').toString();
-      if (country) _setVal('search-country', country);
+      const country = (s.country || defs.country || personal.country || '').toString();
+      _setVal('search-country', country || '');
       _setVal('search-hours-old', (defs.hours_old != null ? defs.hours_old : '72'));
       _setVal('search-results', (defs.results_per_site != null ? defs.results_per_site : '50'));
       if (boards && boards.length) _setVal('search-boards', boards.join(','));
@@ -2606,6 +2727,8 @@ async function setupUploadResumePdf(btn) {{
 }}
 
 async function setupSaveSearches(btn) {{
+  const adv = !!((document.getElementById('setup-adv-yaml') || {{}}).checked);
+  if (!adv) setupGenerateSearchesYaml();
   const text = ((document.getElementById('setup-searches') || {{}}).value || '').trim();
   if (!text) {{
     toast('Paste searches.yaml', 'warn', 3200);
@@ -2613,6 +2736,7 @@ async function setupSaveSearches(btn) {{
   }}
   return await _withAction(btn, {{ working: 'Saving...', success: 'searches.yaml saved', fail: 'Save failed' }}, async () => {{
     await _apiJson('/api/setup/searches', {{ text: text }});
+    await setupLoadWorkspace(true, null);
     await setupRefresh(null);
   }});
 }}
@@ -2843,6 +2967,7 @@ async function apiPipelineRun(stages, opts) {{
     results_per_site: (opts && opts.results_per_site) || '',
     hours_old: (opts && opts.hours_old) || '',
     selected_only: !!(opts && opts.selected_only),
+    tailor_lenient: !!(opts && opts.tailor_lenient),
     discover_skip_jobspy: !!(opts && opts.discover_skip_jobspy),
     discover_skip_workday: !!(opts && opts.discover_skip_workday),
     discover_skip_smarte: !!(opts && opts.discover_skip_smarte)
@@ -2852,6 +2977,10 @@ async function apiPipelineRun(stages, opts) {{
 
 async function apiPipelineStop() {{
   return await _apiJson('/api/pipeline/stop', {{}});
+}}
+
+async function apiScoreRepair() {{
+  return await _apiJson('/api/score/repair', {{}});
 }}
 
 async function apiPipelineLogs(since) {{
@@ -3009,6 +3138,7 @@ function _renderRecentRuns(runs) {{
     if (r.discover_skip_jobspy) extra.push('no_jobspy');
     if (r.discover_skip_workday) extra.push('no_workday');
     if (r.discover_skip_smarte) extra.push('no_smarte');
+    if (r.tailor_lenient) extra.push('lenient_tailor');
 
     const row = document.createElement('div');
     row.style.display = 'flex';
@@ -3095,6 +3225,10 @@ async function pipelineInitFromHistory() {{
     if (r.selected_only !== undefined && r.selected_only !== null) {{
       const so = document.getElementById('pipe-selected-only');
       if (so) so.checked = !!r.selected_only;
+    }}
+    if (r.tailor_lenient !== undefined && r.tailor_lenient !== null) {{
+      const tl = document.getElementById('pipe-tailor-lenient');
+      if (tl) tl.checked = !!r.tailor_lenient;
     }}
 
     // If a per-run search override was used, seed the inputs so reruns are easy.
@@ -3221,6 +3355,7 @@ async function pipelineRun(stages) {{
   const resultsPerSite = parseInt(((document.getElementById('pipe-results-per-site') || {{}}).value || '').trim() || '0') || 0;
   const hoursOld = parseInt(((document.getElementById('pipe-hours-old') || {{}}).value || '').trim() || '0') || 0;
   const selectedOnly = !!((document.getElementById('pipe-selected-only') || {{}}).checked);
+  const tailorLenient = !!((document.getElementById('pipe-tailor-lenient') || {{}}).checked);
   const skipJobspy = !!((document.getElementById('pipe-skip-jobspy') || {{}}).checked);
   const skipWorkday = !!((document.getElementById('pipe-skip-workday') || {{}}).checked);
   const skipSmarte = !!((document.getElementById('pipe-skip-smarte') || {{}}).checked);
@@ -3241,6 +3376,7 @@ async function pipelineRun(stages) {{
       results_per_site: resultsPerSite,
       hours_old: hoursOld,
       selected_only: selectedOnly,
+      tailor_lenient: tailorLenient,
       discover_skip_jobspy: skipJobspy,
       discover_skip_workday: skipWorkday,
       discover_skip_smarte: skipSmarte
@@ -3267,6 +3403,43 @@ async function pipelineStop() {{
   }} catch (e) {{
     _pipeWarnOnce('[pipeline] stop failed: ' + (e && e.message ? e.message : e));
     toast('Stop failed: ' + (e && e.message ? e.message : e), 'error', 4200);
+  }}
+}}
+
+async function pipelineScoreRepair() {{
+  if (window.location.protocol === 'file:') {{
+    toast('Score repair: use applypilot dashboard-serve', 'warn', 3600);
+    return;
+  }}
+
+  if (!(await pipelineCheckApiOnce())) {{
+    toast('Pipeline API unavailable', 'error', 4200);
+    return;
+  }}
+
+  if (_pipeRunning) {{
+    toast('Stop the running pipeline first', 'warn', 3200);
+    return;
+  }}
+
+  if (!confirm('Repair zero scores from stored LLM output?')) return;
+
+  try {{
+    _pipeAppend(['[score-repair] starting...']);
+    const res = await apiScoreRepair();
+    const info = (res && res.result) || {{}};
+    const recovered = parseInt(info.recovered || 0, 10) || 0;
+    const candidates = parseInt(info.candidates || 0, 10) || 0;
+    const remaining = parseInt(info.remaining_zero || 0, 10) || 0;
+    _pipeAppend([
+      '[score-repair] done: candidates=' + candidates + ' recovered=' + recovered + ' remaining_zero=' + remaining
+    ]);
+    pipelineJumpToBottom();
+    toast('Score repair recovered ' + recovered + ' jobs', 'success');
+    setTimeout(() => window.location.reload(), 450);
+  }} catch (e) {{
+    _pipeWarnOnce('[score-repair] failed: ' + (e && e.message ? e.message : e));
+    toast('Score repair failed: ' + (e && e.message ? e.message : e), 'error', 4200);
   }}
 }}
 

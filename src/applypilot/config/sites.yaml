@@ -44,6 +44,7 @@ base_urls:
   "Adzuna UK": "https://www.adzuna.co.uk"
   "Guardian Jobs": "https://jobs.theguardian.com"
   "NHS Jobs": "https://www.jobs.nhs.uk"
+  "Reed": "https://www.reed.co.uk"
   "RemoteOK": null
   "WelcomeToTheJungle": null
   "Workopolis": "https://www.workopolis.com"
@@ -196,6 +197,7 @@ sites:
   - name: "NHS Jobs"
     url: "https://www.jobs.nhs.uk/candidate/search/results?keyword={query_encoded}&location={location_encoded}"
     type: search
+    omit_generic_location: true
 
   - name: "Adzuna UK"
     url: "https://www.adzuna.co.uk/search?q={query_encoded}&w={location_encoded}"

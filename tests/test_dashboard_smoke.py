@@ -80,8 +80,11 @@ def test_generate_dashboard_writes_html_and_contains_panels() -> None:
             assert "Full Profile Editor" in html
             assert "setup-full-profile-json" in html
             assert "setupSaveFullProfile" in html
+            assert "setup-profile-json-file" in html
+            assert "setupImportProfileJsonFile" in html
             assert "String.fromCharCode(10)" in html
             assert "split(cr).join(nl)" in html
+            assert "out.join('\\n')" in html
             assert "return await _apiJson('/api/pipeline/run', payload);" in html
             assert "return await _apiJson('/api/jobs/mark', payload);" in html
 

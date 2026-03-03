@@ -11,9 +11,9 @@ import re
 import time
 from datetime import datetime, timezone
 
-from applypilot.config import RESUME_PATH, load_profile
+from applypilot.config import RESUME_PATH
 from applypilot.database import get_connection, get_jobs_by_stage
-from applypilot.llm import get_client
+from applypilot.llm import chat_json
 
 log = logging.getLogger(__name__)
 
@@ -61,8 +61,11 @@ def _parse_score_response(response: str) -> dict:
     # First try strict JSON shape.
     try:
         txt = (response or "").strip()
+        fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", txt, flags=re.IGNORECASE | re.DOTALL)
+        if fenced:
+            txt = fenced.group(1).strip()
         if txt.startswith("```"):
-            txt = re.sub(r"^```[a-zA-Z]*\n?", "", txt)
+            txt = re.sub(r"^```(?:json)?\s*", "", txt, flags=re.IGNORECASE)
             txt = re.sub(r"\n?```$", "", txt)
             txt = txt.strip()
         data = json.loads(txt)
@@ -90,6 +93,32 @@ def _parse_score_response(response: str) -> dict:
 
             if score > 0:
                 return {"score": score, "keywords": keywords, "reasoning": reasoning, "confidence": confidence}
+    except Exception:
+        pass
+
+    # Gemini can occasionally truncate JSON output after hidden reasoning,
+    # leaving a partial object like: {"score": 7, "keywords": [
+    # Recover the score from partial JSON so we don't mark valid responses as 0.
+    try:
+        m = re.search(r'"score"\s*:\s*(\d{1,2})', response or "")
+        if m:
+            score = max(1, min(10, int(m.group(1))))
+
+            kw_match = re.search(r'"keywords"\s*:\s*\[(.*?)\]', response or "", flags=re.DOTALL)
+            if kw_match:
+                kws = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', kw_match.group(1))
+                keywords = ", ".join(k.strip() for k in kws if k.strip())
+
+            conf_match = re.search(r'"confidence"\s*:\s*([0-9]+(?:\.[0-9]+)?)', response or "")
+            if conf_match:
+                try:
+                    confidence = max(0.0, min(1.0, float(conf_match.group(1))))
+                except Exception:
+                    confidence = 0.0
+            if confidence <= 0.0:
+                confidence = 0.6
+
+            return {"score": score, "keywords": keywords, "reasoning": reasoning, "confidence": confidence}
     except Exception:
         pass
 
@@ -142,12 +171,58 @@ def score_job(resume_text: str, job: dict) -> dict:
     ]
 
     try:
-        client = get_client()
-        response = client.chat(messages, max_tokens=512, temperature=0.2)
+        response = chat_json(messages, max_tokens=768, temperature=0.0)
         return _parse_score_response(response)
     except Exception as e:
         log.error("LLM error scoring job '%s': %s", job.get("title", "?"), e)
         return {"score": 0, "keywords": "", "reasoning": f"LLM error: {e}", "confidence": 0.0}
+
+
+def _repair_zero_scores(conn) -> int:
+    """Backfill fit_score for rows where LLM JSON was truncated but score is recoverable."""
+    rows = conn.execute(
+        "SELECT url, score_reasoning FROM jobs "
+        "WHERE fit_score = 0 AND score_reasoning IS NOT NULL "
+        "AND score_reasoning LIKE '%\"score\"%'"
+    ).fetchall()
+
+    repaired = 0
+    for row in rows:
+        parsed = _parse_score_response(str(row[1] or ""))
+        score = int(parsed.get("score") or 0)
+        if score <= 0:
+            continue
+        conn.execute(
+            "UPDATE jobs SET fit_score = ?, score_confidence = ? WHERE url = ?",
+            (score, float(parsed.get("confidence") or 0.0), row[0]),
+        )
+        repaired += 1
+
+    if repaired:
+        conn.commit()
+        log.info("Recovered %d previously-zero scores from stored LLM output.", repaired)
+
+    return repaired
+
+
+def run_score_repair() -> dict:
+    """Repair previously stored zero scores when score is recoverable from score_reasoning."""
+    conn = get_connection()
+
+    candidates = conn.execute(
+        "SELECT COUNT(*) FROM jobs "
+        "WHERE fit_score = 0 AND score_reasoning IS NOT NULL "
+        "AND score_reasoning LIKE '%\"score\"%'"
+    ).fetchone()[0]
+
+    recovered = _repair_zero_scores(conn)
+    remaining_zero = conn.execute("SELECT COUNT(*) FROM jobs WHERE fit_score = 0").fetchone()[0]
+
+    return {
+        "candidates": int(candidates or 0),
+        "recovered": int(recovered or 0),
+        "remaining_zero": int(remaining_zero or 0),
+    }
 
 
 def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
@@ -158,10 +233,11 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
         rescore: If True, re-score all jobs (not just unscored ones).
 
     Returns:
-        {"scored": int, "errors": int, "elapsed": float, "distribution": list}
+        {"scored": int, "errors": int, "recovered": int, "elapsed": float, "distribution": list}
     """
     resume_text = RESUME_PATH.read_text(encoding="utf-8")
     conn = get_connection()
+    recovered = _repair_zero_scores(conn)
 
     if rescore:
         query = "SELECT * FROM jobs WHERE full_description IS NOT NULL"
@@ -173,7 +249,7 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
 
     if not jobs:
         log.info("No unscored jobs with descriptions found.")
-        return {"scored": 0, "errors": 0, "elapsed": 0.0, "distribution": []}
+        return {"scored": 0, "errors": 0, "recovered": recovered, "elapsed": 0.0, "distribution": []}
 
     # Convert sqlite3.Row to dicts if needed
     if jobs and not isinstance(jobs[0], dict):
@@ -229,6 +305,7 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     return {
         "scored": len(results),
         "errors": errors,
+        "recovered": recovered,
         "elapsed": elapsed,
         "distribution": distribution,
     }

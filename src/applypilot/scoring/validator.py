@@ -176,16 +176,16 @@ def _load_resume_validation(profile: dict, runtime_rules: dict | None = None) ->
 
     defaults = {
         "experience_bullets": {
-            "most_recent": {"min": 5, "max": 6},
-            "other": {"min": 3, "max": 4},
-            "enforce_most_recent_max": True,
+            "most_recent": {"min": 3, "max": 6},
+            "other": {"min": 2, "max": 4},
+            "enforce_most_recent_max": False,
         },
         "project_bullets": {
             "min": 1,
             "max": 2,
         },
         "required_sections": {
-            "projects": True,
+            "projects": False,
             "education": True,
         },
         "bullet_lint": {
@@ -351,8 +351,8 @@ def validate_json_fields(data: dict, profile: dict, runtime_rules: dict | None =
 
     if isinstance(data["experience"], list):
         # Ensure we keep a minimally complete work history.
-        if len(data["experience"]) < 3:
-            errors.append("Too few experience entries (need at least 3).")
+        if len(data["experience"]) < 2:
+            errors.append("Too few experience entries (need at least 2).")
 
         # Ensure the current company appears somewhere in Experience.
         current_company = str(profile.get("experience", {}).get("current_company", "") or "").strip()
@@ -514,7 +514,7 @@ def validate_tailored_resume(
 
     rules = _load_resume_validation(profile, runtime_rules=runtime_rules)
     required_cfg = rules.get("required_sections") or {}
-    require_projects = bool(required_cfg.get("projects", True))
+    require_projects = bool(required_cfg.get("projects", False))
     require_education = bool(required_cfg.get("education", True))
 
     for section, variants in section_variants_required.items():

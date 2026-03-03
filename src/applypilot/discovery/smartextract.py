@@ -56,6 +56,37 @@ def _env_flag(name: str, default: str = "1") -> bool:
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
+_CAPTCHA_SIGNALS = (
+    "captcha",
+    "are you a human",
+    "verify you",
+    "unusual requests",
+    "access denied",
+    "please verify",
+    "bot detection",
+)
+
+_GENERIC_LOCATION_TERMS = {
+    "united kingdom",
+    "uk",
+    "great britain",
+    "england",
+    "scotland",
+    "wales",
+    "northern ireland",
+    "united states",
+    "usa",
+    "us",
+    "canada",
+    "australia",
+    "new zealand",
+    "europe",
+    "global",
+    "worldwide",
+    "remote",
+    "anywhere",
+}
+
 
 # -- Location filtering -------------------------------------------------------
 
@@ -100,6 +131,21 @@ def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> 
         if a.lower() in loc:
             return True
     return False
+
+
+def _is_generic_location(location: str | None) -> bool:
+    """Return True when a location is country-wide/non-specific."""
+    if not location:
+        return False
+    normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z]+", " ", location.lower())).strip()
+    return normalized in _GENERIC_LOCATION_TERMS
+
+
+def _has_captcha_signal(html: str | None) -> bool:
+    if not html:
+        return False
+    lowered = html.lower()
+    return any(s in lowered for s in _CAPTCHA_SIGNALS)
 
 
 # -- Site configuration from YAML --------------------------------------------
@@ -777,6 +823,13 @@ def extract_json(text: str) -> dict:
     raise json.JSONDecodeError("Could not parse JSON", text, 0)
 
 
+def _normalize_selector_for_bs4(selector: str | None) -> str | None:
+    """Normalize LLM CSS selectors to SoupSieve-supported equivalents."""
+    if not selector:
+        return selector
+    return re.sub(r"(?<!-soup):contains\(", ":-soup-contains(", selector)
+
+
 # -- JSON path resolution ---------------------------------------------------
 
 
@@ -914,6 +967,14 @@ def execute_css_selectors(intel: dict) -> tuple[dict, list[dict]]:
         log.warning("LLM: %s", selectors["error"])
         return selectors, []
 
+    for field in ["job_card", "title", "salary", "description", "location", "url"]:
+        value = selectors.get(field)
+        if not isinstance(value, str):
+            continue
+        normalized = _normalize_selector_for_bs4(value)
+        if normalized != value:
+            selectors[field] = normalized
+
     log.info("Selectors: %s", selectors)
 
     # Apply selectors to the ORIGINAL full_html
@@ -973,17 +1034,35 @@ def _run_one_site(name: str, url: str) -> dict:
     # Headful retry if page content is tiny
     full_html = intel.get("full_html", "")
     cleaned_check = clean_page_html(full_html) if full_html else ""
-    _captcha_signals = [
-        "captcha",
-        "are you a human",
-        "verify you",
-        "unusual requests",
-        "access denied",
-        "please verify",
-        "bot detection",
-    ]
-    _is_captcha = any(s in full_html.lower() for s in _captcha_signals) if full_html else False
-    if len(cleaned_check) < 5000 and full_html and not _is_captcha:
+    _is_captcha = _has_captcha_signal(full_html)
+    if _is_captcha:
+        retry_captcha = _env_flag("SMARTE_CAPTCHA_RETRY", "1")
+        if not retry_captcha:
+            log.warning("CAPTCHA/rate-limit detected -- skipping retries")
+            return {"name": name, "status": "CAPTCHA", "error": "captcha/rate-limit detected"}
+
+        try:
+            retry_delay = float(str(os.environ.get("SMARTE_CAPTCHA_RETRY_DELAY", "6")).strip() or "0")
+        except Exception:
+            retry_delay = 0.0
+        if retry_delay > 0:
+            time.sleep(retry_delay)
+
+        log.warning("CAPTCHA/rate-limit detected -- retrying once in headful mode")
+        intel = collect_page_intelligence(url, headless=False)
+        collect_time = time.time() - t0
+        full_html = intel.get("full_html", "")
+        cleaned_check = clean_page_html(full_html) if full_html else ""
+        if _has_captcha_signal(full_html):
+            log.warning("CAPTCHA persists after retry")
+            return {"name": name, "status": "CAPTCHA", "error": "captcha/rate-limit detected"}
+        log.info(
+            "Headful retry done in %.1fs | JSON-LD: %d | API: %d",
+            collect_time,
+            len(intel["json_ld"]),
+            len(intel["api_responses"]),
+        )
+    elif len(cleaned_check) < 5000 and full_html:
         log.info("Cleaned HTML only %s chars -- retrying headful...", f"{len(cleaned_check):,}")
         intel = collect_page_intelligence(url, headless=False)
         collect_time = time.time() - t0
@@ -993,10 +1072,6 @@ def _run_one_site(name: str, url: str) -> dict:
             len(intel["json_ld"]),
             len(intel["api_responses"]),
         )
-    elif _is_captcha:
-        log.warning("CAPTCHA/rate-limit detected -- skipping headful retry")
-        # Don't burn LLM calls on a CAPTCHA/blocked page.
-        return {"name": name, "status": "CAPTCHA", "error": "captcha/rate-limit detected"}
 
     # Step 1.5: Judge filters API responses
     if intel["api_responses"]:
@@ -1128,11 +1203,14 @@ def build_scrape_targets(
         site_type = site.get("type", "static")
 
         if site_type == "search" and queries:
+            site_location = default_location
+            if site.get("omit_generic_location") and _is_generic_location(default_location):
+                site_location = ""
             for query in queries:
                 expanded_url = site_url
                 expanded_url = expanded_url.replace("{query_encoded}", quote_plus(query))
                 expanded_url = expanded_url.replace("{query}", quote_plus(query))
-                expanded_url = expanded_url.replace("{location_encoded}", quote_plus(default_location))
+                expanded_url = expanded_url.replace("{location_encoded}", quote_plus(site_location))
                 targets.append(
                     {
                         "name": site_name,
@@ -1141,8 +1219,11 @@ def build_scrape_targets(
                     }
                 )
         else:
+            site_location = default_location
+            if site.get("omit_generic_location") and _is_generic_location(default_location):
+                site_location = ""
             expanded_url = site_url
-            expanded_url = expanded_url.replace("{location_encoded}", quote_plus(default_location))
+            expanded_url = expanded_url.replace("{location_encoded}", quote_plus(site_location))
             targets.append(
                 {
                     "name": site_name,

@@ -527,6 +527,7 @@ class _PipelineRunner:
         stream = bool(payload.get("stream") or False)
         dry_run = bool(payload.get("dry_run") or False)
         selected_only = self._coerce_bool(payload.get("selected_only"))
+        tailor_lenient = self._coerce_bool(payload.get("tailor_lenient"))
 
         # Optional per-run discovery config (dashboard-driven overrides).
         skip_jobspy = self._coerce_bool(payload.get("discover_skip_jobspy"))
@@ -588,7 +589,10 @@ class _PipelineRunner:
         if skip_smarte:
             env["DISCOVER_SKIP_SMARTE"] = "1"
         if selected_only:
+            env["APPLYPILOT_SELECTED_ONLY"] = "1"
             env["APPLYPILOT_APPLY_SELECTED_ONLY"] = "1"
+        if tailor_lenient:
+            env["APPLYPILOT_TAILOR_LENIENT"] = "1"
 
         # Persist run metadata immediately.
         _upsert_run_history(
@@ -607,6 +611,7 @@ class _PipelineRunner:
                 "stream": bool(stream),
                 "dry_run": bool(dry_run),
                 "selected_only": bool(selected_only),
+                "tailor_lenient": bool(tailor_lenient),
                 "discover_skip_jobspy": bool(skip_jobspy),
                 "discover_skip_workday": bool(skip_workday),
                 "discover_skip_smarte": bool(skip_smarte),
@@ -2020,6 +2025,23 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(400, {"ok": False, **info})
                 return
             self._send_json(200, {"ok": True, **info})
+            return
+
+        if path == "/api/score/repair":
+            st = runner.status()
+            if st.get("running") or st.get("starting"):
+                self._send_json(409, {"ok": False, "error": "pipeline_running"})
+                return
+            try:
+                from applypilot.scoring.scorer import run_score_repair
+
+                result = run_score_repair()
+                _regen_dashboard_async(app_dir=app_dir, db_path=db_path)
+                self._send_json(200, {"ok": True, "result": result})
+            except sqlite3.OperationalError as e:
+                self._send_json(409, {"ok": False, "error": "db_locked", "detail": str(e)})
+            except Exception as e:
+                self._send_json(400, {"ok": False, "error": "score_repair_failed", "detail": str(e)})
             return
 
         self._send_json(404, {"ok": False, "error": "not_found"})

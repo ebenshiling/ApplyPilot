@@ -29,6 +29,14 @@ log = logging.getLogger(__name__)
 MAX_ATTEMPTS = 5  # max cross-run retries before giving up
 
 
+def _selected_only_enabled() -> bool:
+    for key in ("APPLYPILOT_SELECTED_ONLY", "APPLYPILOT_APPLY_SELECTED_ONLY"):
+        val = str(os.environ.get(key, "") or "").strip().lower()
+        if val in ("1", "true", "yes", "y", "on"):
+            return True
+    return False
+
+
 def _sign_off_name(profile: dict) -> str:
     personal = profile.get("personal", {})
 
@@ -319,20 +327,29 @@ def run_cover_letters(min_score: int = 7, limit: int = 0) -> dict:
     profile = load_profile()
     resume_text = RESUME_PATH.read_text(encoding="utf-8")
     conn = get_connection()
+    selected_only = _selected_only_enabled()
 
     # Fetch jobs that have tailored resumes but no cover letter yet
-    jobs = conn.execute(
-        "SELECT * FROM jobs "
-        "WHERE fit_score >= ? AND tailored_resume_path IS NOT NULL "
+    where = (
+        "fit_score >= ? AND tailored_resume_path IS NOT NULL "
         "AND full_description IS NOT NULL "
         "AND (cover_letter_path IS NULL OR cover_letter_path = '') "
-        "AND COALESCE(cover_attempts, 0) < ? "
-        "ORDER BY fit_score DESC" + ("" if limit <= 0 else " LIMIT ?"),
-        ((min_score, MAX_ATTEMPTS) if limit <= 0 else (min_score, MAX_ATTEMPTS, limit)),
-    ).fetchall()
+        "AND COALESCE(cover_attempts, 0) < ?"
+    )
+    params: list[object] = [min_score, MAX_ATTEMPTS]
+    if selected_only:
+        where += " AND apply_status = 'selected'"
+    query = "SELECT * FROM jobs WHERE " + where + " ORDER BY fit_score DESC"
+    if limit > 0:
+        query += " LIMIT ?"
+        params.append(limit)
+    jobs = conn.execute(query, tuple(params)).fetchall()
 
     if not jobs:
-        log.info("No jobs needing cover letters (score >= %d).", min_score)
+        if selected_only:
+            log.info("No selected jobs needing cover letters (score >= %d).", min_score)
+        else:
+            log.info("No jobs needing cover letters (score >= %d).", min_score)
         return {"generated": 0, "errors": 0, "elapsed": 0.0}
 
     # Convert rows to dicts
@@ -341,11 +358,10 @@ def run_cover_letters(min_score: int = 7, limit: int = 0) -> dict:
         jobs = [dict(zip(columns, row)) for row in jobs]
 
     COVER_LETTER_DIR.mkdir(parents=True, exist_ok=True)
-    log.info(
-        "Generating cover letters for %d jobs (score >= %d)...",
-        len(jobs),
-        min_score,
-    )
+    if selected_only:
+        log.info("Generating cover letters for %d selected jobs (score >= %d)...", len(jobs), min_score)
+    else:
+        log.info("Generating cover letters for %d jobs (score >= %d)...", len(jobs), min_score)
     t0 = time.time()
     completed = 0
     results: list[dict] = []

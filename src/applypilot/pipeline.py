@@ -287,7 +287,8 @@ _PENDING_SQL: dict[str, str] = {
         "AND COALESCE(tailor_attempts, 0) < 5"
     ),
     "cover": (
-        "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL "
+        "SELECT COUNT(*) FROM jobs WHERE fit_score >= ? "
+        "AND tailored_resume_path IS NOT NULL "
         "AND full_description IS NOT NULL "
         "AND (cover_letter_path IS NULL OR cover_letter_path = '') "
         "AND COALESCE(cover_attempts, 0) < 5"
@@ -299,14 +300,29 @@ _PENDING_SQL: dict[str, str] = {
 _STREAM_POLL_INTERVAL = 10
 
 
+def _selected_only_enabled() -> bool:
+    for key in ("APPLYPILOT_SELECTED_ONLY", "APPLYPILOT_APPLY_SELECTED_ONLY"):
+        val = str(os.environ.get(key, "") or "").strip().lower()
+        if val in ("1", "true", "yes", "y", "on"):
+            return True
+    return False
+
+
 def _count_pending(stage: str, min_score: int = 7) -> int:
     """Count pending work items for a stage."""
     sql = _PENDING_SQL.get(stage)
     if sql is None:
         return 0
-    conn = get_connection()
+    if _selected_only_enabled() and stage in ("tailor", "cover"):
+        sql += " AND apply_status = 'selected'"
+
+    params: list[object] = []
     if "?" in sql:
-        return conn.execute(sql, (min_score,)).fetchone()[0]
+        params.append(min_score)
+
+    conn = get_connection()
+    if params:
+        return conn.execute(sql, tuple(params)).fetchone()[0]
     return conn.execute(sql).fetchone()[0]
 
 

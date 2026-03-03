@@ -48,6 +48,105 @@ log = logging.getLogger(__name__)
 MAX_ATTEMPTS = 5  # max cross-run retries before giving up
 
 
+def _selected_only_enabled() -> bool:
+    for key in ("APPLYPILOT_SELECTED_ONLY", "APPLYPILOT_APPLY_SELECTED_ONLY"):
+        val = str(os.environ.get(key, "") or "").strip().lower()
+        if val in ("1", "true", "yes", "y", "on"):
+            return True
+    return False
+
+
+def _lenient_tailor_enabled(profile: dict | None = None) -> bool:
+    """Return True when lenient tailoring mode is enabled.
+
+    Enable via:
+    - env: APPLYPILOT_TAILOR_LENIENT=1
+    - profile: tailoring.mode = "lenient" or tailoring.lenient = true
+    """
+    ev = str(os.environ.get("APPLYPILOT_TAILOR_LENIENT", "") or "").strip().lower()
+    if ev in ("1", "true", "yes", "y", "on"):
+        return True
+    if ev in ("0", "false", "no", "n", "off"):
+        return False
+
+    try:
+        cfg = (profile or {}).get("tailoring") or {}
+        if isinstance(cfg, dict):
+            mode = str(cfg.get("mode") or "").strip().lower()
+            if mode == "lenient":
+                return True
+            if mode == "strict":
+                return False
+            lv = cfg.get("lenient")
+            if isinstance(lv, bool):
+                return lv
+            ls = str(lv or "").strip().lower()
+            if ls in ("1", "true", "yes", "y", "on"):
+                return True
+            if ls in ("0", "false", "no", "n", "off"):
+                return False
+    except Exception:
+        pass
+
+    return False
+
+
+def _is_fatal_json_error(msg: str) -> bool:
+    s = str(msg or "").strip().lower()
+    if not s:
+        return False
+    fatal_markers = (
+        "missing required field",
+        "fabricated skill",
+        "banned words",
+        "llm self-talk",
+        "invented tools not in base resume",
+    )
+    return any(m in s for m in fatal_markers)
+
+
+def _is_fatal_full_validation_error(msg: str) -> bool:
+    s = str(msg or "").strip().lower()
+    if not s:
+        return False
+    fatal_markers = (
+        "fabricated skill",
+        "banned words",
+        "llm self-talk",
+        "contains em dash or en dash",
+        "education '",
+        "current company",
+    )
+    return any(m in s for m in fatal_markers)
+
+
+def _strict_evidence_enabled(profile: dict) -> bool:
+    """Whether citation/quant checks are hard blockers.
+
+    Default is lenient (False) to reduce false negatives in real-world tailoring.
+    Enable with profile.tailoring.strict_evidence=true or env APPLYPILOT_TAILOR_STRICT_EVIDENCE=1.
+    """
+    if _lenient_tailor_enabled(profile):
+        return False
+
+    try:
+        cfg = (profile or {}).get("tailoring") or {}
+        if isinstance(cfg, dict):
+            v = cfg.get("strict_evidence")
+            if isinstance(v, bool):
+                return v
+            s = str(v or "").strip().lower()
+            if s in ("1", "true", "yes", "y", "on"):
+                return True
+            if s in ("0", "false", "no", "n", "off"):
+                return False
+    except Exception:
+        pass
+
+    ev = str(os.environ.get("APPLYPILOT_TAILOR_STRICT_EVIDENCE", "") or "").strip().lower()
+    return ev in ("1", "true", "yes", "y", "on")
+
+
 def _load_skip_titles() -> list[str]:
     """Load `skip_titles` from searches.yaml (case-insensitive substrings)."""
     try:
@@ -759,6 +858,9 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
         },
         "draft_ranking": [],
     }
+    lenient_tailor = _lenient_tailor_enabled(profile)
+    strict_evidence = _strict_evidence_enabled(profile)
+    report["mode"] = "lenient" if lenient_tailor else "strict"
 
     def _normalize_title(s: str) -> str:
         return re.sub(r"[^a-z0-9]+", " ", str(s).lower()).strip()
@@ -1111,7 +1213,8 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
             assert isinstance(data, dict)
             citation_check = validate_fact_citations(data, fact_ids)
             validation = validate_json_fields(data, profile, runtime_rules=runtime_rules)
-            if validation.get("passed") and citation_check.get("passed"):
+            citation_gate_ok = bool(citation_check.get("passed") or not strict_evidence)
+            if validation.get("passed") and citation_gate_ok:
                 tailored_candidate = assemble_resume_text(data, profile)
                 coverage = score_jd_coverage(tailored_candidate, jd_targets, jd_synonyms)
                 quant_check = check_quant_consistency(data, evidence_numbers)
@@ -1186,9 +1289,24 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
         report["quant_check"] = best.get("quant")
 
         hard_errors: list[str] = []
-        hard_errors.extend(list((best.get("validation") or {}).get("errors") or []))
-        hard_errors.extend(list((best.get("citation") or {}).get("errors") or []))
-        hard_errors.extend(list((best.get("quant") or {}).get("errors") or []))
+        validation_errors = list((best.get("validation") or {}).get("errors") or [])
+        if lenient_tailor:
+            hard_errors.extend([e for e in validation_errors if _is_fatal_json_error(str(e))])
+            soft_json = [str(e) for e in validation_errors if not _is_fatal_json_error(str(e))]
+            if soft_json:
+                report.setdefault("lenient_warnings", [])
+                report["lenient_warnings"].extend(soft_json)
+        else:
+            hard_errors.extend(validation_errors)
+        if strict_evidence:
+            hard_errors.extend(list((best.get("citation") or {}).get("errors") or []))
+            hard_errors.extend(list((best.get("quant") or {}).get("errors") or []))
+        else:
+            evidence_warnings: list[str] = []
+            evidence_warnings.extend(list((best.get("citation") or {}).get("errors") or []))
+            evidence_warnings.extend(list((best.get("quant") or {}).get("errors") or []))
+            if evidence_warnings:
+                report["evidence_warnings"] = evidence_warnings
 
         if hard_errors:
             avoid_notes.extend(hard_errors[:6])
@@ -1256,20 +1374,37 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
         )
         report["full_validator"] = full_validation
         if not full_validation["passed"]:
-            avoid_notes.extend(full_validation["errors"])
-            if attempt < max_retries:
-                continue
-            report["status"] = "failed_full_validation"
-            return tailored, report
+            fv_errors = [str(e) for e in (full_validation.get("errors") or [])]
+            if lenient_tailor:
+                fatal_fv = [e for e in fv_errors if _is_fatal_full_validation_error(e)]
+                nonfatal_fv = [e for e in fv_errors if e not in fatal_fv]
+                if nonfatal_fv:
+                    report.setdefault("lenient_warnings", [])
+                    report["lenient_warnings"].extend(nonfatal_fv)
+                if fatal_fv:
+                    avoid_notes.extend(fatal_fv)
+                    if attempt < max_retries:
+                        continue
+                    report["status"] = "failed_full_validation"
+                    return tailored, report
+            else:
+                avoid_notes.extend(fv_errors)
+                if attempt < max_retries:
+                    continue
+                report["status"] = "failed_full_validation"
+                return tailored, report
 
-        judge = judge_tailored_resume(resume_text, tailored, job.get("title", ""), profile)
-        report["judge"] = judge
-        if not judge["passed"]:
-            avoid_notes.append(f"Judge rejected: {judge['issues']}")
-            if attempt < max_retries:
-                continue
-            report["status"] = "failed_judge"
-            return tailored, report
+        if not lenient_tailor:
+            judge = judge_tailored_resume(resume_text, tailored, job.get("title", ""), profile)
+            report["judge"] = judge
+            if not judge["passed"]:
+                avoid_notes.append(f"Judge rejected: {judge['issues']}")
+                if attempt < max_retries:
+                    continue
+                report["status"] = "failed_judge"
+                return tailored, report
+        else:
+            report["judge"] = {"passed": True, "verdict": "SKIPPED_IN_LENIENT_MODE", "issues": "", "raw": ""}
 
         report["status"] = "approved"
         report["keywords"] = highlight_keywords
@@ -1295,10 +1430,17 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
     profile = load_profile()
     resume_text = RESUME_PATH.read_text(encoding="utf-8")
     conn = get_connection()
+    selected_only = _selected_only_enabled()
 
     skip_titles = _load_skip_titles()
 
-    jobs = get_jobs_by_stage(conn=conn, stage="pending_tailor", min_score=min_score, limit=limit)
+    jobs = get_jobs_by_stage(
+        conn=conn,
+        stage="pending_tailor",
+        min_score=min_score,
+        limit=limit,
+        selected_only=selected_only,
+    )
 
     if jobs and skip_titles:
         # Mark known-bad titles as skipped so they don't remain "pending".
@@ -1320,11 +1462,18 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
         jobs = kept
 
     if not jobs:
-        log.info("No untailored jobs with score >= %d.", min_score)
+        if selected_only:
+            log.info("No selected untailored jobs with score >= %d.", min_score)
+        else:
+            log.info("No untailored jobs with score >= %d.", min_score)
         return {"approved": 0, "failed": 0, "errors": 0, "elapsed": 0.0}
 
     TAILORED_DIR.mkdir(parents=True, exist_ok=True)
-    log.info("Tailoring resumes for %d jobs (score >= %d)...", len(jobs), min_score)
+    mode_label = "lenient" if _lenient_tailor_enabled(profile) else "strict"
+    if selected_only:
+        log.info("Tailoring resumes for %d selected jobs (score >= %d, mode=%s)...", len(jobs), min_score, mode_label)
+    else:
+        log.info("Tailoring resumes for %d jobs (score >= %d, mode=%s)...", len(jobs), min_score, mode_label)
     t0 = time.time()
     completed = 0
     results: list[dict] = []
@@ -1378,7 +1527,24 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
                 "site": job["site"],
                 "status": report["status"],
                 "attempts": report["attempts"],
+                "failure_detail": "",
             }
+
+            if result["status"] in ("failed_validation", "failed_full_validation"):
+                full_v = report.get("full_validator") if isinstance(report, dict) else None
+                base_v = report.get("validator") if isinstance(report, dict) else None
+                err_list = []
+                if isinstance(full_v, dict) and isinstance(full_v.get("errors"), list):
+                    err_list = [str(e).strip() for e in full_v.get("errors", []) if str(e).strip()]
+                if not err_list and isinstance(base_v, dict) and isinstance(base_v.get("errors"), list):
+                    err_list = [str(e).strip() for e in base_v.get("errors", []) if str(e).strip()]
+                if err_list:
+                    result["failure_detail"] = "; ".join(err_list[:3])
+            elif result["status"] == "failed_judge":
+                judge = report.get("judge") if isinstance(report, dict) else None
+                issues = judge.get("issues") if isinstance(judge, dict) else ""
+                if issues:
+                    result["failure_detail"] = str(issues)
         except Exception as e:
             result = {
                 "url": job["url"],
@@ -1388,6 +1554,7 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
                 "attempts": 0,
                 "path": None,
                 "pdf_path": None,
+                "failure_detail": str(e),
             }
             log.error("%d/%d [ERROR] %s -- %s", completed, len(jobs), job["title"][:40], e)
 
@@ -1405,6 +1572,8 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
             rate * 60,
             result["title"][:40],
         )
+        if result.get("failure_detail") and result["status"] != "approved":
+            log.info("  detail: %s", result["failure_detail"])
 
     # Persist to DB: increment attempt counter for ALL, save path only for approved
     now = datetime.now(timezone.utc).isoformat()

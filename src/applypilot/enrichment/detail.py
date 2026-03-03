@@ -18,7 +18,7 @@ import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
@@ -58,6 +58,34 @@ def _load_base_urls() -> dict[str, str | None]:
     return load_base_urls()
 
 
+def _infer_base_url_from_site_registry(site: str) -> str | None:
+    """Infer a base URL from `sites[].url` when base_urls is missing."""
+    if not site:
+        return None
+    try:
+        cfg = config.load_sites_config()
+    except Exception:
+        return None
+
+    entries = cfg.get("sites") if isinstance(cfg, dict) else None
+    if not isinstance(entries, list):
+        return None
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("name") or "").strip() != site:
+            continue
+        raw = str(entry.get("url") or "").strip()
+        if not raw:
+            return None
+        parsed = urlparse(raw)
+        if parsed.scheme in ("http", "https") and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+        return None
+    return None
+
+
 def resolve_url(raw_url: str, site: str) -> str | None:
     """Resolve a stored URL to an absolute URL."""
     if not raw_url:
@@ -76,6 +104,8 @@ def resolve_url(raw_url: str, site: str) -> str | None:
         return None
 
     base = _load_base_urls().get(site)
+    if not base:
+        base = _infer_base_url_from_site_registry(site)
     if not base:
         return None
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -90,6 +91,16 @@ def run(
     ),
     min_score: int = typer.Option(7, "--min-score", help="Minimum fit score for tailor/cover stages."),
     workers: int = typer.Option(1, "--workers", "-w", help="Parallel threads for discovery/enrichment stages."),
+    selected_only: bool = typer.Option(
+        False,
+        "--selected-only",
+        help="Tailor/cover/apply stages only process jobs marked as selected.",
+    ),
+    tailor_lenient: bool = typer.Option(
+        False,
+        "--tailor-lenient",
+        help="Use lenient validation mode for tailoring (fewer strict blockers).",
+    ),
     stream: bool = typer.Option(False, "--stream", help="Run stages concurrently (streaming mode)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview stages without executing."),
 ) -> None:
@@ -112,6 +123,12 @@ def run(
         from applypilot.config import check_tier
 
         check_tier(2, "AI scoring/tailoring")
+
+    if selected_only:
+        os.environ["APPLYPILOT_SELECTED_ONLY"] = "1"
+        os.environ["APPLYPILOT_APPLY_SELECTED_ONLY"] = "1"
+    if tailor_lenient:
+        os.environ["APPLYPILOT_TAILOR_LENIENT"] = "1"
 
     result = run_pipeline(
         stages=stage_list,
@@ -347,6 +364,22 @@ def score_cmd(
     from applypilot.scoring.scorer import run_scoring
 
     run_scoring(limit=limit, rescore=rescore)
+
+
+@app.command("score-repair")
+def score_repair_cmd() -> None:
+    """Repair jobs incorrectly saved with fit_score=0 from truncated LLM JSON."""
+    _bootstrap()
+
+    from applypilot.scoring.scorer import run_score_repair
+
+    result = run_score_repair()
+    console.print(
+        "[green]Score repair complete.[/green] "
+        f"Candidates: {result['candidates']} | "
+        f"Recovered: {result['recovered']} | "
+        f"Remaining zero scores: {result['remaining_zero']}"
+    )
 
 
 @app.command("llm-test")
