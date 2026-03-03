@@ -1192,7 +1192,7 @@ def generate_dashboard(
 
           <div style="margin-top:0.55rem;display:flex;gap:0.45rem;flex-wrap:wrap;align-items:center">
             <input id="setup-profile-json-file" type="file" accept="application/json,.json" style="max-width:100%">
-            <button type="button" class="apply-link copy-btn" onclick="setupImportProfileJsonFile(this)">Import profile.json file</button>
+            <button type="button" class="apply-link copy-btn" data-live="1" onclick="setupImportProfileJsonFile(this)">Import + save profile.json</button>
           </div>
 
           <div style="margin-top:0.65rem;display:flex;gap:0.45rem;flex-wrap:wrap">
@@ -1249,7 +1249,7 @@ def generate_dashboard(
 
             <div class="job-card" style="padding:0.65rem;grid-column:1 / -1;background:rgba(15,23,42,0.03);border-color:rgba(15,23,42,0.12)">
               <div class="job-title" style="font-size:0.96rem;margin-bottom:0.35rem">Resume Template Builder (No JSON Needed)</div>
-              <div class="job-desc" style="margin:0 0 0.55rem 0">Add/update skills, education, certifications, and preserved resume facts here. Use comma or newline separators.</div>
+              <div class="job-desc" style="margin:0 0 0.55rem 0">Add/update skills, education, certifications, and preserved resume facts here. Use comma or newline separators. Legacy keys are auto-mapped (for example: bi_tools, spreadsheets, data_practices, capabilities).</div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.45rem">
                 <label class="job-desc" style="margin:0">Skills: Languages / Programming
                   <textarea id="setup-tpl-languages" class="full-desc" style="min-height:74px;max-height:120px;margin-top:0.3rem" placeholder="SQL, Python, TypeScript"></textarea>
@@ -2008,9 +2008,9 @@ function setupTemplateFromJson(quiet) {{
 
   _setTemplateItems('setup-tpl-languages', _templateItemsFromKeys(skillsBoundary, ['languages', 'programming_languages']));
   _setTemplateItems('setup-tpl-frameworks', _templateItemsFromKeys(skillsBoundary, ['frameworks', 'libraries']));
-  _setTemplateItems('setup-tpl-analytics', _templateItemsFromKeys(skillsBoundary, ['analytics', 'business_intelligence', 'bi', 'reporting']));
-  _setTemplateItems('setup-tpl-data', _templateItemsFromKeys(skillsBoundary, ['data', 'databases', 'data_engineering']));
-  _setTemplateItems('setup-tpl-tools', _templateItemsFromKeys(skillsBoundary, ['tools', 'platforms', 'devops', 'cloud', 'infrastructure']));
+  _setTemplateItems('setup-tpl-analytics', _templateItemsFromKeys(skillsBoundary, ['analytics', 'business_intelligence', 'bi', 'reporting', 'bi_tools']));
+  _setTemplateItems('setup-tpl-data', _templateItemsFromKeys(skillsBoundary, ['data', 'databases', 'data_engineering', 'data_practices', 'capabilities']));
+  _setTemplateItems('setup-tpl-tools', _templateItemsFromKeys(skillsBoundary, ['tools', 'platforms', 'devops', 'cloud', 'infrastructure', 'spreadsheets']));
   _setTemplateItems('setup-tpl-governance', _templateItemsFromKeys(skillsBoundary, ['governance', 'compliance', 'security']));
   _setTemplateItems('setup-tpl-education', resumeSections.education);
   _setTemplateItems('setup-tpl-certifications', resumeSections.certifications);
@@ -2057,8 +2057,8 @@ function setupTemplateToJson(quiet) {{
     summary.push('frameworks kept (' + curFw.length + ')');
   }}
 
-  const anKey = _pickTemplateTargetKey(skillsBoundary, 'analytics', ['business_intelligence', 'bi', 'reporting']);
-  const curAn = _templateItemsFromKeys(skillsBoundary, ['analytics', 'business_intelligence', 'bi', 'reporting']);
+  const anKey = _pickTemplateTargetKey(skillsBoundary, 'analytics', ['business_intelligence', 'bi', 'reporting', 'bi_tools']);
+  const curAn = _templateItemsFromKeys(skillsBoundary, ['analytics', 'business_intelligence', 'bi', 'reporting', 'bi_tools']);
   if (analytics.length) {{
     const merged = _mergeTemplateItems(curAn, analytics);
     skillsBoundary[anKey] = merged;
@@ -2067,8 +2067,8 @@ function setupTemplateToJson(quiet) {{
     summary.push('analytics kept (' + curAn.length + ')');
   }}
 
-  const dataKey = _pickTemplateTargetKey(skillsBoundary, 'data', ['databases', 'data_engineering']);
-  const curData = _templateItemsFromKeys(skillsBoundary, ['data', 'databases', 'data_engineering']);
+  const dataKey = _pickTemplateTargetKey(skillsBoundary, 'data', ['databases', 'data_engineering', 'data_practices', 'capabilities']);
+  const curData = _templateItemsFromKeys(skillsBoundary, ['data', 'databases', 'data_engineering', 'data_practices', 'capabilities']);
   if (data.length) {{
     const merged = _mergeTemplateItems(curData, data);
     skillsBoundary[dataKey] = merged;
@@ -2077,8 +2077,8 @@ function setupTemplateToJson(quiet) {{
     summary.push('data kept (' + curData.length + ')');
   }}
 
-  const toolKey = _pickTemplateTargetKey(skillsBoundary, 'tools', ['platforms', 'devops', 'cloud', 'infrastructure']);
-  const curTools = _templateItemsFromKeys(skillsBoundary, ['tools', 'platforms', 'devops', 'cloud', 'infrastructure']);
+  const toolKey = _pickTemplateTargetKey(skillsBoundary, 'tools', ['platforms', 'devops', 'cloud', 'infrastructure', 'spreadsheets']);
+  const curTools = _templateItemsFromKeys(skillsBoundary, ['tools', 'platforms', 'devops', 'cloud', 'infrastructure', 'spreadsheets']);
   if (tools.length) {{
     const merged = _mergeTemplateItems(curTools, tools);
     skillsBoundary[toolKey] = merged;
@@ -2349,7 +2349,7 @@ function setupFullProfileFromJson(quiet) {{
 }}
 
 async function setupImportProfileJsonFile(btn) {{
-  return await _withAction(btn, {{ working: 'Importing profile...', success: 'Profile imported', fail: 'Import failed' }}, async () => {{
+  return await _withAction(btn, {{ working: 'Importing profile...', success: 'Profile imported and saved', fail: 'Import failed' }}, async () => {{
     const input = document.getElementById('setup-profile-json-file');
     const file = input && input.files && input.files.length ? input.files[0] : null;
     if (!file) throw new Error('Pick a profile.json file first');
@@ -2380,6 +2380,10 @@ async function setupImportProfileJsonFile(btn) {{
 
     const country = (((obj.personal || {{}}).country || '') + '').trim();
     if (country) _setVal('search-country', country);
+
+    await _apiJson('/api/setup/profile', {{ profile: obj }});
+    await setupLoadWorkspace(true, null);
+    await setupRefresh(null);
   }});
 }}
 
