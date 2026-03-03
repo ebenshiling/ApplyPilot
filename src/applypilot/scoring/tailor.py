@@ -207,6 +207,132 @@ def _matches_skip_titles(title: str | None, skip_titles: list[str]) -> bool:
     return any(st in t_low for st in skip_titles if st)
 
 
+_ROLE_STOPWORDS = {
+    "and",
+    "or",
+    "the",
+    "a",
+    "an",
+    "of",
+    "for",
+    "to",
+    "in",
+    "at",
+    "with",
+    "on",
+    "analyst",
+    "engineer",
+    "developer",
+    "scientist",
+    "specialist",
+    "manager",
+    "consultant",
+    "associate",
+    "intern",
+    "internship",
+    "graduate",
+    "senior",
+    "junior",
+    "lead",
+    "principal",
+    "staff",
+    "head",
+}
+
+
+def _strict_title_filter_enabled(profile: dict) -> bool:
+    """Whether strict mode enforces title alignment against focus roles."""
+    if _lenient_tailor_enabled(profile):
+        return False
+
+    try:
+        cfg = (profile or {}).get("tailoring") or {}
+        if isinstance(cfg, dict) and cfg.get("strict_title_filter") is not None:
+            v = cfg.get("strict_title_filter")
+            if isinstance(v, bool):
+                return v
+            s = str(v or "").strip().lower()
+            if s in ("1", "true", "yes", "y", "on"):
+                return True
+            if s in ("0", "false", "no", "n", "off"):
+                return False
+    except Exception:
+        pass
+
+    ev = str(os.environ.get("APPLYPILOT_TAILOR_STRICT_TITLE_FILTER", "") or "").strip().lower()
+    if ev in ("1", "true", "yes", "y", "on"):
+        return True
+    if ev in ("0", "false", "no", "n", "off"):
+        return False
+
+    return True
+
+
+def _load_focus_roles(profile: dict) -> list[str]:
+    """Collect target role phrases from profile + search queries."""
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(text: str) -> None:
+        s = re.sub(r"\s+", " ", str(text or "").strip())
+        if not s:
+            return
+        key = s.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(s)
+
+    try:
+        target_role = str((((profile or {}).get("experience") or {}).get("target_role") or "")).strip()
+        if target_role:
+            for part in re.split(r"[|/;\n]+", target_role):
+                _add(part)
+    except Exception:
+        pass
+
+    try:
+        search_cfg = load_search_config() or {}
+        for q in search_cfg.get("queries") or []:
+            if isinstance(q, dict):
+                _add(str(q.get("query") or ""))
+            else:
+                _add(str(q or ""))
+    except Exception:
+        pass
+
+    return out
+
+
+def _title_matches_focus_roles(title: str | None, focus_roles: list[str]) -> bool:
+    """Return True when job title aligns with configured focus role phrases."""
+    if not title or not focus_roles:
+        return True
+
+    title_norm = re.sub(r"[^a-z0-9]+", " ", str(title).lower()).strip()
+    if not title_norm:
+        return False
+
+    title_tokens = set(title_norm.split())
+    expanded_tokens = set(title_tokens)
+    if "bi" in expanded_tokens:
+        expanded_tokens.update({"business", "intelligence"})
+
+    for role in focus_roles:
+        role_norm = re.sub(r"[^a-z0-9]+", " ", str(role).lower()).strip()
+        if not role_norm:
+            continue
+        if role_norm in title_norm:
+            return True
+
+        role_tokens = [t for t in role_norm.split() if t]
+        significant = [t for t in role_tokens if t not in _ROLE_STOPWORDS]
+        if significant and all(t in expanded_tokens for t in significant):
+            return True
+
+    return False
+
+
 # ── Prompt Builders (profile-driven) ──────────────────────────────────────
 
 
@@ -1506,6 +1632,23 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
             log.info("Skipped %d jobs due to skip_titles.", skipped)
         jobs = kept
 
+    strict_title_filter = _strict_title_filter_enabled(profile)
+    focus_roles = _load_focus_roles(profile) if strict_title_filter else []
+    if jobs and strict_title_filter and focus_roles:
+        kept: list[dict] = []
+        skipped = 0
+        for j in jobs:
+            if _title_matches_focus_roles(j.get("title"), focus_roles):
+                kept.append(j)
+            else:
+                skipped += 1
+        jobs = kept
+        if skipped:
+            preview = ", ".join(focus_roles[:4])
+            if len(focus_roles) > 4:
+                preview += ", ..."
+            log.info("Strict title filter skipped %d jobs (focus roles: %s)", skipped, preview)
+
     if not jobs:
         if selected_only:
             log.info("No selected untailored jobs with score >= %d.", min_score)
@@ -1517,23 +1660,26 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
     mode_label = "lenient" if _lenient_tailor_enabled(profile) else "strict"
     evidence_label = "on" if _strict_evidence_enabled(profile) else "off"
     min_cov = _min_coverage_required(profile)
+    title_filter_label = "on" if strict_title_filter else "off"
     if selected_only:
         log.info(
-            "Tailoring resumes for %d selected jobs (score >= %d, mode=%s, strict_evidence=%s, min_cov=%.2f)...",
+            "Tailoring resumes for %d selected jobs (score >= %d, mode=%s, strict_evidence=%s, min_cov=%.2f, title_filter=%s)...",
             len(jobs),
             min_score,
             mode_label,
             evidence_label,
             min_cov,
+            title_filter_label,
         )
     else:
         log.info(
-            "Tailoring resumes for %d jobs (score >= %d, mode=%s, strict_evidence=%s, min_cov=%.2f)...",
+            "Tailoring resumes for %d jobs (score >= %d, mode=%s, strict_evidence=%s, min_cov=%.2f, title_filter=%s)...",
             len(jobs),
             min_score,
             mode_label,
             evidence_label,
             min_cov,
+            title_filter_label,
         )
     t0 = time.time()
     completed = 0
@@ -1577,7 +1723,8 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
                     from applypilot.scoring.pdf import convert_to_pdf
 
                     pdf_path = str(convert_to_pdf(txt_path))
-                except Exception:
+                except Exception as e:
+                    log.warning("PDF generation failed for %s: %s", txt_path.name, e)
                     log.debug("PDF generation failed for %s", txt_path, exc_info=True)
 
             result = {

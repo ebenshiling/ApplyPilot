@@ -1,8 +1,11 @@
 from applypilot.scoring.tailor import _is_fatal_full_validation_error
 from applypilot.scoring.tailor import _is_fatal_json_error
 from applypilot.scoring.tailor import _lenient_tailor_enabled
+from applypilot.scoring.tailor import _load_focus_roles
 from applypilot.scoring.tailor import _min_coverage_required
+from applypilot.scoring.tailor import _strict_title_filter_enabled
 from applypilot.scoring.tailor import _strict_evidence_enabled
+from applypilot.scoring.tailor import _title_matches_focus_roles
 
 
 def test_lenient_tailor_enabled_via_env(monkeypatch) -> None:
@@ -31,6 +34,33 @@ def test_min_coverage_defaults_follow_mode(monkeypatch) -> None:
     monkeypatch.delenv("APPLYPILOT_TAILOR_MIN_COVERAGE", raising=False)
     assert _min_coverage_required({"tailoring": {"mode": "lenient"}}) == 0.0
     assert _min_coverage_required({"tailoring": {"mode": "strict"}}) > 0.0
+
+
+def test_strict_title_filter_default_and_override(monkeypatch) -> None:
+    monkeypatch.delenv("APPLYPILOT_TAILOR_STRICT_TITLE_FILTER", raising=False)
+    assert _strict_title_filter_enabled({"tailoring": {"mode": "strict"}}) is True
+    monkeypatch.setenv("APPLYPILOT_TAILOR_STRICT_TITLE_FILTER", "0")
+    assert _strict_title_filter_enabled({"tailoring": {"mode": "strict"}}) is False
+
+
+def test_title_matches_focus_roles_behavior() -> None:
+    roles = ["Data Analyst", "Analytics Engineer", "Business Intelligence Analyst"]
+    assert _title_matches_focus_roles("Senior Data Analyst", roles) is True
+    assert _title_matches_focus_roles("BI Developer", roles) is True
+    assert _title_matches_focus_roles("Summer Intern", roles) is False
+
+
+def test_load_focus_roles_combines_profile_and_queries(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "applypilot.scoring.tailor.load_search_config",
+        lambda: {"queries": [{"query": "Data Engineer"}, {"query": "Insight Analyst"}]},
+    )
+    profile = {"experience": {"target_role": "Data Analyst / Analytics Engineer"}}
+    roles = _load_focus_roles(profile)
+    assert "Data Analyst" in roles
+    assert "Analytics Engineer" in roles
+    assert "Data Engineer" in roles
+    assert "Insight Analyst" in roles
 
 
 def test_fatal_error_classification() -> None:

@@ -46,3 +46,43 @@ Thumbs.db
 
 # Claude Code
 .claude/
+
+# Local agent/tooling workspaces
+.adal/
+.agent/
+.agents/
+.augment/
+.ci311/
+.cline/
+.codebuddy/
+.commandcode/
+.continue/
+.cortex/
+.crush/
+.factory/
+.goose/
+.iflow/
+.junie/
+.kilocode/
+.kiro/
+.kode/
+.mcpjam/
+.mux/
+.neovate/
+.openhands/
+.pi/
+.pochi/
+.qoder/
+.qwen/
+.roo/
+.trae/
+.vibe/
+.windsurf/
+.zencoder/
+.venv/
+.venv311/
+skills/
+skills-lock.json
+dashboard_test.html
+tmp_manual_test.html
+tmp_manual_test.pdf

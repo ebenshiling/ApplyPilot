@@ -11,6 +11,7 @@ services:
       APPLYPILOT_DIR: /data/workspace
       APPLYPILOT_MULTI_ROOT: /data/multi
       PYTHONUNBUFFERED: "1"
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
     volumes:
       - ./docker-data/workspace:/data/workspace
       - ./docker-data/multi:/data/multi

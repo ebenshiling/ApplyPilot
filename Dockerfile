@@ -2,7 +2,8 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /app
 
@@ -12,7 +13,8 @@ COPY scripts /app/scripts
 COPY profile.example.json /app/profile.example.json
 COPY ops /app/ops
 
-RUN pip install --upgrade pip \
+RUN mkdir -p /ms-playwright \
+    && pip install --upgrade pip \
     && pip install -e . \
     && pip install --no-deps python-jobspy \
     && pip install pydantic tls-client requests markdownify regex \
