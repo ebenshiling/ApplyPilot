@@ -144,7 +144,44 @@ def _strict_evidence_enabled(profile: dict) -> bool:
         pass
 
     ev = str(os.environ.get("APPLYPILOT_TAILOR_STRICT_EVIDENCE", "") or "").strip().lower()
-    return ev in ("1", "true", "yes", "y", "on")
+    if ev in ("1", "true", "yes", "y", "on"):
+        return True
+    if ev in ("0", "false", "no", "n", "off"):
+        return False
+
+    # In strict mode, evidence should be strict by default.
+    return True
+
+
+def _min_coverage_required(profile: dict) -> float:
+    """Minimum JD keyword coverage ratio required for approval.
+
+    - Lenient mode defaults to 0.0 (no hard gate)
+    - Strict mode defaults to 0.22 (light relevance guard)
+    Override with tailoring.min_coverage_for_approval or env APPLYPILOT_TAILOR_MIN_COVERAGE.
+    """
+    if _lenient_tailor_enabled(profile):
+        default = 0.0
+    else:
+        default = 0.22
+
+    try:
+        cfg = (profile or {}).get("tailoring") or {}
+        if isinstance(cfg, dict) and cfg.get("min_coverage_for_approval") is not None:
+            v = float(str(cfg.get("min_coverage_for_approval")).strip())
+            return max(0.0, min(1.0, v))
+    except Exception:
+        pass
+
+    try:
+        ev = str(os.environ.get("APPLYPILOT_TAILOR_MIN_COVERAGE", "") or "").strip()
+        if ev:
+            v = float(ev)
+            return max(0.0, min(1.0, v))
+    except Exception:
+        pass
+
+    return default
 
 
 def _load_skip_titles() -> list[str]:
@@ -864,6 +901,7 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
     }
     lenient_tailor = _lenient_tailor_enabled(profile)
     strict_evidence = _strict_evidence_enabled(profile)
+    min_coverage_required = _min_coverage_required(profile)
     report["mode"] = "lenient" if lenient_tailor else "strict"
 
     def _normalize_title(s: str) -> str:
@@ -1293,6 +1331,9 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
         report["quant_check"] = best.get("quant")
 
         hard_errors: list[str] = []
+        coverage_ratio = float((best.get("coverage") or {}).get("ratio") or 0.0)
+        if min_coverage_required > 0.0 and coverage_ratio < min_coverage_required:
+            hard_errors.append(f"JD coverage too low ({coverage_ratio:.2f} < {min_coverage_required:.2f})")
         validation_errors = list((best.get("validation") or {}).get("errors") or [])
         if lenient_tailor:
             hard_errors.extend([e for e in validation_errors if _is_fatal_json_error(str(e))])
@@ -1474,10 +1515,26 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
 
     TAILORED_DIR.mkdir(parents=True, exist_ok=True)
     mode_label = "lenient" if _lenient_tailor_enabled(profile) else "strict"
+    evidence_label = "on" if _strict_evidence_enabled(profile) else "off"
+    min_cov = _min_coverage_required(profile)
     if selected_only:
-        log.info("Tailoring resumes for %d selected jobs (score >= %d, mode=%s)...", len(jobs), min_score, mode_label)
+        log.info(
+            "Tailoring resumes for %d selected jobs (score >= %d, mode=%s, strict_evidence=%s, min_cov=%.2f)...",
+            len(jobs),
+            min_score,
+            mode_label,
+            evidence_label,
+            min_cov,
+        )
     else:
-        log.info("Tailoring resumes for %d jobs (score >= %d, mode=%s)...", len(jobs), min_score, mode_label)
+        log.info(
+            "Tailoring resumes for %d jobs (score >= %d, mode=%s, strict_evidence=%s, min_cov=%.2f)...",
+            len(jobs),
+            min_score,
+            mode_label,
+            evidence_label,
+            min_cov,
+        )
     t0 = time.time()
     completed = 0
     results: list[dict] = []
