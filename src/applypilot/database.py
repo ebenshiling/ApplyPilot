@@ -588,7 +588,7 @@ def get_jobs_by_stage(
     if selected_only:
         where += " AND apply_status = 'selected'"
 
-    query = f"SELECT * FROM jobs WHERE {where} ORDER BY fit_score DESC NULLS LAST, discovered_at DESC"
+    query = f"SELECT rowid AS job_id, * FROM jobs WHERE {where} ORDER BY fit_score DESC NULLS LAST, discovered_at DESC"
     if limit > 0:
         query += " LIMIT ?"
         params.append(limit)

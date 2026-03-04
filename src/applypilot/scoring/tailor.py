@@ -1702,8 +1702,10 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
 
             # Save job description for traceability
             job_path = TAILORED_DIR / f"{prefix}_JOB.txt"
+            job_num = str(job.get("job_id") or job.get("id") or "").strip()
+            job_num_line = f"Job ID: {job_num}\n" if job_num else ""
             job_desc = (
-                f"Title: {job['title']}\n"
+                job_num_line + f"Title: {job['title']}\n"
                 f"Company: {job['site']}\n"
                 f"Location: {job.get('location', 'N/A')}\n"
                 f"Score: {job.get('fit_score', 'N/A')}\n"

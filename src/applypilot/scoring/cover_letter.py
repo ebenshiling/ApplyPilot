@@ -339,7 +339,7 @@ def run_cover_letters(min_score: int = 7, limit: int = 0) -> dict:
     params: list[object] = [min_score, MAX_ATTEMPTS]
     if selected_only:
         where += " AND apply_status = 'selected'"
-    query = "SELECT * FROM jobs WHERE " + where + " ORDER BY fit_score DESC"
+    query = "SELECT rowid AS job_id, * FROM jobs WHERE " + where + " ORDER BY fit_score DESC"
     if limit > 0:
         query += " LIMIT ?"
         params.append(limit)

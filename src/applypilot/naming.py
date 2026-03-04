@@ -51,15 +51,39 @@ def _safe_token(text: str, *, max_len: int = 28, fallback: str = "item") -> str:
     return t[:max_len] if len(t) > max_len else t
 
 
+def _job_number(job: dict | None) -> str:
+    """Return a stable job number token for filenames when available."""
+    if not isinstance(job, dict) or not job:
+        return ""
+
+    raw = job.get("job_id")
+    if raw is None:
+        raw = job.get("id")
+    if raw is None:
+        raw = job.get("rowid")
+
+    try:
+        num = int(str(raw).strip())
+    except Exception:
+        return ""
+
+    if num <= 0:
+        return ""
+    return f"J{num}"
+
+
 def _job_suffix(job: dict | None) -> str:
     if not isinstance(job, dict) or not job:
         return ""
     role = str(job.get("search_query") or job.get("title") or "")
     site = str(job.get("site") or "")
     url = str(job.get("url") or job.get("application_url") or "")
+    job_num = _job_number(job)
     uid = hashlib.sha1(url.encode("utf-8")).hexdigest()[:8] if url else "unknown"
     role_t = _safe_token(role, max_len=24, fallback="role")
     site_t = _safe_token(site, max_len=16, fallback="site")
+    if job_num:
+        return f"{job_num}_{role_t}_{site_t}_{uid}"
     return f"{role_t}_{site_t}_{uid}"
 
 
