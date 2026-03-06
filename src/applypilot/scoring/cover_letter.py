@@ -6,6 +6,7 @@ profile at runtime. No hardcoded personal information.
 """
 
 import json
+import hashlib
 import logging
 import os
 import re
@@ -27,6 +28,37 @@ from applypilot.scoring.keywords import build_keyword_bank
 log = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 5  # max cross-run retries before giving up
+
+
+_STYLE_VARIANTS: tuple[dict[str, str], ...] = (
+    {
+        "name": "impact-first",
+        "opening": "Open with a measured outcome first, then how you delivered it.",
+        "p2": "Explain two relevant wins with tools, scope, and concrete outcomes.",
+        "p3": "Tie one team challenge from the JD to how you would contribute in month one.",
+    },
+    {
+        "name": "problem-solution",
+        "opening": "Open by naming a real data problem from your work and the fix you shipped.",
+        "p2": "Show two examples proving repeatable delivery under constraints.",
+        "p3": "Connect to one specific responsibility from the JD and close crisply.",
+    },
+    {
+        "name": "stakeholder-value",
+        "opening": "Open with a decision or business action enabled by your reporting/analysis.",
+        "p2": "Use two achievements showing collaboration with non-technical stakeholders.",
+        "p3": "Reference one product/team detail and state the value you would bring.",
+    },
+)
+
+
+_GENERIC_PHRASES: tuple[str, ...] = (
+    "i built and maintained",
+    "i developed automated",
+    "i am interested in this",
+    "particularly the opportunity to contribute",
+    "let's discuss how my experience can benefit",
+)
 
 
 def _selected_only_enabled() -> bool:
@@ -128,10 +160,140 @@ def _looks_truncated(text: str, signoff_name: str) -> bool:
     return s[-1] not in (".", "!", "?")
 
 
+def _pick_style_variant(job: dict) -> dict[str, str]:
+    seed = f"{job.get('url', '')}|{job.get('title', '')}|{job.get('site', '')}"
+    idx = int(hashlib.sha1(seed.encode("utf-8")).hexdigest(), 16) % len(_STYLE_VARIANTS)
+    return dict(_STYLE_VARIANTS[idx])
+
+
+def _extract_job_signals(job: dict, *, max_items: int = 4) -> list[str]:
+    jd = str(job.get("full_description") or "")
+    if not jd.strip():
+        return []
+
+    lines = [re.sub(r"\s+", " ", ln).strip(" -\t") for ln in re.split(r"[\r\n]+", jd)]
+    lines = [ln for ln in lines if len(ln) >= 28]
+
+    keywords = (
+        "responsible",
+        "own",
+        "build",
+        "develop",
+        "maintain",
+        "improve",
+        "analy",
+        "insight",
+        "stakeholder",
+        "governance",
+        "quality",
+        "pipeline",
+        "dashboard",
+        "sql",
+        "python",
+        "power bi",
+    )
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for ln in lines:
+        low = ln.lower()
+        if not any(k in low for k in keywords):
+            continue
+        item = ln[:140]
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+        if len(out) >= max_items:
+            break
+
+    # Fall back to first informative lines if keyword extraction is sparse.
+    if not out:
+        for ln in lines[:max_items]:
+            item = ln[:140]
+            key = item.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(item)
+
+    return out[:max_items]
+
+
+def _opening_sentence(text: str) -> str:
+    body = (text or "").strip()
+    if not body:
+        return ""
+    body = re.sub(r"^\s*Dear[^\n]*\n+", "", body, flags=re.IGNORECASE)
+    body = re.sub(r"\s+", " ", body).strip()
+    m = re.search(r"(.+?[.!?])(?:\s|$)", body)
+    if not m:
+        return body[:140]
+    return m.group(1)[:140]
+
+
+def _recent_openings(limit: int = 6) -> list[str]:
+    items: list[str] = []
+    seen: set[str] = set()
+    try:
+        files = sorted(COVER_LETTER_DIR.glob("*_CL.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except Exception:
+        return items
+
+    for p in files:
+        if len(items) >= limit:
+            break
+        try:
+            txt = p.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        opening = _opening_sentence(txt)
+        if not opening:
+            continue
+        key = opening.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(opening)
+    return items
+
+
+def _generic_issues(letter: str, recent_openings: list[str]) -> list[str]:
+    low = (letter or "").lower()
+    issues: list[str] = []
+
+    hits = [p for p in _GENERIC_PHRASES if p in low]
+    if len(hits) >= 2:
+        issues.append("Letter reads templated. Use a less generic narrative and a different close.")
+
+    opening = _opening_sentence(letter).lower()
+    if opening:
+        for prev in recent_openings:
+            prev_low = prev.lower()
+            if opening == prev_low:
+                issues.append("Opening sentence repeats a recent cover letter. Use a new opener.")
+                break
+            # Soft near-duplicate check on first 7 words.
+            o7 = " ".join(opening.split()[:7])
+            p7 = " ".join(prev_low.split()[:7])
+            if o7 and o7 == p7:
+                issues.append("Opening is too similar to recent letters. Change sentence structure.")
+                break
+
+    return issues
+
+
 # ── Prompt Builder (profile-driven) ──────────────────────────────────────
 
 
-def _build_cover_letter_prompt(profile: dict) -> str:
+def _build_cover_letter_prompt(
+    profile: dict,
+    *,
+    style: dict[str, str] | None = None,
+    job_signals: list[str] | None = None,
+    recent_openings: list[str] | None = None,
+) -> str:
     """Build the cover letter system prompt from the user's profile.
 
     All personal data, skills, and sign-off name come from the profile.
@@ -142,6 +304,7 @@ def _build_cover_letter_prompt(profile: dict) -> str:
 
     # Preferred name for the sign-off (falls back to full name)
     sign_off_name = personal.get("preferred_name") or personal.get("full_name", "")
+    style_cfg = style or _STYLE_VARIANTS[0]
 
     # Flatten all allowed skills
     all_skills: list[str] = []
@@ -163,15 +326,39 @@ def _build_cover_letter_prompt(profile: dict) -> str:
     if real_metrics:
         metrics_hint = f"\nReal metrics to use: {', '.join(real_metrics)}"
 
+    signals_block = ""
+    if job_signals:
+        signals_block = "\nJob-specific signals to anchor against:\n" + "\n".join(
+            f"- {s}" for s in job_signals[:4] if str(s).strip()
+        )
+
+    recent_openings_block = ""
+    if recent_openings:
+        recent_openings_block = "\nDo NOT reuse these recent opening sentences:\n" + "\n".join(
+            f"- {s}" for s in recent_openings[:4] if str(s).strip()
+        )
+
     return f"""Write a cover letter for {sign_off_name}. The goal is to get an interview.
 
-STRUCTURE: 3 short paragraphs. Under 250 words. Every sentence must earn its place.
+STRUCTURE: 3 short paragraphs. 150-230 words. Every sentence must earn its place.
+
+STYLE VARIANT ({style_cfg.get("name", "impact-first")}):
+- Paragraph 1: {style_cfg.get("opening", "")}
+- Paragraph 2: {style_cfg.get("p2", "")}
+- Paragraph 3: {style_cfg.get("p3", "")}
 
 PARAGRAPH 1 (2-3 sentences): Open with a specific thing YOU built that solves THEIR problem. Not "I'm excited about this role." Not "This role aligns with my experience." Start with the work.
 
 PARAGRAPH 2 (3-4 sentences): Pick 2 achievements from the resume that are MOST relevant to THIS job. Use numbers. Frame as solving their problem, not listing your accomplishments.{projects_hint}{metrics_hint}
 
 PARAGRAPH 3 (1-2 sentences): One specific thing about the company from the job description (a product, a technical challenge, a team structure). Then close. "Happy to walk through any of this in more detail." or "Let's discuss." Nothing else.
+
+Specificity and anti-template rules:
+- Mention at least one concrete JD detail from the job-specific signals (verbatim or very close wording).
+- Do not reuse the same opening pattern repeatedly across letters.
+- Do not use the exact phrase "I built and maintained".
+{signals_block}
+{recent_openings_block}
 
 BANNED WORDS/PHRASES (using ANY of these = instant rejection):
 "resonated", "aligns with", "passionate", "eager", "eager to", "excited to apply", "I am confident",
@@ -240,7 +427,15 @@ def generate_cover_letter(resume_text: str, job: dict, profile: dict, max_retrie
     avoid_notes: list[str] = []
     letter = ""
     client = get_client()
-    cl_prompt_base = _build_cover_letter_prompt(profile)
+    style = _pick_style_variant(job)
+    job_signals = _extract_job_signals(job)
+    recent_openings = _recent_openings()
+    cl_prompt_base = _build_cover_letter_prompt(
+        profile,
+        style=style,
+        job_signals=job_signals,
+        recent_openings=recent_openings,
+    )
     name = _sign_off_name(profile)
 
     # Keyword bank derived from JD + (tailored) resume.
@@ -276,8 +471,9 @@ def generate_cover_letter(resume_text: str, job: dict, profile: dict, max_retrie
         messages[-1]["content"] += (
             "\n\nHard requirements:\n"
             "- Exactly 3 paragraphs\n"
-            "- 160-220 words\n"
+            "- 140-240 words\n"
             "- Include at least 2 concrete numbers from the resume\n"
+            "- Mention at least 1 specific detail from the target job description\n"
             "- End with a closing line (e.g. Best,) then your name on its own line\n"
             "- Output plain text only\n"
             "- Do not stop early"
@@ -295,6 +491,17 @@ def generate_cover_letter(resume_text: str, job: dict, profile: dict, max_retrie
 
         # Ensure sign-off survives sanitize and truncation guard.
         letter = _ensure_greeting_and_signoff(letter, name)
+
+        generic_issues = _generic_issues(letter, recent_openings)
+        if generic_issues:
+            avoid_notes.extend(generic_issues)
+            log.debug(
+                "Cover letter attempt %d/%d flagged as templated: %s",
+                attempt + 1,
+                max_retries + 1,
+                generic_issues,
+            )
+            continue
 
         validation = validate_cover_letter(letter, profile=profile, resume_text=resume_text)
         if validation["passed"]:
