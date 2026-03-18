@@ -45,6 +45,10 @@ base_urls:
   "Guardian Jobs": "https://jobs.theguardian.com"
   "NHS Jobs": "https://www.jobs.nhs.uk"
   "Reed": "https://www.reed.co.uk"
+  "Jobs Go Public": "https://www.jobsgopublic.com"
+  "LG Jobs": "https://www.lgjobs.com"
+  "HealthJobsUK": "https://www.healthjobsuk.com"
+  "MoJ Jobs": "https://jobs.justice.gov.uk"
   "RemoteOK": null
   "WelcomeToTheJungle": null
   "Workopolis": "https://www.workopolis.com"
@@ -209,4 +213,23 @@ sites:
 
   - name: "jobs.ac.uk"
     url: "https://www.jobs.ac.uk/search/?keywords={query_encoded}&location={location_encoded}"
+    type: search
+
+  - name: "Jobs Go Public"
+    url: "https://www.jobsgopublic.com/jobs?keywords={query_encoded}&location={location_encoded}"
+    type: search
+
+  - name: "LG Jobs"
+    url: "https://www.lgjobs.com/jobs?keywords={query_encoded}&location={location_encoded}"
+    type: search
+
+  - name: "HealthJobsUK"
+    # GET form submits to /job_list with JobSearch_* parameters.
+    # Keep location broad (UK / any) because the site uses coded location selectors.
+    url: "https://www.healthjobsuk.com/job_list?JobSearch_q={query_encoded}&JobSearch_re_0=1&JobSearch_re_1=1-_-_-"
+    type: search
+
+  - name: "MoJ Jobs"
+    # Ministry of Justice jobs portal (Avature). Query is supported via `search=`.
+    url: "https://jobs.justice.gov.uk/careers/SearchJobs?search={query_encoded}"
     type: search

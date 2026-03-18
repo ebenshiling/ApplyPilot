@@ -92,6 +92,10 @@ def generate_dashboard(
             "Adzuna UK",
             "Guardian Jobs",
             "jobs.ac.uk",
+            "Jobs Go Public",
+            "LG Jobs",
+            "HealthJobsUK",
+            "MoJ Jobs",
         ]
         if any(n.lower() == s.lower() for s in smart_site_names)
     ]
@@ -160,15 +164,17 @@ def generate_dashboard(
     # All scored jobs (5+), ordered by score desc
     jobs = conn.execute("""
          SELECT rowid AS id,
-                url, title, search_query, salary, description, location, site, strategy,
-                full_description, application_url, detail_error,
-                fit_score, score_reasoning,
-                tailored_resume_path, cover_letter_path,
-                applied_at, apply_status, apply_error
-         FROM jobs
-         WHERE fit_score >= 5
-         ORDER BY fit_score DESC, site, title
-     """).fetchall()
+                url, title, company, search_query, salary, description, location, site, strategy,
+                 full_description, application_url, detail_error,
+                sponsorship_explicit, sponsorship_evidence,
+                sponsor_licensed, sponsor_match_name, sponsor_match_confidence,
+                 fit_score, score_reasoning,
+                 tailored_resume_path, supporting_statement_path, cover_letter_path,
+                 applied_at, apply_status, apply_error
+          FROM jobs
+          WHERE fit_score >= 5
+          ORDER BY fit_score DESC, site, title
+      """).fetchall()
 
     # Blocked URL prefixes (for client-side fast checks / avoiding stale cards)
     try:
@@ -191,6 +197,14 @@ def generate_dashboard(
         "linkedin": "#0a66c2",
         "Dice": "#eb1c26",
         "Glassdoor": "#0caa41",
+        "GOV.UK Find a job": "#1d70b8",
+        "NHS Jobs": "#005eb8",
+        "Reed": "#d1001c",
+        "Adzuna UK": "#111827",
+        "Guardian Jobs": "#052962",
+        "jobs.ac.uk": "#0f766e",
+        "Jobs Go Public": "#6d28d9",
+        "LG Jobs": "#7c3aed",
     }
 
     # Score distribution bar chart
@@ -257,6 +271,7 @@ def generate_dashboard(
 
         jid = str(j["id"])
         title = escape(j["title"] or "Untitled")
+        company = escape(j["company"] or "")
         role_query_raw = str(j["search_query"] or "").strip()
         role_query_label = role_query_raw if role_query_raw else "Unassigned"
         url = escape(j["url"] or "")
@@ -265,6 +280,11 @@ def generate_dashboard(
         site = escape(j["site"] or "")
         site_color = colors.get(j["site"] or "", "#6b7280")
         apply_url = escape(j["application_url"] or "")
+
+        sponsor_policy = str(j["sponsorship_explicit"] or "Unknown").strip() or "Unknown"
+        sponsor_licensed = str(j["sponsor_licensed"] or "Unknown").strip() or "Unknown"
+        sponsor_evidence = str(j["sponsorship_evidence"] or "").strip()
+        sponsor_match_name = str(j["sponsor_match_name"] or "").strip()
 
         status_raw = (j["apply_status"] or "").strip().lower()
         if not status_raw and j["applied_at"]:
@@ -301,11 +321,32 @@ def generate_dashboard(
         meta_parts.append(
             f'<span class="meta-tag site-tag" style="background:{site_color}33;color:{site_color}">{site}</span>'
         )
+        if company:
+            meta_parts.append(f'<span class="meta-tag">{company[:48]}</span>')
         meta_parts.append(
             f'<span class="meta-tag status status-{escape(status_raw)}" data-role="status">{escape(status_label)}</span>'
         )
+        if sponsor_licensed.lower() == "yes":
+            label = escape(sponsor_match_name or "Licensed sponsor")
+            meta_parts.append(
+                f'<span class="meta-tag" title="Licensed sponsor (Home Office register)">Sponsor: {label[:48]}</span>'
+            )
+        if sponsor_policy.lower() == "no":
+            meta_parts.append(
+                f'<span class="meta-tag" title="{escape(sponsor_evidence) if sponsor_evidence else ""}">Sponsorship: No</span>'
+            )
+        elif sponsor_policy.lower() == "yes":
+            meta_parts.append(
+                f'<span class="meta-tag" title="{escape(sponsor_evidence) if sponsor_evidence else ""}">Sponsorship: Yes</span>'
+            )
+        elif sponsor_policy.lower() == "conditional":
+            meta_parts.append(
+                f'<span class="meta-tag" title="{escape(sponsor_evidence) if sponsor_evidence else ""}">Sponsorship: Conditional</span>'
+            )
         if j["tailored_resume_path"]:
             meta_parts.append('<span class="meta-tag artifact">Tailored</span>')
+        if j["supporting_statement_path"]:
+            meta_parts.append('<span class="meta-tag artifact">Statement</span>')
         if j["cover_letter_path"]:
             meta_parts.append('<span class="meta-tag artifact">Cover</span>')
         if salary:
@@ -347,7 +388,7 @@ def generate_dashboard(
         apply_html = "".join(footer_links)
 
         job_sections += f"""
-        <div class="job-card" data-id="{jid}" data-score="{score}" data-site="{escape(j["site"] or "")}" data-status="{escape(status_raw)}" data-location="{location.lower()}" data-role="{escape(role_query_label.lower())}">
+        <div class="job-card" data-id="{jid}" data-score="{score}" data-site="{escape(j["site"] or "")}" data-status="{escape(status_raw)}" data-location="{location.lower()}" data-role="{escape(role_query_label.lower())}" data-company="{company}" data-sponsor-policy="{escape(sponsor_policy.lower())}" data-sponsor-licensed="{escape(sponsor_licensed.lower())}">
           <div class="card-header">
             <span class="score-pill" style="background:{"#10b981" if score >= 7 else "#f59e0b"}">{score}</span>
             <span class="meta-tag" title="Stable job ID for manual marking">#{jid}</span>
@@ -772,20 +813,256 @@ def generate_dashboard(
   .expand-btn {{ font-size: 0.82rem; color: rgba(29,78,216,0.92); cursor: pointer; list-style: none; padding: 0.25rem 0; font-weight: 700; }}
   .expand-btn::-webkit-details-marker {{ display: none; }}
   .expand-btn:hover {{ color: rgba(232,93,42,0.95); }}
-  .full-desc {{
-    font-size: 0.82rem;
-    color: rgba(226, 232, 240, 0.92);
-    line-height: 1.55;
-    margin-top: 0.55rem;
-    padding: 0.75rem;
-    background: rgba(2, 6, 23, 0.92);
-    border: 1px solid rgba(255,255,255,0.10);
-    border-radius: 14px;
-    max-height: 420px;
-    overflow-y: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }}
+      .full-desc {{
+        font-size: 0.82rem;
+        color: rgba(226, 232, 240, 0.92);
+        line-height: 1.55;
+        margin-top: 0.55rem;
+        padding: 0.75rem;
+        background: rgba(2, 6, 23, 0.92);
+        border: 1px solid rgba(255,255,255,0.10);
+        border-radius: 14px;
+        max-height: 420px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }}
+
+      /* Setup workbench */
+      .setup-body {{
+        max-height: none;
+        overflow: visible;
+      }}
+      .setup-shell {{
+        display: grid;
+        grid-template-columns: 230px minmax(0, 1fr);
+        gap: 0.95rem;
+        align-items: start;
+      }}
+      .setup-nav {{
+        position: sticky;
+        top: 14px;
+        align-self: start;
+        background: rgba(255,255,255,0.55);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 0.75rem;
+        box-shadow: 0 10px 26px rgba(2,6,23,0.06);
+        backdrop-filter: blur(10px);
+      }}
+      .setup-nav h3 {{
+        font-family: 'Fraunces', serif;
+        font-size: 1.02rem;
+        font-weight: 800;
+        margin: 0 0 0.55rem 0;
+        color: rgba(2,6,23,0.88);
+      }}
+      .setup-nav .nav-help {{
+        color: rgba(2,6,23,0.64);
+        font-size: 0.82rem;
+        line-height: 1.35;
+        margin: 0 0 0.55rem 0;
+      }}
+      .setup-nav button {{
+        width: 100%;
+        text-align: left;
+        border-radius: 12px;
+        padding: 0.45rem 0.6rem;
+        border: 1px solid rgba(2,6,23,0.10);
+        background: rgba(255,255,255,0.62);
+        color: rgba(2,6,23,0.82);
+        cursor: pointer;
+        font-size: 0.84rem;
+        font-weight: 700;
+        margin: 0 0 0.4rem 0;
+        transition: transform 0.12s, background 0.12s, border-color 0.12s;
+      }}
+      .setup-nav button:hover {{
+        transform: translateY(-1px);
+        border-color: rgba(2,6,23,0.20);
+        background: rgba(255,255,255,0.82);
+      }}
+      .setup-nav button.active {{
+        background: rgba(29,78,216,0.12);
+        border-color: rgba(29,78,216,0.25);
+        box-shadow: 0 0 0 3px rgba(29,78,216,0.08);
+      }}
+      .setup-main {{
+        display: flex;
+        flex-direction: column;
+        gap: 0.85rem;
+        min-width: 0;
+      }}
+      .setup-section {{
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 0.95rem;
+        box-shadow: 0 10px 26px rgba(2,6,23,0.06);
+        backdrop-filter: blur(10px);
+      }}
+      .setup-section .section-head {{
+        display: flex;
+        gap: 0.6rem;
+        align-items: baseline;
+        flex-wrap: wrap;
+        margin-bottom: 0.55rem;
+      }}
+      .setup-section .section-title {{
+        font-family: 'Fraunces', serif;
+        font-size: 1.12rem;
+        font-weight: 800;
+        color: rgba(2,6,23,0.90);
+      }}
+      .setup-section .section-desc {{
+        color: rgba(2,6,23,0.62);
+        font-size: 0.86rem;
+        line-height: 1.35;
+      }}
+      .setup-section .fields-2 {{
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+      }}
+      .setup-section .fields-3 {{
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 0.5rem;
+      }}
+      .setup-actions {{
+        margin-top: 0.65rem;
+        display: flex;
+        gap: 0.45rem;
+        flex-wrap: wrap;
+        align-items: center;
+      }}
+
+      /* Setup textarea/input overrides for readability */
+      .setup-body .full-desc {{
+        background: rgba(255,255,255,0.66);
+        color: rgba(2,6,23,0.86);
+        border-color: rgba(2,6,23,0.12);
+        box-shadow: 0 8px 18px rgba(2,6,23,0.06);
+      }}
+      .setup-body .full-desc::placeholder {{ color: rgba(75,85,99,0.80); }}
+      .setup-body .search-input, .setup-body .select-input {{
+        width: 100%;
+      }}
+      .setup-body .panel-body {{
+        max-height: none;
+        overflow: visible;
+        padding-right: 0;
+      }}
+
+      .setup-card {{
+        background: rgba(255,255,255,0.52);
+        border: 1px solid rgba(2,6,23,0.10);
+        border-radius: 16px;
+        padding: 0.85rem;
+      }}
+
+      .variants-head {{
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+        margin-bottom: 0.45rem;
+      }}
+      .variants-tabs {{
+        display: inline-flex;
+        gap: 0.35rem;
+        flex-wrap: wrap;
+      }}
+      .tab-btn {{
+        border: 1px solid rgba(2,6,23,0.12);
+        background: rgba(255,255,255,0.62);
+        color: rgba(2,6,23,0.82);
+        border-radius: 999px;
+        padding: 0.32rem 0.6rem;
+        font-weight: 800;
+        font-size: 0.78rem;
+        cursor: pointer;
+      }}
+      .tab-btn.active {{
+        background: rgba(15,118,110,0.10);
+        border-color: rgba(15,118,110,0.22);
+      }}
+      .tab-btn.has::after {{
+        content: '';
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        margin-left: 0.45rem;
+        background: rgba(15,118,110,0.70);
+        box-shadow: 0 0 0 2px rgba(15,118,110,0.10);
+        vertical-align: middle;
+      }}
+
+      .setup-statusbar {{
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.55rem;
+        flex-wrap: wrap;
+        padding: 0.7rem 0.75rem;
+        background: rgba(255,255,255,0.52);
+        border: 1px solid rgba(2,6,23,0.10);
+        border-radius: 16px;
+      }}
+      .status-group {{
+        display: inline-flex;
+        gap: 0.4rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }}
+      .status-pill {{
+        font-size: 0.74rem;
+        font-weight: 800;
+        padding: 0.16rem 0.5rem;
+        border-radius: 999px;
+        border: 1px solid rgba(2,6,23,0.10);
+        background: rgba(255,255,255,0.60);
+        color: rgba(2,6,23,0.78);
+      }}
+      .status-pill.ok {{
+        border-color: rgba(15,118,110,0.22);
+        background: rgba(15,118,110,0.10);
+      }}
+      .status-pill.warn {{
+        border-color: rgba(180,83,9,0.22);
+        background: rgba(180,83,9,0.10);
+      }}
+      .status-pill.bad {{
+        border-color: rgba(185,28,28,0.22);
+        background: rgba(185,28,28,0.08);
+      }}
+
+      /* Statement Studio */
+      .studio-grid {{
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+        align-items: start;
+      }}
+      .studio-pane {{
+        background: rgba(255,255,255,0.52);
+        border: 1px solid rgba(2,6,23,0.10);
+        border-radius: 16px;
+        padding: 0.85rem;
+      }}
+      .studio-pane .meta {{ margin: 0 0 0.35rem 0; }}
+      .studio-output {{
+        min-height: 320px;
+        max-height: 520px;
+      }}
+
+      @media (max-width: 980px) {{
+        .setup-shell {{ grid-template-columns: 1fr; }}
+        .setup-nav {{ position: relative; top: 0; }}
+        .studio-grid {{ grid-template-columns: 1fr; }}
+      }}
 
   .hidden {{ display: none !important; }}
   .job-count {{ color: rgba(2,6,23,0.70); font-size: 0.9rem; margin: 0.35rem 0 0.85rem; font-weight: 700; }}
@@ -923,6 +1200,17 @@ def generate_dashboard(
     }
   </select>
 
+  <span class="filter-label">Sponsorship:</span>
+  <select class="select-input" onchange="filterSponsorship(this.value)">
+    <option value="">Any</option>
+    <option value="licensed_yes">Licensed sponsor</option>
+    <option value="policy_yes">Sponsorship: Yes</option>
+    <option value="policy_conditional">Sponsorship: Conditional</option>
+    <option value="policy_no">Sponsorship: No</option>
+    <option value="not_no">Exclude "No"</option>
+    <option value="unknown">Unknown</option>
+  </select>
+
   <span class="filter-label" style="margin-left:1rem">Search:</span>
   <input type="text" class="search-input" placeholder="Filter by title, company, tags..." oninput="filterText(this.value)">
   <button type="button" class="filter-btn" data-live="1" onclick="deleteVisibleJobs()">Delete shown</button>
@@ -932,9 +1220,9 @@ def generate_dashboard(
  <div class="filters motion-2" id="pipeline-controls" style="margin-top:-0.75rem">
   <span class="filter-label">Pipeline:</span>
   <span class="filter-label" style="opacity:0.85">Presets:</span>
-  <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['discover','enrich','score','tailor','cover','pdf'])">All</button>
+  <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['discover','enrich','score','tailor','statement','cover','pdf'])">All</button>
   <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['discover','enrich','score'])">Prep-only</button>
-  <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['tailor','cover','pdf'])">Apply-only</button>
+  <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['tailor','statement','cover','pdf'])">Apply-only</button>
 
   <span class="filter-label" style="margin-left:0.5rem;opacity:0.85">Stages:</span>
   <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['discover'])">Discover</button>
@@ -942,6 +1230,7 @@ def generate_dashboard(
   <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['score'])">Score</button>
   <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineScoreRepair()">Score repair</button>
   <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['tailor'])">Tailor</button>
+  <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['statement'])">Statement</button>
   <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['cover'])">Cover</button>
   <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['pdf'])">PDF</button>
   <span class="filter-label" id="pipe-status" style="margin-left:0.5rem;opacity:0.9">Idle</span>
@@ -997,7 +1286,7 @@ def generate_dashboard(
 
   <details class="panel motion-3" id="setup-panel" open>
     <summary>Setup</summary>
-    <div class="panel-body">
+    <div class="panel-body setup-body">
       <div class="meta" style="margin:0 0 0.65rem 0">
         <span class="meta-tag">Workspace</span>
         <span class="meta-tag" title="ApplyPilot workspace">{escape(str(setup.get("app_dir") or ""))}</span>
@@ -1009,9 +1298,45 @@ def generate_dashboard(
         Setup API unavailable. Open this dashboard via <code>applypilot dashboard-serve</code>.
       </div>
 
-      <details class="panel" id="setup-diagnostics" style="margin:0 0 0.85rem 0">
-        <summary>Diagnostics</summary>
-        <div class="panel-body">
+      <div class="setup-shell">
+        <div class="setup-nav" aria-label="Setup navigation">
+          <h3>Workbench</h3>
+          <div class="nav-help">Set up your profile, resume, searches, and generation tools.</div>
+          <button type="button" data-target="setup-sec-diagnostics" onclick="setupJump('setup-sec-diagnostics')">Diagnostics</button>
+          <button type="button" data-target="setup-sec-studio" onclick="setupJump('setup-sec-studio')">Statement Studio</button>
+          <button type="button" data-target="setup-sec-profile" onclick="setupJump('setup-sec-profile')">Quick Profile</button>
+          <button type="button" data-target="setup-sec-full-profile" onclick="setupJump('setup-sec-full-profile')">Full Profile</button>
+          <button type="button" data-target="setup-sec-resume" onclick="setupJump('setup-sec-resume')">Resume</button>
+          <button type="button" data-target="setup-sec-tailoring" onclick="setupJump('setup-sec-tailoring')">Tailoring</button>
+          <button type="button" data-target="setup-sec-searches" onclick="setupJump('setup-sec-searches')">Job Search</button>
+        </div>
+
+        <div class="setup-main">
+
+          <div class="setup-statusbar" id="setup-sec-top">
+            <div class="status-group">
+              <span id="setup-pill-profile" class="status-pill {
+        ("ok" if setup.get("has_profile") else "warn")
+    }">Profile: {("ready" if setup.get("has_profile") else "missing")}</span>
+              <span id="setup-pill-resume" class="status-pill {
+        ("ok" if setup.get("has_resume_txt") else "warn")
+    }">Resume: {("ready" if setup.get("has_resume_txt") else "missing")}</span>
+              <span id="setup-pill-search" class="status-pill {
+        ("ok" if setup.get("has_searches") else "warn")
+    }">Search: {("ready" if setup.get("has_searches") else "missing")}</span>
+            </div>
+            <div class="status-group">
+              <span class="status-pill" id="setup-tier">Tier: {escape(str(setup.get("tier") or "?"))}</span>
+              <button type="button" class="apply-link copy-btn" data-live="1" onclick="setupRefresh(this)">Refresh status</button>
+            </div>
+          </div>
+
+      <section class="setup-section" id="setup-sec-diagnostics">
+        <div class="section-head">
+          <div class="section-title">Diagnostics</div>
+          <div class="section-desc">Confirm local APIs are reachable and capture a clean debug bundle.</div>
+        </div>
+        <div class="panel-body" style="margin-top:0">
           <div class="meta" style="margin:0 0 0.5rem 0">
             <span class="meta-tag">health</span>
             <span class="meta-tag" id="diag-health">?</span>
@@ -1021,21 +1346,71 @@ def generate_dashboard(
             <span class="meta-tag" id="diag-pipe">?</span>
           </div>
           <div class="job-desc" id="diag-last-error" style="margin:0 0 0.55rem 0">No errors captured.</div>
-          <div style="display:flex;gap:0.45rem;flex-wrap:wrap">
+          <div class="setup-actions">
             <button type="button" class="apply-link copy-btn" data-live="1" onclick="diagPing()">Run checks</button>
             <button type="button" class="apply-link copy-btn" onclick="diagCopy()">Copy debug</button>
           </div>
         </div>
-      </details>
+      </section>
 
-      <div class="setup-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:0.85rem;align-items:start">
-        <div class="job-card" style="padding:0.85rem">
-          <div class="job-title" style="margin-bottom:0.35rem">Profile</div>
+      <section class="setup-section" id="setup-sec-studio">
+        <div class="section-head">
+          <div class="section-title">Statement Studio</div>
+          <div class="section-desc">Paste job + resume, generate an NHS-ready supporting statement under the word cap.</div>
+        </div>
+
+        <div class="studio-grid">
+          <div class="studio-pane">
+            <div class="meta"><span class="meta-tag">Title</span></div>
+            <input id="studio-title" class="search-input" placeholder="e.g. Data Analyst / IT Support">
+
+            <div class="meta" style="margin-top:0.45rem"><span class="meta-tag">Organisation</span></div>
+            <input id="studio-org" class="search-input" placeholder="e.g. NHS England">
+
+            <div class="meta" style="margin-top:0.45rem;display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap">
+              <span class="meta-tag">Max words</span>
+              <input id="studio-max-words" class="search-input" style="width:120px" value="1500" inputmode="numeric" pattern="[0-9]*">
+              <span class="meta-tag" id="studio-count">0 words</span>
+            </div>
+
+            <textarea id="studio-resume" class="full-desc" style="min-height:200px" placeholder="Paste resume text here..."></textarea>
+            <div class="setup-actions">
+              <button type="button" class="apply-link copy-btn" data-live="1" onclick="studioUseSavedResume()">Use saved resume.txt</button>
+              <button type="button" class="apply-link copy-btn" data-live="1" onclick="studioClear('studio-resume')">Clear resume</button>
+            </div>
+          </div>
+
+          <div class="studio-pane">
+            <div class="meta"><span class="meta-tag">Job description + person spec</span></div>
+            <textarea id="studio-job" class="full-desc" style="min-height:260px" placeholder="Paste job description + person specification here..."></textarea>
+            <div class="setup-actions">
+              <button type="button" class="apply-link copy-btn" data-live="1" onclick="studioClear('studio-job')">Clear job</button>
+            </div>
+
+            <div class="setup-actions" style="margin-top:0.2rem">
+              <button type="button" class="apply-link copy-btn" data-live="1" onclick="studioGenerate(this)">Generate statement</button>
+              <button type="button" class="apply-link copy-btn" onclick="studioCopy()">Copy statement</button>
+              <span class="job-desc" id="studio-status" style="margin-left:0.25rem">Idle.</span>
+            </div>
+
+            <textarea id="studio-output" class="full-desc studio-output" placeholder="Generated statement appears here..."></textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="setup-section" id="setup-sec-profile">
+        <div class="section-head">
+          <div class="section-title">Quick Profile</div>
+          <div class="section-desc">Minimum profile fields used by scoring, tailoring and apply.</div>
+        </div>
+        <div>
           <div class="job-meta" style="margin-bottom:0.55rem">
             <span class="meta-tag">profile.json</span>
             <span class="meta-tag" id="has-profile">{("yes" if setup.get("has_profile") else "no")}</span>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+          <div class="job-meta" style="margin-bottom:0.55rem">
+          </div>
+          <div class="fields-2">
             <input id="setup-name" class="search-input" placeholder="Full name">
             <input id="setup-email" class="search-input" placeholder="Email">
             <input id="setup-phone" class="search-input" placeholder="Phone (optional)">
@@ -1045,16 +1420,20 @@ def generate_dashboard(
             <input id="setup-target-role" class="search-input" placeholder="Target role (optional)">
             <input id="setup-years" class="search-input" placeholder="Years exp (optional)" inputmode="decimal">
           </div>
-          <div style="margin-top:0.65rem;display:flex;gap:0.45rem;flex-wrap:wrap">
+          <div class="setup-actions">
             <button type="button" class="apply-link copy-btn" data-live="1" onclick="setupSaveProfile(this)">Save profile</button>
             <button type="button" class="apply-link copy-btn" data-live="1" onclick="setupLoadWorkspace(false, this)">Load current</button>
             <button type="button" class="apply-link copy-btn" data-live="1" onclick="setupRefresh(this)">Refresh status</button>
           </div>
           <div class="job-desc" style="margin-top:0.5rem">Saved into `profile.json` and used by scoring/tailoring/apply. Passwords/API keys stay in `.env` (not here).</div>
         </div>
+      </section>
 
-        <div class="job-card" style="padding:0.85rem;grid-column:1 / -1">
-          <div class="job-title" style="margin-bottom:0.35rem">Full Profile Editor</div>
+      <section class="setup-section" id="setup-sec-full-profile">
+        <div class="section-head">
+          <div class="section-title">Full Profile Editor</div>
+          <div class="section-desc">Detailed `profile.json` control for accuracy and fewer auto-fill errors.</div>
+        </div>
           <div class="job-meta" style="margin-bottom:0.55rem">
             <span class="meta-tag">profile.json</span>
             <span class="meta-tag">personal</span>
@@ -1067,7 +1446,7 @@ def generate_dashboard(
 
           <details class="panel" open style="margin:0 0 0.55rem 0">
             <summary>Identity & Contact</summary>
-            <div class="panel-body" style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+             <div class="panel-body fields-2">
               <input id="setup-full-name" class="search-input" placeholder="Full name">
               <input id="setup-pref-name" class="search-input" placeholder="Preferred name">
               <input id="setup-full-email" class="search-input" placeholder="Email">
@@ -1086,7 +1465,7 @@ def generate_dashboard(
 
           <details class="panel" style="margin:0 0 0.55rem 0">
             <summary>Work Authorization & Availability</summary>
-            <div class="panel-body" style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+             <div class="panel-body fields-2">
               <label class="job-desc" style="margin:0">Legally authorized to work
                 <select id="setup-auth-legal" class="select-input" style="width:100%;margin-top:0.3rem">
                   <option value="">Select</option>
@@ -1112,7 +1491,7 @@ def generate_dashboard(
 
           <details class="panel" style="margin:0 0 0.55rem 0">
             <summary>Compensation & Experience</summary>
-            <div class="panel-body" style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+             <div class="panel-body fields-2">
               <input id="setup-comp-salary" class="search-input" placeholder="Salary expectation (annual)">
               <label class="job-desc" style="margin:0">Salary currency
                 <select id="setup-comp-currency" class="select-input" style="width:100%;margin-top:0.3rem">
@@ -1146,7 +1525,7 @@ def generate_dashboard(
 
           <details class="panel" style="margin:0 0 0.55rem 0">
             <summary>EEO Voluntary</summary>
-            <div class="panel-body" style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+             <div class="panel-body fields-2">
               <label class="job-desc" style="margin:0">Gender
                 <select id="setup-eeo-gender" class="select-input" style="width:100%;margin-top:0.3rem">
                   <option value="">Select</option>
@@ -1202,30 +1581,58 @@ def generate_dashboard(
             <button type="button" class="apply-link copy-btn" data-live="1" onclick="setupSaveFullProfile(this)">Save full profile</button>
           </div>
           <div class="job-desc" style="margin-top:0.5rem">Use this for complete profile control across all sections. Quick Profile is still available for fast edits.</div>
-        </div>
+      </section>
 
-        <div class="job-card" style="padding:0.85rem">
-          <div class="job-title" style="margin-bottom:0.35rem">Resume</div>
+      <section class="setup-section" id="setup-sec-resume">
+        <div class="section-head">
+          <div class="section-title">Resume</div>
+          <div class="section-desc">`resume.txt` powers scoring/tailoring. PDF is optional reference.</div>
+        </div>
           <div class="job-meta" style="margin-bottom:0.55rem">
             <span class="meta-tag">resume.txt</span>
             <span class="meta-tag" id="has-resume-txt">{("yes" if setup.get("has_resume_txt") else "no")}</span>
             <span class="meta-tag">resume.pdf</span>
             <span class="meta-tag" id="has-resume-pdf">{("yes" if setup.get("has_resume_pdf") else "no")}</span>
           </div>
-          <textarea id="setup-resume-text" class="full-desc" style="min-height:160px;max-height:220px" placeholder="Paste plain-text resume here..."></textarea>
+          <textarea id="setup-resume-text" class="full-desc" style="min-height:220px" placeholder="Paste plain-text resume here..."></textarea>
           <div style="margin-top:0.55rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
             <input id="setup-resume-pdf" type="file" accept="application/pdf,.pdf" style="max-width:100%">
             <span class="meta-tag" id="setup-resume-pdf-name">no file</span>
           </div>
-          <div style="margin-top:0.65rem;display:flex;gap:0.45rem;flex-wrap:wrap">
+          <div class="setup-actions">
             <button type="button" class="apply-link copy-btn" data-live="1" onclick="setupSaveResumeText(this)">Save resume.txt</button>
             <button type="button" class="apply-link copy-btn" data-live="1" onclick="setupUploadResumePdf(this)">Upload resume.pdf</button>
           </div>
           <div class="job-desc" style="margin-top:0.5rem">PDF upload is optional (for reference); scoring/tailoring reads `resume.txt`.</div>
-        </div>
 
-        <div class="job-card" style="padding:0.85rem;grid-column:1 / -1">
-          <div class="job-title" style="margin-bottom:0.35rem">Tailoring Intelligence</div>
+          <div class="setup-card" style="margin-top:0.85rem">
+            <div class="variants-head">
+              <div>
+                <div class="section-title" style="font-size:1.02rem">Resume Variants</div>
+                <div class="section-desc">Keep separate base resumes for data/support/testing and route jobs deterministically.</div>
+              </div>
+              <div class="variants-tabs" role="tablist" aria-label="Resume variants">
+                <button type="button" class="tab-btn active" data-variant-key="data_analyst" onclick="variantsSelect('data_analyst', this)">Data</button>
+                <button type="button" class="tab-btn" data-variant-key="it_support" onclick="variantsSelect('it_support', this)">Support</button>
+                <button type="button" class="tab-btn" data-variant-key="software_testing" onclick="variantsSelect('software_testing', this)">Testing</button>
+              </div>
+            </div>
+
+            <textarea id="variants-text" class="full-desc" style="min-height:200px" placeholder="Paste the resume variant text for the selected role family..."></textarea>
+            <div class="setup-actions">
+              <button type="button" class="apply-link copy-btn" data-live="1" onclick="variantsLoad()">Load saved</button>
+              <button type="button" class="apply-link copy-btn" data-live="1" onclick="variantsUseMainResume()">Copy from resume.txt</button>
+              <button type="button" class="apply-link copy-btn" data-live="1" onclick="variantsSave(this)">Save variant</button>
+              <span class="meta-tag" id="variants-status">active: data_analyst</span>
+            </div>
+          </div>
+      </section>
+
+      <section class="setup-section" id="setup-sec-tailoring">
+        <div class="section-head">
+          <div class="section-title">Tailoring Intelligence</div>
+          <div class="section-desc">Controls prompt packs, evidence grounding, and resume structure validation.</div>
+        </div>
           <div class="job-meta" style="margin-bottom:0.55rem">
             <span class="meta-tag">profile.json</span>
             <span class="meta-tag">skills_boundary</span>
@@ -1234,7 +1641,7 @@ def generate_dashboard(
             <span class="meta-tag">resume_validation</span>
             <span class="meta-tag">tailoring</span>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+          <div class="fields-2">
             <label class="job-desc" style="margin:0">Role pack
               <select id="setup-role-pack" class="select-input" style="width:100%;margin-top:0.3rem">
                 <option value="auto">Auto (recommended)</option>
@@ -1247,10 +1654,13 @@ def generate_dashboard(
               <input id="setup-draft-count" class="search-input" inputmode="numeric" pattern="[0-9]*" placeholder="3" style="margin-top:0.3rem">
             </label>
 
-            <div class="job-card" style="padding:0.65rem;grid-column:1 / -1;background:rgba(15,23,42,0.03);border-color:rgba(15,23,42,0.12)">
-              <div class="job-title" style="font-size:0.96rem;margin-bottom:0.35rem">Resume Template Builder (No JSON Needed)</div>
+            <div class="setup-card" style="grid-column:1 / -1">
+              <div class="section-head" style="margin-bottom:0.45rem">
+                <div class="section-title" style="font-size:1.02rem">Resume Template Builder (No JSON Needed)</div>
+                <div class="section-desc">No JSON needed. Update skills/education/certs and preserved facts.</div>
+              </div>
               <div class="job-desc" style="margin:0 0 0.55rem 0">Add/update skills, education, certifications, and preserved resume facts here. Use comma or newline separators. Legacy keys are auto-mapped (for example: bi_tools, spreadsheets, data_practices, capabilities).</div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.45rem">
+              <div class="fields-2" style="gap:0.45rem">
                 <label class="job-desc" style="margin:0">Skills: Languages / Programming
                   <textarea id="setup-tpl-languages" class="full-desc" style="min-height:74px;max-height:120px;margin-top:0.3rem" placeholder="SQL, Python, TypeScript"></textarea>
                 </label>
@@ -1293,7 +1703,7 @@ def generate_dashboard(
                   <textarea id="setup-tpl-real-metrics" class="full-desc" style="min-height:74px;max-height:120px;margin-top:0.3rem" placeholder="40%, 25%, 2h -> 20m"></textarea>
                 </label>
               </div>
-              <div style="margin-top:0.55rem;display:flex;gap:0.45rem;flex-wrap:wrap;align-items:center">
+              <div class="setup-actions" style="margin-top:0.55rem">
                 <button type="button" class="apply-link copy-btn" onclick="setupTemplateFromJson(false)">Sync builder from JSON</button>
                 <button type="button" class="apply-link copy-btn" onclick="setupTemplateToJson(false)">Apply builder to JSON</button>
                 <button type="button" class="apply-link copy-btn" data-live="1" onclick="setupRegenerateTailoredResumes(this)">Regenerate tailored resumes now</button>
@@ -1322,16 +1732,19 @@ def generate_dashboard(
               <textarea id="setup-safe-synonyms" class="full-desc" style="min-height:90px;max-height:160px;margin-top:0.35rem" placeholder="JSON object mapping canonical skill to safe synonyms"></textarea>
             </label>
           </div>
-          <div style="margin-top:0.65rem;display:flex;gap:0.45rem;flex-wrap:wrap">
+          <div class="setup-actions">
             <button type="button" class="apply-link copy-btn" onclick="setupValidateTailoring(this)">Validate JSON</button>
             <button type="button" class="apply-link copy-btn" data-live="1" onclick="setupSaveTailoring(this)">Save tailoring config</button>
             <button type="button" class="apply-link copy-btn" data-live="1" onclick="setupLoadWorkspace(false, this)">Reload from profile.json</button>
           </div>
           <div class="job-desc" style="margin-top:0.5rem">These fields power role prompt packs, evidence-grounded bullets, draft ranking, JD coverage optimization, quant checks, and adaptive section budgets.</div>
-        </div>
+      </section>
 
-        <div class="job-card" style="padding:0.85rem;grid-column:1 / -1">
-          <div class="job-title" style="margin-bottom:0.35rem">Job Search Config</div>
+      <section class="setup-section" id="setup-sec-searches">
+        <div class="section-head">
+          <div class="section-title">Job Search Config</div>
+          <div class="section-desc">Build or paste `searches.yaml` with guardrails and UK smart sites.</div>
+        </div>
           <div class="job-meta" style="margin-bottom:0.55rem">
             <span class="meta-tag">searches.yaml</span>
             <span class="meta-tag" id="has-searches">{("yes" if setup.get("has_searches") else "no")}</span>
@@ -1340,7 +1753,7 @@ def generate_dashboard(
           </div>
           <div class="job-desc" style="margin:0 0 0.65rem 0">Use the builder for safe defaults, or switch to Advanced YAML to paste/edit directly.</div>
 
-          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
+          <div class="setup-actions" style="margin-top:0">
             <label class="toggle" title="Edit YAML directly">
               <input id="setup-adv-yaml" type="checkbox" onchange="setupToggleAdvancedYaml(this.checked)"> Advanced YAML
             </label>
@@ -1349,7 +1762,7 @@ def generate_dashboard(
           </div>
 
           <div id="setup-search-builder" style="margin-top:0.65rem">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+            <div class="fields-2">
               <input id="search-country" class="search-input" placeholder="Country (e.g. USA, Canada, UK)">
               <input id="search-location" class="search-input" placeholder="Primary location text (e.g. Remote, New York, NY)">
               <label class="toggle" style="grid-column:1 / -1">
@@ -1364,14 +1777,14 @@ def generate_dashboard(
               <datalist id="smart-site-options">
                 {"".join(f'<option value="{escape(n)}"></option>' for n in smart_site_names)}
               </datalist>
-              <div style="grid-column:1 / -1;display:flex;gap:0.45rem;flex-wrap:wrap;align-items:center">
+              <div class="setup-actions" style="grid-column:1 / -1;margin-top:0">
                 <button type="button" class="apply-link copy-btn" onclick="setupUseUkSmartSites()">Use UK smart sites</button>
                 <button type="button" class="apply-link copy-btn" onclick="setupClearSmartSites()">Clear smart filter</button>
                 <span class="meta-tag">Pick 1 or many sites; empty uses all smart sites</span>
               </div>
               <textarea id="search-exclude" class="full-desc" style="min-height:88px;max-height:140px;grid-column:1 / -1" placeholder="Exclude title keywords (one per line, optional)"></textarea>
             </div>
-            <div style="margin-top:0.55rem;display:flex;gap:0.45rem;flex-wrap:wrap">
+            <div class="setup-actions">
               <button type="button" class="apply-link copy-btn" onclick="setupGenerateSearchesYaml()">Generate YAML</button>
               <span class="meta-tag" id="search-guardrails">guardrails: on</span>
             </div>
@@ -1379,9 +1792,9 @@ def generate_dashboard(
 
           <textarea id="setup-searches" class="full-desc" style="display:none;min-height:160px;max-height:260px;margin-top:0.65rem" placeholder="searches.yaml (advanced mode)"></textarea>
           <div class="job-desc" style="margin-top:0.5rem">Guardrails: JobSpy boards are validated; smart site names support 1..N selection; hours_old capped to 720; results_per_site capped to 300; empty roles default to Software Engineer.</div>
-        </div>
+      </section>
 
-        
+        </div>
       </div>
     </div>
   </details>
@@ -1422,6 +1835,7 @@ let searchText = '';
 let siteText = '';
 let statusText = 'active';
 let roleText = '';
+let sponsorFilter = '';
 let hideModerate = true;
 const SMART_SITE_CATALOG = {smart_catalog_js};
 const SMART_UK_DEFAULTS = {uk_smart_defaults_js};
@@ -1449,6 +1863,110 @@ function _btnBusy(btn, on, label) {{
       btn.disabled = false;
     }}
   }} catch (e) {{}}
+}}
+
+function setupJump(id) {{
+  try {{
+    const el = document.getElementById(id);
+    if (!el) return;
+    try {{ _setupNavSetActive(id); }} catch (e) {{}}
+    el.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+  }} catch (e) {{}}
+}}
+
+// Setup nav: highlight active section
+function _setupNavSetActive(id) {{
+  try {{
+    const btns = document.querySelectorAll('.setup-nav button[data-target]');
+    btns.forEach(b => b.classList.remove('active'));
+    const b = document.querySelector(`.setup-nav button[data-target="${id}"]`);
+    if (b) b.classList.add('active');
+  }} catch (e) {{}}
+}}
+
+function setupInitNavObserver() {{
+  try {{
+    const sections = Array.from(document.querySelectorAll('.setup-section[id]'));
+    if (!sections.length) return;
+    const obs = new IntersectionObserver((entries) => {{
+      try {{
+        const vis = entries
+          .filter(e => e.isIntersecting)
+          .sort((a, b) => (b.intersectionRatio || 0) - (a.intersectionRatio || 0));
+        if (vis && vis[0] && vis[0].target && vis[0].target.id) _setupNavSetActive(vis[0].target.id);
+      }} catch (e) {{}}
+    }}, {{ root: null, threshold: [0.15, 0.25, 0.35] }});
+    sections.forEach(s => obs.observe(s));
+  }} catch (e) {{}}
+}}
+
+// Resume variants manager
+let _variantKey = 'data_analyst';
+let _variantCache = {{}};
+let _variantLoaded = {{}};
+
+function variantsSelect(key, btn) {{
+  _variantKey = String(key || '').trim().toLowerCase() || 'data_analyst';
+  const tabs = document.querySelectorAll('.tab-btn[data-variant-key]');
+  tabs.forEach(t => t.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const st = document.getElementById('variants-status');
+  if (st) st.textContent = 'active: ' + _variantKey;
+  const ta = document.getElementById('variants-text');
+  if (ta) ta.value = String(_variantCache[_variantKey] || '').trim();
+
+  try {{
+    if (window.location.protocol !== 'file:' && !(_variantLoaded[_variantKey])) {{
+      const cur = ((ta || {{}}).value || '').trim();
+      if (!cur) variantsLoad();
+    }}
+  }} catch (e) {{}}
+}}
+
+async function variantsLoad() {{
+  if (window.location.protocol === 'file:') return;
+  const st = document.getElementById('variants-status');
+  if (st) st.textContent = 'loading ' + _variantKey + '...';
+  try {{
+    const res = await fetch('/api/setup/resume-variant?key=' + encodeURIComponent(_variantKey));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data || !data.ok) throw new Error((data && (data.detail || data.error)) || 'read_failed');
+    const txt = String(data.text || '').trim();
+    _variantCache[_variantKey] = txt;
+    _variantLoaded[_variantKey] = true;
+    const ta = document.getElementById('variants-text');
+    if (ta) ta.value = txt;
+    if (st) st.textContent = 'active: ' + _variantKey + (data.truncated ? ' (loaded, truncated)' : (txt ? ' (loaded)' : ' (no saved text)'));
+    if (txt) showToast('Loaded ' + _variantKey + ' variant.', 'success', 2200);
+    else showToast('No saved ' + _variantKey + ' variant yet.', 'warn', 2600);
+  }} catch (e) {{
+    if (st) st.textContent = 'load failed';
+    showToast('Failed to load variants: ' + _errMsg(e), 'error', 3600);
+  }}
+}}
+
+function variantsUseMainResume() {{
+  const src = document.getElementById('setup-resume-text');
+  const dst = document.getElementById('variants-text');
+  if (!src || !dst) return;
+  const t = (src.value || '').trim();
+  if (!t) return;
+  dst.value = t;
+}}
+
+async function variantsSave(btn) {{
+  if (window.location.protocol === 'file:') return;
+  const ta = document.getElementById('variants-text');
+  const text = ((ta || {{}}).value || '').trim();
+  if (!text) {{ showToast('Variant text is empty.', 'warn', 2600); return; }}
+  return await _withAction(btn, {{ working: 'Saving...', success: 'variant saved', fail: 'save failed' }}, async () => {{
+    await _apiJson('/api/setup/resume-variant', {{ key: _variantKey, text: text }});
+    _variantCache[_variantKey] = text;
+    _variantLoaded[_variantKey] = true;
+    const st = document.getElementById('variants-status');
+    if (st) st.textContent = 'active: ' + _variantKey + ' (saved)';
+  }});
 }}
 
 function _errMsg(e) {{
@@ -1547,6 +2065,11 @@ function filterRole(role) {{
   applyFilters();
 }}
 
+function filterSponsorship(val) {{
+  sponsorFilter = (val || '').toLowerCase();
+  applyFilters();
+}}
+
 function filterText(text) {{
   searchText = text.toLowerCase();
   applyFilters();
@@ -1570,7 +2093,18 @@ function applyFilters() {{
       || (statusText === 'active' && !['applied','failed','skipped','blocked','manual'].includes(status))
       || status === statusText;
     const roleMatch = !roleText || (card.dataset.role || '').toLowerCase() === roleText;
-    if (scoreMatch && moderateMatch && textMatch && siteMatch && statusMatch && roleMatch) {{
+
+    const pol = (card.dataset.sponsorPolicy || '').toLowerCase();
+    const lic = (card.dataset.sponsorLicensed || '').toLowerCase();
+    let sponsorMatch = true;
+    if (sponsorFilter === 'licensed_yes') sponsorMatch = (lic === 'yes');
+    else if (sponsorFilter === 'policy_yes') sponsorMatch = (pol === 'yes');
+    else if (sponsorFilter === 'policy_conditional') sponsorMatch = (pol === 'conditional');
+    else if (sponsorFilter === 'policy_no') sponsorMatch = (pol === 'no');
+    else if (sponsorFilter === 'not_no') sponsorMatch = (pol !== 'no');
+    else if (sponsorFilter === 'unknown') sponsorMatch = (!pol || pol === 'unknown') && (!lic || lic === 'unknown');
+
+    if (scoreMatch && moderateMatch && textMatch && siteMatch && statusMatch && roleMatch && sponsorMatch) {{
       card.classList.remove('hidden');
       shown++;
     }} else {{
@@ -1655,6 +2189,8 @@ applyFilters();
       if (adv) setupToggleAdvancedYaml(!!adv.checked);
       setupInitSearchBuilderDefaults();
       setupLoadWorkspace(true, null);
+      setupInitNavObserver();
+      _setupNavSetActive('setup-sec-diagnostics');
     }} catch (e) {{}}
 
     // Lightweight ping to show whether APIs are reachable.
@@ -1702,6 +2238,15 @@ async function setupRefresh(btn) {{
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     const s = (data && data.status) || {{}};
+
+    const pill = (id, ok, labelReady, labelMissing) => {{
+      const el = document.getElementById(id);
+      if (!el) return;
+      const good = !!ok;
+      el.className = 'status-pill ' + (good ? 'ok' : 'warn');
+      el.textContent = good ? labelReady : labelMissing;
+    }};
+
     const tag = document.getElementById('setup-status-tag');
     if (tag) {{
       const ok = !!(s.has_profile && s.has_resume_txt && s.has_searches);
@@ -1717,6 +2262,12 @@ async function setupRefresh(btn) {{
     if (ht) ht.textContent = s.has_resume_txt ? 'yes' : 'no';
     if (hpdf) hpdf.textContent = s.has_resume_pdf ? 'yes' : 'no';
     if (hs) hs.textContent = s.has_searches ? 'yes' : 'no';
+
+    pill('setup-pill-profile', s.has_profile, 'Profile: ready', 'Profile: missing');
+    pill('setup-pill-resume', s.has_resume_txt, 'Resume: ready', 'Resume: missing');
+    pill('setup-pill-search', s.has_searches, 'Search: ready', 'Search: missing');
+    const tier = document.getElementById('setup-tier');
+    if (tier) tier.textContent = 'Tier: ' + String((s.tier === null || typeof s.tier === 'undefined') ? '?' : s.tier);
     _setupApiOk = true;
     const hint = document.getElementById('setup-api-hint');
     if (hint) hint.classList.add('hidden');
@@ -2621,6 +3172,22 @@ async function setupLoadWorkspace(quiet, btn) {{
     const st = document.getElementById('setup-searches');
     if (st && typeof data.searches_text === 'string') st.value = data.searches_text;
 
+    // Resume variants presence indicator (dots on tabs)
+    try {{
+      const arr = (data && data.resume_variants) || [];
+      const have = {{}};
+      for (const v of arr) {{
+        const k = String((v && v.key) || '').trim().toLowerCase();
+        if (k) have[k] = true;
+      }}
+      const tabs = document.querySelectorAll('.tab-btn[data-variant-key]');
+      tabs.forEach(b => {{
+        const k = String(b.getAttribute('data-variant-key') || '').trim().toLowerCase();
+        if (k && have[k]) b.classList.add('has');
+        else b.classList.remove('has');
+      }});
+    }} catch (e) {{}}
+
     try {{
       const s = (data && data.searches) || {{}};
       const defs = (s.defaults || {{}});
@@ -2687,6 +3254,64 @@ async function setupSaveResumeText(btn) {{
     await _apiJson('/api/setup/resume-text', {{ text: text }});
     await setupRefresh(null);
   }});
+}}
+
+
+function studioUseSavedResume() {{
+  const src = document.getElementById('setup-resume-text');
+  const dst = document.getElementById('studio-resume');
+  if (!src || !dst) return;
+  const t = (src.value || '').trim();
+  if (t) dst.value = t;
+}}
+
+function studioClear(id) {{
+  const el = document.getElementById(id);
+  if (el) el.value = '';
+}}
+
+function studioCopy() {{
+  const el = document.getElementById('studio-output');
+  if (!el) return;
+  const t = (el.value || '').trim();
+  if (!t) return;
+  navigator.clipboard.writeText(t);
+}}
+
+function _studioSetStatus(msg) {{
+  const el = document.getElementById('studio-status');
+  if (el) el.textContent = msg;
+}}
+
+function _studioSetCount(wc, max) {{
+  const el = document.getElementById('studio-count');
+  if (!el) return;
+  if (max) el.textContent = String(wc) + ' words / ' + String(max);
+  else el.textContent = String(wc) + ' words';
+}}
+
+async function studioGenerate(btn) {{
+  const resume = ((document.getElementById('studio-resume') || {{}}).value || '').trim();
+  const job = ((document.getElementById('studio-job') || {{}}).value || '').trim();
+  const title = ((document.getElementById('studio-title') || {{}}).value || '').trim();
+  const org = ((document.getElementById('studio-org') || {{}}).value || '').trim();
+  const mwRaw = ((document.getElementById('studio-max-words') || {{}}).value || '').trim();
+  const maxWords = mwRaw ? parseInt(mwRaw, 10) : 1500;
+
+  if (!resume) {{ _studioSetStatus('Paste your resume first.'); return; }}
+  if (!job) {{ _studioSetStatus('Paste the job description/person spec first.'); return; }}
+
+  _studioSetStatus('Generating...');
+  try {{
+    const res = await _apiJson('/api/statement/generate', {{ resume_text: resume, job_text: job, title: title, org: org, max_words: maxWords }});
+    if (!res || !res.ok) throw new Error((res && (res.detail || res.error)) || 'generate_failed');
+    const out = document.getElementById('studio-output');
+    if (out) out.value = String(res.statement || '').trim();
+    _studioSetCount(parseInt(res.word_count || 0, 10) || 0, parseInt(res.max_words || 0, 10) || maxWords);
+    _studioSetStatus('Done.');
+  }} catch (e) {{
+    _studioSetStatus('Failed: ' + (e && e.message ? e.message : String(e)));
+  }}
 }}
 
 function setupUpdatePdfName() {{

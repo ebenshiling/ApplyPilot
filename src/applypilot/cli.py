@@ -28,7 +28,7 @@ console = Console()
 log = logging.getLogger(__name__)
 
 # Valid pipeline stages (in execution order)
-VALID_STAGES = ("discover", "enrich", "score", "tailor", "cover", "pdf")
+VALID_STAGES = ("discover", "enrich", "score", "tailor", "statement", "cover", "pdf")
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +104,7 @@ def run(
     stream: bool = typer.Option(False, "--stream", help="Run stages concurrently (streaming mode)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview stages without executing."),
 ) -> None:
-    """Run pipeline stages: discover, enrich, score, tailor, cover, pdf."""
+    """Run pipeline stages: discover, enrich, score, tailor, statement, cover, pdf."""
     _bootstrap()
 
     from applypilot.pipeline import run_pipeline
@@ -118,7 +118,7 @@ def run(
             raise typer.Exit(code=1)
 
     # Gate AI stages behind Tier 2
-    llm_stages = {"score", "tailor", "cover"}
+    llm_stages = {"score", "tailor", "statement", "cover"}
     if any(s in stage_list for s in llm_stages) or "all" in stage_list:
         from applypilot.config import check_tier
 
@@ -968,6 +968,23 @@ def dashboard_serve(
     console.print("[dim]Opening in browser...[/dim]")
     webbrowser.open(url)
     serve_dashboard(host=host, port=port, multi_user=multi_user)
+
+
+@app.command(name="uk-sponsors-update")
+def uk_sponsors_update(
+    force: bool = typer.Option(False, "--force", help="Force re-download of the Home Office sponsor register."),
+    max_age_days: int = typer.Option(7, "--max-age-days", help="Use cached register if newer than this."),
+) -> None:
+    """Download/cache the UK Home Office licensed sponsors register (workers)."""
+    _bootstrap()
+
+    from applypilot.uk_sponsorship import ensure_sponsor_register_cached
+
+    path = ensure_sponsor_register_cached(max_age_days=(0 if force else int(max_age_days)))
+    if path:
+        console.print(f"[green]OK[/green] Cached sponsor register: {path}")
+    else:
+        console.print("[red]Failed[/red] Could not download sponsor register (no cache present).")
 
 
 if __name__ == "__main__":

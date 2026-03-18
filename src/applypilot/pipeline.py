@@ -67,13 +67,14 @@ def _compact_stats(stats: dict) -> dict:
 # Stage definitions
 # ---------------------------------------------------------------------------
 
-STAGE_ORDER = ("discover", "enrich", "score", "tailor", "cover", "pdf")
+STAGE_ORDER = ("discover", "enrich", "score", "tailor", "statement", "cover", "pdf")
 
 STAGE_META: dict[str, dict] = {
     "discover": {"desc": "Job discovery (JobSpy + Workday + smart extract)"},
     "enrich": {"desc": "Detail enrichment (full descriptions + apply URLs)"},
     "score": {"desc": "LLM scoring (fit 1-10)"},
     "tailor": {"desc": "Resume tailoring (LLM + validation)"},
+    "statement": {"desc": "Supporting statement generation (e.g. NHS)"},
     "cover": {"desc": "Cover letter generation"},
     "pdf": {"desc": "PDF conversion (tailored resumes + cover letters)"},
 }
@@ -85,7 +86,8 @@ _UPSTREAM: dict[str, str | None] = {
     "enrich": "discover",
     "score": "enrich",
     "tailor": "score",
-    "cover": "tailor",
+    "statement": "tailor",
+    "cover": "statement",
     "pdf": "cover",
 }
 
@@ -202,6 +204,18 @@ def _run_cover(min_score: int = 7) -> dict:
         return {"status": f"error: {e}"}
 
 
+def _run_statement(min_score: int = 7) -> dict:
+    """Stage: Supporting statement generation."""
+    try:
+        from applypilot.scoring.supporting_statement import run_supporting_statements
+
+        run_supporting_statements(min_score=min_score)
+        return {"status": "ok"}
+    except Exception as e:
+        log.error("Supporting statement generation failed: %s", e)
+        return {"status": f"error: {e}"}
+
+
 def _run_pdf() -> dict:
     """Stage: PDF conversion - convert tailored resumes and cover letters to PDF."""
     try:
@@ -220,6 +234,7 @@ _STAGE_RUNNERS: dict[str, Callable[..., dict]] = {
     "enrich": _run_enrich,
     "score": _run_score,
     "tailor": _run_tailor,
+    "statement": _run_statement,
     "cover": _run_cover,
     "pdf": _run_pdf,
 }
@@ -286,6 +301,13 @@ _PENDING_SQL: dict[str, str] = {
         "AND tailored_resume_path IS NULL "
         "AND COALESCE(tailor_attempts, 0) < 5"
     ),
+    "statement": (
+        "SELECT COUNT(*) FROM jobs WHERE fit_score >= ? "
+        "AND tailored_resume_path IS NOT NULL "
+        "AND full_description IS NOT NULL "
+        "AND (supporting_statement_path IS NULL OR supporting_statement_path = '') "
+        "AND COALESCE(statement_attempts, 0) < 5"
+    ),
     "cover": (
         "SELECT COUNT(*) FROM jobs WHERE fit_score >= ? "
         "AND tailored_resume_path IS NOT NULL "
@@ -313,7 +335,7 @@ def _count_pending(stage: str, min_score: int = 7) -> int:
     sql = _PENDING_SQL.get(stage)
     if sql is None:
         return 0
-    if _selected_only_enabled() and stage in ("tailor", "cover"):
+    if _selected_only_enabled() and stage in ("tailor", "statement", "cover"):
         sql += " AND apply_status = 'selected'"
 
     params: list[object] = []
@@ -341,7 +363,7 @@ def _run_stage_streaming(
     """
     runner = _STAGE_RUNNERS[stage]
     kwargs: dict = {}
-    if stage in ("tailor", "cover"):
+    if stage in ("tailor", "statement", "cover"):
         kwargs["min_score"] = min_score
     if stage in ("discover", "enrich"):
         kwargs["workers"] = workers

@@ -19,6 +19,7 @@ import time
 from datetime import datetime, timezone
 from collections import deque
 import base64
+import re
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -1576,6 +1577,7 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 from applypilot.setup_workspace import (
                     read_profile,
+                    list_resume_variants,
                     read_searches_dict,
                     read_searches_yaml,
                     read_text,
@@ -1586,6 +1588,7 @@ class _Handler(BaseHTTPRequestHandler):
                 searches_text, searches_trunc = read_searches_yaml(app_dir)
                 searches = read_searches_dict(app_dir)
                 resume_text, resume_trunc = read_text(resume_txt_path(app_dir))
+                variants = list_resume_variants(app_dir)
                 self._send_json(
                     200,
                     {
@@ -1596,8 +1599,33 @@ class _Handler(BaseHTTPRequestHandler):
                         "searches_truncated": bool(searches_trunc),
                         "resume_text": resume_text,
                         "resume_truncated": bool(resume_trunc),
+                        "resume_variants": variants,
                     },
                 )
+            except Exception as e:
+                self._send_json(400, {"ok": False, "error": "read_failed", "detail": str(e)})
+            return
+
+        if path == "/api/setup/resume-variant":
+            qs = parse_qs(parsed.query or "")
+            key = str((qs.get("key") or [""])[0] or "").strip().lower()
+            if not key:
+                self._send_json(400, {"ok": False, "error": "missing_key"})
+                return
+            try:
+                from applypilot.setup_workspace import read_resume_variant
+
+                text, trunc = read_resume_variant(app_dir, key)
+                self._send_json(200, {"ok": True, "key": key, "text": text, "truncated": bool(trunc)})
+            except Exception as e:
+                self._send_json(400, {"ok": False, "error": "read_failed", "detail": str(e)})
+            return
+
+        if path == "/api/setup/resume-variants":
+            try:
+                from applypilot.setup_workspace import list_resume_variants
+
+                self._send_json(200, {"ok": True, "variants": list_resume_variants(app_dir)})
             except Exception as e:
                 self._send_json(400, {"ok": False, "error": "read_failed", "detail": str(e)})
             return
@@ -1860,6 +1888,26 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(400, {"ok": False, "error": "write_failed", "detail": str(e)})
             return
 
+        if path == "/api/setup/resume-variant":
+            try:
+                from applypilot.setup_workspace import write_resume_variant
+
+                key = str(data.get("key") or "").strip().lower() if isinstance(data, dict) else ""
+                text = data.get("text") if isinstance(data, dict) else None
+                if not key:
+                    self._send_json(400, {"ok": False, "error": "missing_key"})
+                    return
+                if not isinstance(text, str):
+                    self._send_json(400, {"ok": False, "error": "bad_request"})
+                    return
+
+                write_resume_variant(app_dir, key, text)
+                _regen_dashboard_async(app_dir=app_dir, db_path=db_path)
+                self._send_json(200, {"ok": True})
+            except Exception as e:
+                self._send_json(400, {"ok": False, "error": "write_failed", "detail": str(e)})
+            return
+
         if path == "/api/setup/resume-pdf":
             try:
                 from applypilot.setup_workspace import write_resume_pdf
@@ -1889,6 +1937,87 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True})
             except Exception as e:
                 self._send_json(400, {"ok": False, "error": "write_failed", "detail": str(e)})
+            return
+
+        if path == "/api/statement/generate":
+            try:
+                from applypilot.config import check_tier
+                from applypilot.scoring.supporting_statement import generate_supporting_statement
+                from applypilot.setup_workspace import read_profile
+
+                check_tier(2, "supporting statement generation")
+
+                resume_text = data.get("resume_text") if isinstance(data, dict) else None
+                job_text = data.get("job_text") if isinstance(data, dict) else None
+                title = str(data.get("title") or "").strip() if isinstance(data, dict) else ""
+                org = str(data.get("org") or "").strip() if isinstance(data, dict) else ""
+                max_words_raw = data.get("max_words") if isinstance(data, dict) else None
+                try:
+                    max_words = int(str(max_words_raw).strip()) if max_words_raw is not None else 1500
+                except Exception:
+                    max_words = 1500
+                max_words = max(200, min(5000, int(max_words or 1500)))
+
+                if not isinstance(resume_text, str) or not resume_text.strip():
+                    self._send_json(400, {"ok": False, "error": "missing_resume"})
+                    return
+                if not isinstance(job_text, str) or not job_text.strip():
+                    self._send_json(400, {"ok": False, "error": "missing_job_text"})
+                    return
+
+                profile = read_profile(app_dir)
+                if not isinstance(profile, dict) or not profile:
+                    profile = {}
+
+                job = {
+                    "title": title or "Supporting Statement",
+                    "company": org or None,
+                    "site": org or None,
+                    "full_description": job_text,
+                }
+
+                statement = generate_supporting_statement(resume_text, job, profile)
+
+                # If statement is over the requested word limit, do a deterministic tighten pass.
+                def _word_count(t: str) -> int:
+                    return len(re.findall(r"[A-Za-z0-9%]+", (t or "").strip()))
+
+                wc = _word_count(statement)
+                if wc > max_words:
+                    from applypilot.llm import chat_json
+
+                    sys = (
+                        "You rewrite UK supporting statements. Keep the meaning, keep it truthful, "
+                        "remove repetition, and ensure it fits the word limit. "
+                        "Do not add new facts not present in the original statement or job text."
+                    )
+                    user_msg = (
+                        f"WORD LIMIT: {max_words}\n\n"
+                        f"JOB TEXT:\n{job_text[:8000]}\n\n"
+                        f"ORIGINAL STATEMENT:\n{statement}\n\n"
+                        'Return JSON only: {"statement":"..."}'
+                    )
+                    out = chat_json(
+                        [{"role": "system", "content": sys}, {"role": "user", "content": user_msg}],
+                        max_tokens=1800,
+                        temperature=0.0,
+                    )
+                    try:
+                        obj = json.loads((out or "").strip())
+                        if isinstance(obj, dict) and str(obj.get("statement") or "").strip():
+                            statement2 = str(obj.get("statement") or "").strip()
+                            statement = statement2
+                            wc = _word_count(statement)
+                    except Exception:
+                        pass
+
+                self._send_json(
+                    200, {"ok": True, "statement": statement, "word_count": int(wc), "max_words": int(max_words)}
+                )
+            except SystemExit as e:
+                self._send_json(409, {"ok": False, "error": "tier_blocked", "detail": str(e)})
+            except Exception as e:
+                self._send_json(400, {"ok": False, "error": "generate_failed", "detail": str(e)})
             return
 
         if path == "/api/jobs/mark":

@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 from applypilot import naming
 from applypilot.config import COVER_LETTER_DIR, RESUME_PATH, load_profile
+from applypilot.role_routing import route_resume_for_job
 from applypilot.database import get_connection, get_jobs_by_stage
 from applypilot.llm import get_client
 from applypilot.scoring.validator import (
@@ -532,7 +533,7 @@ def run_cover_letters(min_score: int = 7, limit: int = 0) -> dict:
         {"generated": int, "errors": int, "elapsed": float}
     """
     profile = load_profile()
-    resume_text = RESUME_PATH.read_text(encoding="utf-8")
+    default_resume_text = RESUME_PATH.read_text(encoding="utf-8")
     conn = get_connection()
     selected_only = _selected_only_enabled()
 
@@ -578,13 +579,17 @@ def run_cover_letters(min_score: int = 7, limit: int = 0) -> dict:
         completed += 1
         try:
             # Prefer the tailored resume for this specific job.
-            tailored_text = resume_text
+            tailored_text = default_resume_text
             trp = job.get("tailored_resume_path")
             if trp:
                 try:
                     tailored_text = Path(trp).read_text(encoding="utf-8")
                 except Exception:
-                    tailored_text = resume_text
+                    # Fall back to best base resume variant.
+                    try:
+                        tailored_text = route_resume_for_job(job).text.strip() or default_resume_text
+                    except Exception:
+                        tailored_text = default_resume_text
 
             letter = generate_cover_letter(tailored_text, job, profile)
 

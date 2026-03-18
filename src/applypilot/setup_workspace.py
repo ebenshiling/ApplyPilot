@@ -308,6 +308,15 @@ def resume_pdf_path(app_dir: Path) -> Path:
     return Path(app_dir) / "resume.pdf"
 
 
+def resume_variants_dir(app_dir: Path) -> Path:
+    return Path(app_dir) / "resume_variants"
+
+
+def resume_variant_path(app_dir: Path, key: str) -> Path:
+    k = str(key or "").strip().lower()
+    return resume_variants_dir(app_dir) / f"{k}.txt"
+
+
 def searches_path(app_dir: Path) -> Path:
     return Path(app_dir) / "searches.yaml"
 
@@ -371,6 +380,49 @@ def write_resume_text(app_dir: Path, text: str) -> None:
     _atomic_write_text(resume_txt_path(app_dir), t)
 
 
+def list_resume_variants(app_dir: Path) -> list[dict[str, Any]]:
+    d = resume_variants_dir(app_dir)
+    if not d.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    for p in sorted(d.glob("*.txt"), key=lambda x: x.name.lower()):
+        try:
+            st = p.stat()
+            out.append(
+                {
+                    "key": p.stem,
+                    "name": p.name,
+                    "path": str(p),
+                    "bytes": int(st.st_size),
+                    "mtime": float(st.st_mtime),
+                }
+            )
+        except Exception:
+            continue
+    return out
+
+
+def read_resume_variant(app_dir: Path, key: str) -> tuple[str, bool]:
+    p = resume_variant_path(app_dir, key)
+    return read_text(p)
+
+
+def write_resume_variant(app_dir: Path, key: str, text: str) -> None:
+    k = str(key or "").strip().lower()
+    if not re.match(r"^[a-z0-9_\-]{2,40}$", k):
+        raise ValueError("variant key must be 2-40 chars (a-z, 0-9, _, -)")
+    t = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not t.strip():
+        raise ValueError("variant text is empty")
+    if len(t) > 600_000:
+        raise ValueError("variant text too large")
+    if not t.endswith("\n"):
+        t += "\n"
+    ensure_app_dir(Path(app_dir))
+    resume_variants_dir(app_dir).mkdir(parents=True, exist_ok=True)
+    _atomic_write_text(resume_variant_path(app_dir, k), t)
+
+
 def write_resume_pdf(app_dir: Path, data: bytes) -> None:
     ensure_app_dir(Path(app_dir))
     if not data or len(data) < 5:
@@ -422,10 +474,18 @@ def write_searches_yaml(app_dir: Path, text: str) -> None:
 
 def get_setup_status(app_dir: Path) -> dict[str, Any]:
     ad = Path(app_dir)
+    tier = None
+    try:
+        from applypilot.config import get_tier
+
+        tier = int(get_tier() or 0)
+    except Exception:
+        tier = None
     return {
         "app_dir": str(ad),
         "has_profile": profile_path(ad).exists(),
         "has_resume_txt": resume_txt_path(ad).exists(),
         "has_resume_pdf": resume_pdf_path(ad).exists(),
         "has_searches": searches_path(ad).exists(),
+        "tier": tier,
     }

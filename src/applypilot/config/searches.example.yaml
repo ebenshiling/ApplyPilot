@@ -98,6 +98,25 @@ defaults:
   results_per_site: 100  # Max results per board per query
   hours_old: 72          # Only jobs posted within this many hours
 
+# Optional: Multi-role resume routing (deterministic keyword match)
+# Put your different resume versions in ~/.applypilot/resume_variants/*.txt
+# then map job families -> variant + keywords.
+resume_routing:
+  variants:
+    data_analyst: "resume_variants/data_analyst.txt"
+    it_support: "resume_variants/it_support.txt"
+    software_testing: "resume_variants/software_testing.txt"
+  families:
+    - name: "data"
+      variant: "data_analyst"
+      keywords: ["data analyst", "power bi", "sql", "python", "reporting"]
+    - name: "support"
+      variant: "it_support"
+      keywords: ["service desk", "it support", "desktop support", "helpdesk", "m365"]
+    - name: "testing"
+      variant: "software_testing"
+      keywords: ["qa", "tester", "test analyst", "selenium", "jira"]
+
 # Negative keywords -- skip jobs with these in the title (case-insensitive)
 exclude_titles:
   - "senior director"

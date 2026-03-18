@@ -12,6 +12,7 @@ import time
 from datetime import datetime, timezone
 
 from applypilot.config import RESUME_PATH
+from applypilot.role_routing import route_resume_for_job
 from applypilot.database import get_connection, get_jobs_by_stage
 from applypilot.llm import chat_json
 
@@ -160,7 +161,7 @@ def score_job(resume_text: str, job: dict) -> dict:
     """
     job_text = (
         f"TITLE: {job['title']}\n"
-        f"COMPANY: {job['site']}\n"
+        f"COMPANY: {job.get('company') or job.get('site') or 'N/A'}\n"
         f"LOCATION: {job.get('location', 'N/A')}\n\n"
         f"DESCRIPTION:\n{(job.get('full_description') or '')[:6000]}"
     )
@@ -235,7 +236,7 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     Returns:
         {"scored": int, "errors": int, "recovered": int, "elapsed": float, "distribution": list}
     """
-    resume_text = RESUME_PATH.read_text(encoding="utf-8")
+    base_resume_text = RESUME_PATH.read_text(encoding="utf-8")
     conn = get_connection()
     recovered = _repair_zero_scores(conn)
 
@@ -263,6 +264,13 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     results: list[dict] = []
 
     for job in jobs:
+        # Deterministic multi-role support: choose the best base resume variant.
+        try:
+            routed = route_resume_for_job(job)
+            resume_text = routed.text.strip() or base_resume_text
+        except Exception:
+            resume_text = base_resume_text
+
         result = score_job(resume_text, job)
         result["url"] = job["url"]
         completed += 1

@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from applypilot.config import RESUME_PATH, TAILORED_DIR, load_profile, load_search_config
+from applypilot.role_routing import route_resume_for_job
 from applypilot.database import get_connection, get_jobs_by_stage
 from applypilot.llm import chat_json, get_client
 from applypilot import naming
@@ -1599,7 +1600,7 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
         {"approved": int, "failed": int, "errors": int, "elapsed": float}
     """
     profile = load_profile()
-    resume_text = RESUME_PATH.read_text(encoding="utf-8")
+    default_resume_text = RESUME_PATH.read_text(encoding="utf-8")
     conn = get_connection()
     selected_only = _selected_only_enabled()
 
@@ -1689,7 +1690,14 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
     for job in jobs:
         completed += 1
         try:
-            tailored, report = tailor_resume(resume_text, job, profile)
+            # Deterministic multi-role support: choose the best base resume variant.
+            try:
+                routed = route_resume_for_job(job)
+                base_resume_text = routed.text.strip() or default_resume_text
+            except Exception:
+                base_resume_text = default_resume_text
+
+            tailored, report = tailor_resume(base_resume_text, job, profile)
 
             # Build filename prefix: username/name + role/site + unique URL hash.
             username = str(os.environ.get("APPLYPILOT_USER", "") or "").strip()

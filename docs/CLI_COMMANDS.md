@@ -30,6 +30,12 @@ applypilot llm-test
 applypilot run discover enrich score tailor cover pdf --min-score 7
 ```
 
+- Generate supporting statements (NHS-style) for high-fit jobs:
+
+```bash
+applypilot run statement --min-score 7
+```
+
 - Run only selected stages:
 
 ```bash

@@ -75,3 +75,13 @@ applypilot apply --engine llm --keep-open --url "<job url>"
 - `skip_titles` in `searches.yaml` skips jobs during tailor/apply.
 - UK direct sites are configured in `src/applypilot/config/sites.yaml` and are scraped
   via smart extract during discovery.
+
+### Sponsorship notes
+
+- ApplyPilot can now cache the official Home Office sponsor register and tag jobs with:
+  `Sponsor: <org>` (licensed sponsor) and `Sponsorship: Yes/No` (explicit text signal).
+- Update the cached register:
+
+```bash
+applypilot uk-sponsors-update --force
+```

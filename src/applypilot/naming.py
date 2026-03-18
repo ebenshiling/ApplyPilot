@@ -114,3 +114,13 @@ def cover_letter_filename(personal: dict, ext: str = "pdf", *, username: str = "
     if job_suf:
         return f"{prefix}_Cover_Letter_{job_suf}.{ext}"
     return f"{prefix}_Cover_Letter.{ext}"
+
+
+def supporting_statement_filename(
+    personal: dict, ext: str = "txt", *, username: str = "", job: dict | None = None
+) -> str:
+    prefix = _filename_prefix(personal, username=username)
+    job_suf = _job_suffix(job)
+    if job_suf:
+        return f"{prefix}_Supporting_Statement_{job_suf}.{ext}"
+    return f"{prefix}_Supporting_Statement.{ext}"

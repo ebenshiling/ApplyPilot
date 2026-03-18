@@ -93,6 +93,7 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             -- Discovery stage (smart_extract / job_search)
             url                   TEXT PRIMARY KEY,
             title                 TEXT,
+            company               TEXT,
             search_query          TEXT,
             salary                TEXT,
             description           TEXT,
@@ -107,6 +108,15 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             detail_scraped_at     TEXT,
             detail_error          TEXT,
 
+            -- Sponsorship signals (UK-focused but harmless elsewhere)
+            sponsorship_explicit  TEXT,
+            sponsorship_evidence  TEXT,
+            sponsor_licensed      TEXT,
+            sponsor_match_name    TEXT,
+            sponsor_match_confidence REAL,
+            sponsor_source        TEXT,
+            sponsor_checked_at    TEXT,
+
             -- Scoring stage (job_scorer)
             fit_score             INTEGER,
             score_confidence      REAL,
@@ -117,6 +127,11 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             tailored_resume_path  TEXT,
             tailored_at           TEXT,
             tailor_attempts       INTEGER DEFAULT 0,
+
+            -- Supporting statement stage (e.g. NHS)
+            supporting_statement_path TEXT,
+            supporting_statement_at   TEXT,
+            statement_attempts        INTEGER DEFAULT 0,
 
             -- Cover letter stage
             cover_letter_path     TEXT,
@@ -310,6 +325,7 @@ _ALL_COLUMNS: dict[str, str] = {
     # Discovery
     "url": "TEXT PRIMARY KEY",
     "title": "TEXT",
+    "company": "TEXT",
     "search_query": "TEXT",
     "salary": "TEXT",
     "description": "TEXT",
@@ -322,6 +338,14 @@ _ALL_COLUMNS: dict[str, str] = {
     "application_url": "TEXT",
     "detail_scraped_at": "TEXT",
     "detail_error": "TEXT",
+    # Sponsorship signals
+    "sponsorship_explicit": "TEXT",
+    "sponsorship_evidence": "TEXT",
+    "sponsor_licensed": "TEXT",
+    "sponsor_match_name": "TEXT",
+    "sponsor_match_confidence": "REAL",
+    "sponsor_source": "TEXT",
+    "sponsor_checked_at": "TEXT",
     # Scoring
     "fit_score": "INTEGER",
     "score_confidence": "REAL",
@@ -331,6 +355,10 @@ _ALL_COLUMNS: dict[str, str] = {
     "tailored_resume_path": "TEXT",
     "tailored_at": "TEXT",
     "tailor_attempts": "INTEGER DEFAULT 0",
+    # Supporting statement
+    "supporting_statement_path": "TEXT",
+    "supporting_statement_at": "TEXT",
+    "statement_attempts": "INTEGER DEFAULT 0",
     # Cover letter
     "cover_letter_path": "TEXT",
     "cover_letter_at": "TEXT",
@@ -514,11 +542,12 @@ def store_jobs(conn: sqlite3.Connection, jobs: list[dict], site: str, strategy: 
             continue
         try:
             conn.execute(
-                "INSERT INTO jobs (url, title, search_query, salary, description, location, site, strategy, discovered_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO jobs (url, title, company, search_query, salary, description, location, site, strategy, discovered_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     canonical or url,
                     job.get("title"),
+                    job.get("company"),
                     job.get("search_query"),
                     job.get("salary"),
                     job.get("description"),

@@ -197,6 +197,7 @@ def store_jobspy_results(
             pass
 
         title = str(row.get("title", "")) if str(row.get("title", "")) != "nan" else None
+        company = str(row.get("company", "")) if str(row.get("company", "")) != "nan" else None
         location_str = str(row.get("location", "")) if str(row.get("location", "")) != "nan" else None
 
         # Build salary string from min/max
@@ -249,12 +250,13 @@ def store_jobspy_results(
 
         try:
             conn.execute(
-                "INSERT INTO jobs (url, title, search_query, salary, description, location, site, strategy, discovered_at, "
+                "INSERT INTO jobs (url, title, company, search_query, salary, description, location, site, strategy, discovered_at, "
                 "full_description, application_url, detail_scraped_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     canonical_url,
                     title,
+                    company,
                     (search_query or None),
                     salary,
                     description,

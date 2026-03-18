@@ -258,8 +258,13 @@ def collect_detail_intelligence(page) -> dict:
 
 
 def extract_from_json_ld(intel: dict) -> dict | None:
-    """Extract description and apply URL from JSON-LD JobPosting.
-    Returns {"full_description": str, "application_url": str|None} or None."""
+    """Extract fields from JSON-LD JobPosting.
+
+    Returns a dict with keys:
+      - full_description: str
+      - application_url: str|None
+      - company: str|None
+    """
 
     def find_job_posting(data):
         if isinstance(data, dict):
@@ -300,9 +305,24 @@ def extract_from_json_ld(intel: dict) -> dict | None:
         if not apply_url:
             apply_url = posting.get("url")
 
+        company = None
+        try:
+            org = posting.get("hiringOrganization")
+            if isinstance(org, dict):
+                company = org.get("name")
+            elif isinstance(org, list):
+                # Take the first name we see.
+                for it in org:
+                    if isinstance(it, dict) and it.get("name"):
+                        company = it.get("name")
+                        break
+        except Exception:
+            company = None
+
         return {
             "full_description": desc_clean,
             "application_url": apply_url,
+            "company": (str(company).strip() if company else None),
         }
 
     return None
@@ -762,10 +782,58 @@ def scrape_site_batch(
 
                 if status in ("ok", "partial"):
                     stats[status] += 1
+
+                    # Sponsorship signals (best-effort): use extracted company if available,
+                    # otherwise preserve what discovery already stored.
+                    try:
+                        existing_company = conn.execute("SELECT company FROM jobs WHERE url = ?", (url,)).fetchone()
+                        existing_company_val = (
+                            str(existing_company[0]) if existing_company and existing_company[0] else None
+                        )
+                    except Exception:
+                        existing_company_val = None
+
+                    company_val = str(result.get("company") or existing_company_val or "").strip()
+                    try:
+                        from applypilot.uk_sponsorship import annotate_sponsorship
+
+                        sig = annotate_sponsorship(
+                            company=company_val or None, text=result.get("full_description"), app_dir=None
+                        )
+                    except Exception:
+                        sig = None
+
+                    checked_at = now if sig is not None else None
+
                     conn.execute(
-                        "UPDATE jobs SET full_description = ?, application_url = ?, "
-                        "detail_scraped_at = ?, detail_error = NULL WHERE url = ?",
-                        (result.get("full_description"), result.get("application_url"), now, url),
+                        "UPDATE jobs "
+                        "   SET full_description = ?, "
+                        "       application_url = ?, "
+                        "       company = COALESCE(NULLIF(?, ''), company), "
+                        "       sponsorship_explicit = COALESCE(?, sponsorship_explicit), "
+                        "       sponsorship_evidence = COALESCE(?, sponsorship_evidence), "
+                        "       sponsor_licensed = COALESCE(?, sponsor_licensed), "
+                        "       sponsor_match_name = COALESCE(?, sponsor_match_name), "
+                        "       sponsor_match_confidence = COALESCE(?, sponsor_match_confidence), "
+                        "       sponsor_source = COALESCE(NULLIF(?, ''), sponsor_source), "
+                        "       sponsor_checked_at = COALESCE(NULLIF(?, ''), sponsor_checked_at), "
+                        "       detail_scraped_at = ?, "
+                        "       detail_error = NULL "
+                        " WHERE url = ?",
+                        (
+                            result.get("full_description"),
+                            result.get("application_url"),
+                            company_val,
+                            (sig.sponsorship_explicit if sig else None),
+                            (sig.sponsorship_evidence if sig else None),
+                            (sig.sponsor_licensed if sig else None),
+                            (sig.sponsor_match_name if sig else None),
+                            (sig.sponsor_match_confidence if sig else None),
+                            (sig.sponsor_source if sig else None),
+                            checked_at,
+                            now,
+                            url,
+                        ),
                     )
                 else:
                     stats["error"] += 1
