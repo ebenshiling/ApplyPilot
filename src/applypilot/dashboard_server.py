@@ -1336,9 +1336,9 @@ def _inject_multi_user_ui(html: str, user: dict[str, Any]) -> str:
         ".then(async(r)=>{const t=await r.text();let j={};try{j=JSON.parse(t||'{}')}catch(e){j={detail:t}};if(!r.ok||!j.ok)throw new Error(j.detail||j.error||('HTTP '+r.status));return j;});"
         "}"
         "const bar=document.createElement('div');"
-        "bar.style.cssText='position:fixed;right:12px;top:10px;z-index:9999;background:#fff;border:1px solid #d8dce4;border-radius:999px;padding:6px 10px;display:flex;gap:8px;align-items:center;box-shadow:0 8px 20px rgba(0,0,0,0.08);font:600 13px ui-sans-serif,system-ui';"
+        "bar.style.cssText='position:fixed;right:12px;top:10px;z-index:9999;background:var(--card, rgba(255,255,255,0.92));color:var(--ink, #0b0f14);border:1px solid var(--line, #d8dce4);border-radius:999px;padding:5px 9px;display:flex;gap:7px;align-items:center;box-shadow:var(--shadow, 0 8px 20px rgba(0,0,0,0.08));font:600 12px ui-sans-serif,system-ui;line-height:1;backdrop-filter:blur(10px);';"
         "const role=me.is_admin?'admin':'user';"
-        "bar.innerHTML='<span>'+me.username+'</span><span style=\"opacity:.7\">('+role+')</span><button id=\"ap-logout-btn\" style=\"border:1px solid #d8dce4;border-radius:999px;padding:3px 8px;background:#fff;cursor:pointer;font-weight:700\">Logout</button>';"
+        'bar.innerHTML=\'<span style="font-weight:700">\'+me.username+\'</span><span style="opacity:.7;font-size:11px">(\'+role+\')</span><button id="ap-logout-btn" style="border:1px solid var(--line, #d8dce4);border-radius:999px;padding:2px 7px;background:var(--surface, rgba(255,255,255,0.82));color:var(--ink, #0b0f14);cursor:pointer;font-weight:700;font-size:11px;line-height:1.1">Logout</button>\';'
         "document.body.appendChild(bar);"
         "const lb=document.getElementById('ap-logout-btn');"
         "if(lb){lb.onclick=async()=>{try{await postJson('/api/auth/logout',{});}catch(e){} location.href='/';};}"
@@ -1431,7 +1431,15 @@ class _Handler(BaseHTTPRequestHandler):
                 self.send_header(str(k), str(v))
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # Client disconnected mid-response (refresh/navigate). Ignore.
+            try:
+                self.close_connection = True
+            except Exception:
+                pass
+            return
 
     def _send_json(self, status: int, obj: dict[str, Any], headers: dict[str, Any] | None = None) -> None:
         self._send(status, json.dumps(obj).encode("utf-8"), "application/json; charset=utf-8", headers=headers)
@@ -1617,6 +1625,30 @@ class _Handler(BaseHTTPRequestHandler):
 
                 text, trunc = read_resume_variant(app_dir, key)
                 self._send_json(200, {"ok": True, "key": key, "text": text, "truncated": bool(trunc)})
+            except Exception as e:
+                self._send_json(400, {"ok": False, "error": "read_failed", "detail": str(e)})
+            return
+
+        if path == "/api/job/full-description":
+            qs = parse_qs(parsed.query or "")
+            try:
+                job_id = int((qs.get("job_id") or ["0"])[0])
+            except Exception:
+                job_id = 0
+            if job_id <= 0:
+                self._send_json(400, {"ok": False, "error": "bad_request", "detail": "missing job_id"})
+                return
+            try:
+                conn = get_connection(db_path)
+                row = conn.execute("SELECT full_description FROM jobs WHERE rowid = ?", (int(job_id),)).fetchone()
+                if not row:
+                    self._send_json(404, {"ok": False, "error": "not_found"})
+                    return
+                text = str(row[0] or "")
+                # Keep payload bounded.
+                if len(text) > 60000:
+                    text = text[:60000]
+                self._send_json(200, {"ok": True, "job_id": int(job_id), "text": text})
             except Exception as e:
                 self._send_json(400, {"ok": False, "error": "read_failed", "detail": str(e)})
             return
@@ -2046,13 +2078,32 @@ class _Handler(BaseHTTPRequestHandler):
                 selected = sv
             else:
                 selected = str(sv or "").strip().lower() in ("1", "true", "yes", "on")
+            xv = data.get("exclusive")
+            if isinstance(xv, bool):
+                exclusive = xv
+            else:
+                exclusive = str(xv or "").strip().lower() in ("1", "true", "yes", "on")
             if job_id <= 0:
                 self._send_json(400, {"ok": False, "error": "bad_request"})
                 return
             conn = get_connection(db_path)
             conn.execute("BEGIN IMMEDIATE")
             try:
+                cleared = 0
                 if selected:
+                    if exclusive:
+                        cleared_cur = conn.execute(
+                            """
+                            UPDATE jobs
+                               SET apply_status = NULL,
+                                   apply_error = NULL,
+                                   agent_id = NULL
+                             WHERE rowid != ?
+                               AND apply_status = 'selected'
+                            """,
+                            (job_id,),
+                        )
+                        cleared = int(cleared_cur.rowcount or 0)
                     cur = conn.execute(
                         """
                         UPDATE jobs
@@ -2085,7 +2136,10 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(404, {"ok": False, "error": "not_found"})
                 return
             _regen_dashboard_async(app_dir=app_dir, db_path=db_path)
-            self._send_json(200, {"ok": True, "updated": updated, "selected": selected})
+            self._send_json(
+                200,
+                {"ok": True, "updated": updated, "selected": selected, "exclusive": exclusive, "cleared": cleared},
+            )
             return
 
         if path == "/api/jobs/delete":

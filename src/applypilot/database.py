@@ -70,8 +70,12 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
       - Discovery:  url, title, salary, description, location, site, strategy, discovered_at
       - Enrichment: full_description, application_url, detail_scraped_at, detail_error
       - Scoring:    fit_score, score_reasoning, scored_at
-      - Tailoring:  tailored_resume_path, tailored_at, tailor_attempts
-      - Cover:      cover_letter_path, cover_letter_at, cover_attempts
+      - Tailoring:  tailored_resume_path, tailored_at, tailor_attempts,
+                    tailor_status, tailor_failure_detail, tailor_report_path,
+                    tailor_requirement_gaps, tailor_responsibility_map
+      - Cover:      cover_letter_path, cover_letter_at, cover_attempts,
+                    cover_letter_status, cover_letter_failure_detail,
+                    cover_letter_report_path, cover_letter_diagnostics
       - Apply:      applied_at, apply_status, apply_error, apply_attempts,
                    agent_id, last_attempted_at, apply_duration_ms, apply_task_id,
                    verification_confidence
@@ -127,6 +131,11 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             tailored_resume_path  TEXT,
             tailored_at           TEXT,
             tailor_attempts       INTEGER DEFAULT 0,
+            tailor_status         TEXT,
+            tailor_failure_detail TEXT,
+            tailor_report_path    TEXT,
+            tailor_requirement_gaps TEXT,
+            tailor_responsibility_map TEXT,
 
             -- Supporting statement stage (e.g. NHS)
             supporting_statement_path TEXT,
@@ -137,6 +146,10 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             cover_letter_path     TEXT,
             cover_letter_at       TEXT,
             cover_attempts        INTEGER DEFAULT 0,
+            cover_letter_status   TEXT,
+            cover_letter_failure_detail TEXT,
+            cover_letter_report_path TEXT,
+            cover_letter_diagnostics TEXT,
 
             -- Application stage
             applied_at            TEXT,
@@ -355,6 +368,11 @@ _ALL_COLUMNS: dict[str, str] = {
     "tailored_resume_path": "TEXT",
     "tailored_at": "TEXT",
     "tailor_attempts": "INTEGER DEFAULT 0",
+    "tailor_status": "TEXT",
+    "tailor_failure_detail": "TEXT",
+    "tailor_report_path": "TEXT",
+    "tailor_requirement_gaps": "TEXT",
+    "tailor_responsibility_map": "TEXT",
     # Supporting statement
     "supporting_statement_path": "TEXT",
     "supporting_statement_at": "TEXT",
@@ -363,6 +381,10 @@ _ALL_COLUMNS: dict[str, str] = {
     "cover_letter_path": "TEXT",
     "cover_letter_at": "TEXT",
     "cover_attempts": "INTEGER DEFAULT 0",
+    "cover_letter_status": "TEXT",
+    "cover_letter_failure_detail": "TEXT",
+    "cover_letter_report_path": "TEXT",
+    "cover_letter_diagnostics": "TEXT",
     # Application
     "applied_at": "TEXT",
     "apply_status": "TEXT",
@@ -493,11 +515,14 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
 
     stats["apply_errors"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE apply_error IS NOT NULL").fetchone()[0]
 
+    # "Ready to apply" means the job has application link (or at least a listing URL)
+    # and the documents needed to apply.
     stats["ready_to_apply"] = conn.execute(
         "SELECT COUNT(*) FROM jobs "
         "WHERE tailored_resume_path IS NOT NULL "
+        "AND cover_letter_path IS NOT NULL "
         "AND applied_at IS NULL "
-        "AND application_url IS NOT NULL"
+        "AND COALESCE(NULLIF(application_url, ''), NULLIF(url, '')) IS NOT NULL"
     ).fetchone()[0]
 
     return stats
@@ -598,11 +623,43 @@ def get_jobs_by_stage(
             "AND tailored_resume_path IS NULL AND COALESCE(tailor_attempts, 0) < 5"
         ),
         "tailored": "tailored_resume_path IS NOT NULL",
-        "pending_apply": ("tailored_resume_path IS NOT NULL AND applied_at IS NULL AND application_url IS NOT NULL"),
+        "pending_apply": (
+            "tailored_resume_path IS NOT NULL "
+            "AND cover_letter_path IS NOT NULL "
+            "AND applied_at IS NULL "
+            "AND COALESCE(NULLIF(application_url, ''), NULLIF(url, '')) IS NOT NULL"
+        ),
         "applied": "applied_at IS NOT NULL",
     }
 
     where = conditions.get(stage, "1=1")
+
+    # If the user explicitly selected jobs, selection should override score
+    # thresholds for downstream stages.
+    if selected_only and stage in ("pending_tailor", "statement", "cover", "pending_apply"):
+        if stage == "pending_tailor":
+            where = "full_description IS NOT NULL AND tailored_resume_path IS NULL AND COALESCE(tailor_attempts, 0) < 5"
+        elif stage == "statement":
+            where = (
+                "tailored_resume_path IS NOT NULL "
+                "AND full_description IS NOT NULL "
+                "AND (supporting_statement_path IS NULL OR supporting_statement_path = '') "
+                "AND COALESCE(statement_attempts, 0) < 5"
+            )
+        elif stage == "cover":
+            where = (
+                "tailored_resume_path IS NOT NULL "
+                "AND full_description IS NOT NULL "
+                "AND (cover_letter_path IS NULL OR cover_letter_path = '') "
+                "AND COALESCE(cover_attempts, 0) < 5"
+            )
+        elif stage == "pending_apply":
+            where = (
+                "tailored_resume_path IS NOT NULL "
+                "AND cover_letter_path IS NOT NULL "
+                "AND applied_at IS NULL "
+                "AND COALESCE(NULLIF(application_url, ''), NULLIF(url, '')) IS NOT NULL"
+            )
     params: list = []
 
     if "?" in where and min_score is not None:

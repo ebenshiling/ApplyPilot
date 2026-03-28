@@ -335,7 +335,35 @@ def _count_pending(stage: str, min_score: int = 7) -> int:
     sql = _PENDING_SQL.get(stage)
     if sql is None:
         return 0
-    if _selected_only_enabled() and stage in ("tailor", "statement", "cover"):
+
+    selected_only = _selected_only_enabled()
+    if selected_only and stage in ("tailor", "statement", "cover"):
+        # Selection should override score thresholds; count any selected jobs
+        # that are eligible for the stage.
+        if stage == "tailor":
+            sql = (
+                "SELECT COUNT(*) FROM jobs WHERE apply_status = 'selected' "
+                "AND full_description IS NOT NULL "
+                "AND tailored_resume_path IS NULL "
+                "AND COALESCE(tailor_attempts, 0) < 5"
+            )
+        elif stage == "statement":
+            sql = (
+                "SELECT COUNT(*) FROM jobs WHERE apply_status = 'selected' "
+                "AND tailored_resume_path IS NOT NULL "
+                "AND full_description IS NOT NULL "
+                "AND (supporting_statement_path IS NULL OR supporting_statement_path = '') "
+                "AND COALESCE(statement_attempts, 0) < 5"
+            )
+        elif stage == "cover":
+            sql = (
+                "SELECT COUNT(*) FROM jobs WHERE apply_status = 'selected' "
+                "AND tailored_resume_path IS NOT NULL "
+                "AND full_description IS NOT NULL "
+                "AND (cover_letter_path IS NULL OR cover_letter_path = '') "
+                "AND COALESCE(cover_attempts, 0) < 5"
+            )
+    elif selected_only and stage in ("tailor", "statement", "cover"):
         sql += " AND apply_status = 'selected'"
 
     params: list[object] = []

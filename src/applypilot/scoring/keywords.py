@@ -104,6 +104,7 @@ def build_keyword_bank(
     resume_text: str = "",
     prompt_limit: int = 14,
     highlight_limit: int = 24,
+    seeded_phrases: list[str] | None = None,
 ) -> dict:
     """Build a controlled keyword bank from JD + resume.
 
@@ -170,6 +171,23 @@ def build_keyword_bank(
     phrase_ranked = sorted(phrase_counts.keys(), key=lambda p: (phrase_counts[p], len(p)), reverse=True)
     phrase_hits = [p for p in phrase_ranked if p not in _DENY][: max(0, highlight_limit)]
 
+    seed_hits: list[str] = []
+    for phrase in seeded_phrases or []:
+        p = _clean(str(phrase))
+        pl = p.lower()
+        if not p or len(pl) < 5 or len(pl) > 80:
+            continue
+        words = [w for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9+./-]*", pl) if w]
+        if words and all(w in _STOPWORDS or w in _DENY for w in words):
+            continue
+        if not res_l:
+            continue
+        words = [w for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9+./-]*", pl) if len(w) >= 3]
+        if pl in jd_l and pl in res_l:
+            seed_hits.append(p)
+        elif words and sum(1 for w in words if w in jd_l and w in res_l) >= max(2, min(len(words), 3)):
+            seed_hits.append(p)
+
     # De-dup, preserve order
     def _dedupe(seq: list[str], limit: int) -> list[str]:
         seen: set[str] = set()
@@ -188,6 +206,6 @@ def build_keyword_bank(
         return out
 
     prompt_keywords = _dedupe(skill_hits + acronyms + phrase_hits, prompt_limit)
-    highlight_keywords = _dedupe(prompt_keywords + phrase_hits, highlight_limit)
+    highlight_keywords = _dedupe(prompt_keywords + seed_hits + phrase_hits, highlight_limit)
 
     return {"prompt_keywords": prompt_keywords, "highlight_keywords": highlight_keywords}

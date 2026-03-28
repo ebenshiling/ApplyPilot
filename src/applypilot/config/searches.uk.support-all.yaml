@@ -1,0 +1,253 @@
+# ApplyPilot search configuration (UK) - Combined Support Roles
+# Covers IT Support Analyst, Application Support Engineer, Technical Support Engineer,
+# Service Desk Analyst, Systems Support Analyst, and Application Support Analyst.
+# Copy into your workspace as `searches.yaml` when you want one combined support search.
+
+queries:
+  - query: "IT Support Analyst"
+    tier: 1
+  - query: "Application Support Engineer"
+    tier: 1
+  - query: "Technical Support Engineer"
+    tier: 1
+  - query: "Service Desk Analyst"
+    tier: 1
+  - query: "Systems Support Analyst"
+    tier: 1
+  - query: "Application Support Analyst"
+    tier: 1
+  - query: "IT Service Desk Analyst"
+    tier: 1
+  - query: "System Support Analyst"
+    tier: 1
+  - query: "Production Support Engineer"
+    tier: 1
+  - query: "Systems Application Support Analyst"
+    tier: 1
+
+  - query: "Technical Support Analyst"
+    tier: 2
+  - query: "Desktop Support Analyst"
+    tier: 2
+  - query: "IT Support Engineer"
+    tier: 2
+  - query: "Helpdesk Analyst"
+    tier: 2
+  - query: "Help Desk Analyst"
+    tier: 2
+  - query: "1st Line Support Analyst"
+    tier: 2
+  - query: "2nd Line Support Analyst"
+    tier: 2
+  - query: "Software Support Engineer"
+    tier: 2
+  - query: "Technical Application Support Engineer"
+    tier: 2
+  - query: "Application Support Specialist"
+    tier: 2
+  - query: "Application Operations Engineer"
+    tier: 2
+  - query: "Business Application Support Analyst"
+    tier: 2
+  - query: "Technical Application Support Analyst"
+    tier: 2
+  - query: "Application Analyst"
+    tier: 2
+  - query: "Business Systems Support Analyst"
+    tier: 2
+  - query: "Technical Systems Analyst"
+    tier: 2
+  - query: "Product Support Engineer"
+    tier: 2
+  - query: "Platform Support Engineer"
+    tier: 2
+
+  - query: "IT Support Technician"
+    tier: 3
+  - query: "End User Support Analyst"
+    tier: 3
+  - query: "Service Desk Technician"
+    tier: 3
+  - query: "Support Desk Analyst"
+    tier: 3
+  - query: "SaaS Support Engineer"
+    tier: 3
+  - query: "Cloud Support Engineer"
+    tier: 3
+  - query: "Infrastructure Support Engineer"
+    tier: 3
+  - query: "Implementation Support Engineer"
+    tier: 3
+  - query: "Integration Support Engineer"
+    tier: 3
+  - query: "Platform Support Analyst"
+    tier: 3
+  - query: "Systems Operations Analyst"
+    tier: 3
+  - query: "Technology Support Analyst"
+    tier: 3
+  - query: "ERP Support Analyst"
+    tier: 3
+  - query: "Product Support Analyst"
+    tier: 3
+
+locations:
+  - location: "London, UK"
+    remote: false
+  - location: "Manchester, UK"
+    remote: false
+  - location: "Birmingham, UK"
+    remote: false
+  - location: "Leeds, UK"
+    remote: false
+  - location: "Bristol, UK"
+    remote: false
+  - location: "Edinburgh, UK"
+    remote: false
+  - location: "Glasgow, UK"
+    remote: false
+  - location: "Cardiff, UK"
+    remote: false
+  - location: "Belfast, UK"
+    remote: false
+  - location: "Remote"
+    remote: true
+
+location:
+  accept_patterns:
+    - "United Kingdom"
+    - "UK"
+    - "England"
+    - "Scotland"
+    - "Wales"
+    - "Northern Ireland"
+    - "London"
+    - "Manchester"
+    - "Birmingham"
+    - "Leeds"
+    - "Liverpool"
+    - "Bristol"
+    - "Sheffield"
+    - "Nottingham"
+    - "Newcastle"
+    - "Leicester"
+    - "Glasgow"
+    - "Edinburgh"
+    - "Cardiff"
+    - "Belfast"
+    - "Remote"
+    - "Hybrid"
+    - "Work from home"
+    - "WFH"
+  reject_patterns:
+    - "United States"
+    - "USA"
+    - "U.S."
+    - "Canada"
+    - "India"
+    - "Philippines"
+    - "Nigeria"
+    - "Ghana"
+    - "Pakistan"
+    - "Kenya"
+    - "South Africa"
+    - "Sydney"
+    - "Melbourne"
+    - "Singapore"
+    - "Berlin"
+    - "Amsterdam"
+    - "Paris"
+    - "Madrid"
+    - "Onsite only"
+    - "On-site only"
+    - "in office only"
+
+country: "UK"
+
+boards:
+  - indeed
+  - linkedin
+  - glassdoor
+  - google
+  - zip_recruiter
+
+smart_sites:
+  - "NHS Jobs"
+  - "Jobs Go Public"
+  - "LG Jobs"
+  - "HealthJobsUK"
+  - "MoJ Jobs"
+
+defaults:
+  results_per_site: 75
+  hours_old: 168
+
+resume_routing:
+  variants:
+    it_support_analyst: "resume_variants/it_support_analyst.txt"
+    application_support_engineer: "resume_variants/application_support_engineer.txt"
+    technical_systems_analyst: "resume_variants/technical_systems_analyst.txt"
+    public_sector_main: "resume_variants/public_sector_main.txt"
+    commercial_main: "resume_variants/commercial_main.txt"
+    public_it_support: "resume_variants/public_it_support.txt"
+    public_application_support: "resume_variants/public_application_support.txt"
+    commercial_technical_support: "resume_variants/commercial_technical_support.txt"
+  families:
+    - name: "it_support_analyst"
+      variant: "it_support_analyst"
+      keywords: ["it support analyst", "service desk analyst", "helpdesk", "help desk", "desktop support", "1st line support", "first line support", "2nd line support", "second line support", "end user support", "it support technician", "microsoft 365", "active directory"]
+    - name: "application_support_engineer"
+      variant: "application_support_engineer"
+      keywords: ["application support engineer", "application support analyst", "production support", "software support", "technical application support", "business application support", "application analyst", "platform support", "incident management", "sql", "erp", "release support", "application monitoring"]
+    - name: "technical_systems_analyst"
+      variant: "technical_systems_analyst"
+      keywords: ["technical support engineer", "technical support specialist", "support engineer", "customer support engineer", "product support engineer", "technical systems analyst", "systems support analyst", "system support analyst", "business systems support analyst", "systems operations analyst", "technology support analyst", "system analyst", "systems administrator", "systems configuration", "system configuration", "system integration", "integration support", "saas support", "cloud support", "infrastructure support", "implementation support", "api support", "api", "technical troubleshooting", "troubleshooting", "root cause analysis", "issue resolution", "l2 support", "l3 support", "workflow", "process improvement", "requirement gathering", "stakeholder management", "operational support", "service improvement"]
+  context_families:
+    - name: "public_sector_main"
+      variant: "public_sector_main"
+      keywords: ["nhs", "nhs jobs", "healthjobsuk", "trust", "foundation trust", "university", "council", "borough council", "city council", "county council", "local authority", "jobs go public", "lg jobs", "civil service", "ministry of justice", "moj jobs", "department for", "public sector"]
+    - name: "commercial_main"
+      variant: "commercial_main"
+      keywords: ["saas", "software company", "product", "platform", "customer", "client", "commercial", "private sector", "startup", "scale-up", "b2b", "b2c", "e-commerce", "fintech"]
+  context_routing:
+    enabled: true
+    override_on_strong_match: true
+    min_hits: 2
+    min_margin_vs_role: 1
+  blended_routes:
+    enabled: true
+    combos:
+      - role_variant: "it_support_analyst"
+        context_variant: "public_sector_main"
+        variant: "public_it_support"
+      - role_variant: "application_support_engineer"
+        context_variant: "public_sector_main"
+        variant: "public_application_support"
+      - role_variant: "technical_systems_analyst"
+        context_variant: "commercial_main"
+        variant: "commercial_technical_support"
+
+workday_max_tier: 2
+workday_location_filter: true
+
+exclude_titles:
+  - "senior"
+  - "snr"
+  - "sr "
+  - "lead"
+  - "principal"
+  - "staff"
+  - "head of"
+  - "director"
+  - "vp"
+  - "vice president"
+  - "manager"
+  - "chief"
+  - "architect"
+  - "intern"
+  - "internship"
+  - "graduate"
+  - "phd"
+  - "security clearance"
+  - "DV clearance"
+  - "SC clearance"

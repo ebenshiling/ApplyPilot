@@ -91,3 +91,48 @@ def test_assemble_resume_accepts_string_resume_sections() -> None:
     assert "Masters Degree" not in out
     assert "CERTIFICATIONS" in out
     assert "PL-300 Data Analyst Associate" in out
+
+
+def test_assemble_resume_omits_projects_for_support_titles() -> None:
+    profile = _base_profile()
+    data = {
+        "title": "IT Support Analyst",
+        "summary": "Support analyst focused on resolving incidents and supporting Microsoft 365 users.",
+        "core_skills": ["Microsoft 365", "Entra ID", "Windows", "Ticketing"],
+        "skills": {"Core": "Microsoft 365, Entra ID, Windows"},
+        "experience": [
+            {
+                "header": "IT Support Intern at Example University",
+                "subtitle": "2024-2025",
+                "bullets": ["Resolved 15-25 tickets daily across email and service desk channels [F1]"],
+            }
+        ],
+        "projects": [],
+        "education": "",
+    }
+
+    out = assemble_resume_text(data, profile)
+    assert "PROJECTS" not in out
+
+
+def test_assemble_resume_normalizes_it_role_casing_in_headers() -> None:
+    profile = _base_profile()
+    data = {
+        "title": "it support analyst",
+        "summary": "Support analyst focused on incident resolution and user support.",
+        "core_skills": ["Microsoft 365", "Entra ID"],
+        "skills": {"Core": "Microsoft 365, Entra ID"},
+        "experience": [
+            {
+                "header": "it support Intern at University of Derby",
+                "subtitle": "2024-2025",
+                "bullets": ["Resolved tickets and supported onboarding [F1]"],
+            }
+        ],
+        "projects": [],
+        "education": "",
+    }
+
+    out = assemble_resume_text(data, profile)
+    assert "IT Support Analyst" in out
+    assert "IT Support Intern at University of Derby" in out

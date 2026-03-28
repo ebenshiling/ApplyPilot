@@ -12,6 +12,10 @@ services:
       APPLYPILOT_MULTI_ROOT: /data/multi
       PYTHONUNBUFFERED: "1"
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LLM_URL: ${LLM_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-}
     volumes:
       - ./docker-data/workspace:/data/workspace
       - ./docker-data/multi:/data/multi

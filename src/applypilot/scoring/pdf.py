@@ -191,13 +191,21 @@ def build_html(resume: dict) -> str:
         # Longer first to reduce partial overlaps
         uniq = [k.strip() for k in kws if str(k).strip()]
         uniq = sorted(set(uniq), key=len, reverse=True)[:24]
+        replaced: list[tuple[str, str]] = []
         for kw in uniq:
             if len(kw) < 3:
                 continue
             kw_e = _escape_html(kw)
+            token = f"__APPLYPILOT_HL_{len(replaced)}__"
             pat = re.compile(r"(?i)(?<![A-Za-z0-9])(" + re.escape(kw_e) + r")(?![A-Za-z0-9])")
-            # Use \g<1> so backslashes are not emitted as literal text.
-            out = pat.sub(r"<strong>\g<1></strong>", out)
+            m = pat.search(out)
+            if m:
+                # Preserve the exact casing from the rendered resume text.
+                matched = m.group(1)
+                out = pat.sub(token, out, count=1)
+                replaced.append((token, matched))
+        for token, matched in replaced:
+            out = out.replace(token, f'<strong class="kw">{matched}</strong>')
         return out
 
     def _render_simple_bullets(section_key: str, title: str, bold_label: bool = False) -> str:
@@ -351,6 +359,10 @@ body {{
     font-size: 9.5pt;
     color: #333;
     line-height: 1.4;
+}}
+.kw {{
+    font-weight: 700;
+    color: #123a63;
 }}
 .skill-row {{
     font-size: 9.5pt;

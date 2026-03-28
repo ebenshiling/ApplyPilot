@@ -707,10 +707,67 @@ def validate_cover_letter_consistency(text: str, resume_text: str, profile: dict
     r_l = r.lower()
     allowed = _build_skills_set(profile)
 
+    def _is_toolish_skill(sk: str) -> bool:
+        """Heuristic: treat vendor/tech terms as "tools"; ignore process phrases.
+
+        This guard exists to prevent brand-new tooling claims (e.g., Jira, ServiceNow)
+        from appearing in a cover letter when they are not present anywhere in the
+        candidate materials.
+
+        Process phrases like "incident resolution" or "root cause analysis" should
+        not fail this check.
+        """
+
+        s = (sk or "").strip().lower()
+        if not s or len(s) < 3:
+            return False
+        # Avoid treating long capability sentences as "tools".
+        if len(s.split()) > 5:
+            return False
+        if any(ch.isdigit() for ch in s):
+            return True
+        vendor_tokens = (
+            "microsoft",
+            "entra",
+            "azure",
+            "active directory",
+            "sharepoint",
+            "onedrive",
+            "teams",
+            "outlook",
+            "power bi",
+            "tableau",
+            "postgres",
+            "postgre",
+            "windows",
+            "macos",
+            "dns",
+            "vpn",
+            "tcp/ip",
+            "wifi",
+            "git",
+            "sql",
+            "python",
+            "vba",
+            "pandas",
+            "numpy",
+            "intune",
+            "jira",
+            "servicenow",
+        )
+        if any(tok in s for tok in vendor_tokens):
+            return True
+        # Single-token skills (e.g. "excel") are usually tool/tech keywords.
+        if len(s.split()) == 1:
+            return True
+        return False
+
     # If the letter mentions an allowed tool, ensure the resume also mentions it.
     mentioned_missing: list[str] = []
     for sk in sorted(allowed):
         if not sk or len(sk) < 3:
+            continue
+        if not _is_toolish_skill(sk):
             continue
         pat = r"\b" + re.escape(sk) + r"\b"
         if re.search(pat, t_l) and not re.search(pat, r_l):
@@ -721,11 +778,12 @@ def validate_cover_letter_consistency(text: str, resume_text: str, profile: dict
         items = ", ".join(mentioned_missing[:6])
         errors.append(f"Cover letter mentions tools not in resume: {items}")
 
-    # Numbers should come from the resume (soft but usually correct).
-    nums = re.findall(r"\b\d+\b", t)
-    if len(nums) >= 2:
+    # Numbers should come from the resume.
+    # Only enforce for 3+ digit numbers to avoid flagging common text like 24/7.
+    nums = re.findall(r"\b\d{3,}\b", t)
+    if nums:
         missing = [n for n in nums if n not in r]
-        if len(missing) >= 2:
+        if missing:
             errors.append("Cover letter uses numbers not present in resume")
 
     return {"passed": len(errors) == 0, "errors": errors}

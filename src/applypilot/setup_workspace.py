@@ -14,7 +14,16 @@ from typing import Any
 from applypilot.config import load_sites_config
 
 
-_ALLOWED_ROLE_PACKS = {"auto", "data_bi", "engineering", "support"}
+_ALLOWED_ROLE_PACKS = {
+    "auto",
+    "data_bi",
+    "engineering",
+    "support",
+    "application_support",
+    "qa_testing",
+    "cloud_platform",
+    "business_analysis",
+}
 _BOARD_ALLOWLIST = {"indeed", "linkedin", "glassdoor", "zip_recruiter", "google"}
 
 
@@ -137,7 +146,9 @@ def _validate_profile_patch(patch: dict[str, Any]) -> dict[str, Any]:
         t2 = dict(tailoring)
         rp = _clean_str(t2.get("role_pack_override", "auto"), max_len=32).lower() or "auto"
         if rp not in _ALLOWED_ROLE_PACKS:
-            raise ValueError("tailoring.role_pack_override must be one of auto,data_bi,engineering,support")
+            raise ValueError(
+                "tailoring.role_pack_override must be one of auto,data_bi,engineering,support,application_support,qa_testing,cloud_platform,business_analysis"
+            )
         t2["role_pack_override"] = rp
 
         dc_raw = t2.get("draft_candidates", 3)
@@ -160,6 +171,26 @@ def _validate_profile_patch(patch: dict[str, Any]) -> dict[str, Any]:
                     continue
                 syn2[kk] = [s.lower() for s in _validate_string_list(f"tailoring.safe_synonyms.{kk}", v, max_items=30)]
             t2["safe_synonyms"] = syn2
+
+        for kk in (
+            "hard_requirement_gate",
+            "align_current_role_header",
+        ):
+            if kk in t2 and not isinstance(t2.get(kk), bool):
+                raise ValueError(f"tailoring.{kk} must be true/false")
+
+        for kk in (
+            "max_missing_must_haves",
+            "max_missing_domain_requirements",
+        ):
+            if kk in t2:
+                try:
+                    iv = int(str(t2.get(kk)).strip())
+                except Exception:
+                    raise ValueError(f"tailoring.{kk} must be an integer")
+                if iv < 0 or iv > 20:
+                    raise ValueError(f"tailoring.{kk} must be in 0..20")
+                t2[kk] = iv
         out["tailoring"] = t2
 
     return out

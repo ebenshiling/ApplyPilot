@@ -75,7 +75,9 @@ def _job_number(job: dict | None) -> str:
 def _job_suffix(job: dict | None) -> str:
     if not isinstance(job, dict) or not job:
         return ""
-    role = str(job.get("search_query") or job.get("title") or "")
+    # Prefer the actual job title in filenames. `search_query` is the query used
+    # to discover the job and can be misleading (e.g. legacy searches).
+    role = str(job.get("title") or job.get("search_query") or "")
     site = str(job.get("site") or "")
     url = str(job.get("url") or job.get("application_url") or "")
     job_num = _job_number(job)

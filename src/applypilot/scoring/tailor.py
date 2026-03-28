@@ -34,10 +34,16 @@ from applypilot.scoring.tailor_strategy import (
     build_adaptive_budget,
     build_fact_library,
     build_jd_targets,
+    build_summary_gap_guidance,
+    evaluate_requirement_gaps,
     check_quant_consistency,
     collect_evidence_numbers,
     detect_role_pack,
+    extract_jd_requirements,
+    extract_job_responsibilities,
     format_fact_library_for_prompt,
+    format_responsibility_map_for_prompt,
+    map_responsibilities_to_evidence,
     rank_candidate,
     score_jd_coverage,
     strip_fact_citations,
@@ -185,6 +191,81 @@ def _min_coverage_required(profile: dict) -> float:
     return default
 
 
+def _hard_requirement_gating_enabled(profile: dict) -> bool:
+    if _lenient_tailor_enabled(profile):
+        return False
+    try:
+        cfg = (profile or {}).get("tailoring") or {}
+        if isinstance(cfg, dict) and cfg.get("hard_requirement_gate") is not None:
+            v = cfg.get("hard_requirement_gate")
+            if isinstance(v, bool):
+                return v
+            s = str(v or "").strip().lower()
+            if s in ("1", "true", "yes", "y", "on"):
+                return True
+            if s in ("0", "false", "no", "n", "off"):
+                return False
+    except Exception:
+        pass
+    ev = str(os.environ.get("APPLYPILOT_TAILOR_HARD_REQUIREMENT_GATE", "") or "").strip().lower()
+    if ev in ("1", "true", "yes", "y", "on"):
+        return True
+    if ev in ("0", "false", "no", "n", "off"):
+        return False
+    return True
+
+
+def _max_missing_must_haves(profile: dict) -> int:
+    if _lenient_tailor_enabled(profile):
+        default = 99
+    else:
+        default = 2
+    try:
+        cfg = (profile or {}).get("tailoring") or {}
+        if isinstance(cfg, dict) and cfg.get("max_missing_must_haves") is not None:
+            return max(0, int(str(cfg.get("max_missing_must_haves")).strip()))
+    except Exception:
+        pass
+    try:
+        ev = str(os.environ.get("APPLYPILOT_TAILOR_MAX_MISSING_MUST_HAVES", "") or "").strip()
+        if ev:
+            return max(0, int(ev))
+    except Exception:
+        pass
+    return default
+
+
+def _max_missing_domain_requirements(profile: dict) -> int:
+    if _lenient_tailor_enabled(profile):
+        default = 99
+    else:
+        default = 1
+    try:
+        cfg = (profile or {}).get("tailoring") or {}
+        if isinstance(cfg, dict) and cfg.get("max_missing_domain_requirements") is not None:
+            return max(0, int(str(cfg.get("max_missing_domain_requirements")).strip()))
+    except Exception:
+        pass
+    return default
+
+
+def _current_role_alignment_enabled(profile: dict) -> bool:
+    try:
+        cfg = (profile or {}).get("tailoring") or {}
+        if isinstance(cfg, dict) and cfg.get("align_current_role_header") is not None:
+            v = cfg.get("align_current_role_header")
+            if isinstance(v, bool):
+                return v
+            s = str(v or "").strip().lower()
+            if s in ("1", "true", "yes", "y", "on"):
+                return True
+            if s in ("0", "false", "no", "n", "off"):
+                return False
+    except Exception:
+        pass
+    return True
+
+
 def _load_skip_titles() -> list[str]:
     """Load `skip_titles` from searches.yaml (case-insensitive substrings)."""
     try:
@@ -319,6 +400,16 @@ def _title_matches_focus_roles(title: str | None, focus_roles: list[str]) -> boo
     if "bi" in expanded_tokens:
         expanded_tokens.update({"business", "intelligence"})
 
+    title_has_support = "support" in expanded_tokens
+    title_has_line = bool({"1st", "2nd", "first", "second", "line", "l1", "l2", "l3"} & expanded_tokens)
+    title_has_desk = bool({"service", "desk", "helpdesk", "help", "desktop", "user"} & expanded_tokens)
+    title_has_app = bool({"application", "software", "production", "platform", "ops", "operations"} & expanded_tokens)
+    title_has_tech = bool(
+        {"technical", "product", "platform", "customer", "saas", "cloud", "integration"} & expanded_tokens
+    )
+    title_has_systems = bool({"system", "systems"} & expanded_tokens)
+    title_has_it = "it" in expanded_tokens
+
     for role in focus_roles:
         role_norm = re.sub(r"[^a-z0-9]+", " ", str(role).lower()).strip()
         if not role_norm:
@@ -330,6 +421,24 @@ def _title_matches_focus_roles(title: str | None, focus_roles: list[str]) -> boo
         significant = [t for t in role_tokens if t not in _ROLE_STOPWORDS]
         if significant and all(t in expanded_tokens for t in significant):
             return True
+
+        # Support-role loosening: allow common market variations (e.g. "1st / 2nd Line Support")
+        # when the configured focus roles are clearly support families.
+        title_is_supporty = title_has_support or title_has_desk
+        if title_is_supporty and "support" in significant:
+            is_it_support = bool({"it", "service", "desk", "helpdesk", "help", "desktop", "user"} & set(significant))
+            is_app_support = "application" in significant or "software" in significant
+            is_systems_support = bool({"system", "systems"} & set(significant))
+            is_tech_support = bool({"technical", "product", "platform", "customer", "saas", "cloud"} & set(significant))
+
+            if is_it_support and (title_has_it or title_has_desk or title_has_line):
+                return True
+            if is_app_support and (title_has_app or title_has_line):
+                return True
+            if is_systems_support and (title_has_systems or title_has_line):
+                return True
+            if is_tech_support and (title_has_tech or title_has_line):
+                return True
 
     return False
 
@@ -344,6 +453,8 @@ def _build_tailor_prompt(
     adaptive_budget_hint: str = "",
     fact_library_text: str = "",
     jd_targets_text: str = "",
+    responsibility_map_text: str = "",
+    summary_gap_guidance: str = "",
 ) -> str:
     """Build the resume tailoring system prompt from the user's profile.
 
@@ -380,6 +491,8 @@ def _build_tailor_prompt(
     adaptive_block = adaptive_budget_hint.strip()
     fact_block = fact_library_text.strip()
     targets_block = jd_targets_text.strip()
+    resp_block = responsibility_map_text.strip()
+    summary_guidance_block = summary_gap_guidance.strip()
 
     return f"""You are a senior technical recruiter rewriting a resume to get this person an interview.
 
@@ -418,6 +531,9 @@ In particular, do NOT mention Power Automate, Copilot Studio, Power Apps, ALM, o
 TITLE: Match the target role. Keep seniority (Senior/Lead/Staff). Drop company suffixes and team names.
 
 SUMMARY: Rewrite from scratch. Lead with the 1-2 skills that matter most for THIS role. Sound like someone who's done this job.
+
+SUMMARY GAP GUIDANCE:
+{summary_guidance_block or "Keep the summary assertive but truthful, and avoid overclaiming missing requirements."}
 
 CORE TECHNICAL SKILLS: Provide 8-12 short items (not inline). Focus on role-relevant skills from the base resume.
 
@@ -471,6 +587,13 @@ Citation rule (non-negotiable):
 
 ## JD COVERAGE TARGETS:
 {targets_block or "Prioritize role-relevant terms that are truthful and present in evidence."}
+
+## RESPONSIBILITY TO EVIDENCE MAP:
+{resp_block or "Prioritize the job's top responsibilities and tie them to the closest evidence facts."}
+
+Responsibility ordering rule:
+- Order the most recent role bullets so the first bullets align with the top mapped responsibilities when truthful.
+- Prefer evidence-backed overlap over generic relevance language.
 
 Quant rule:
 - Every numeric claim in summary/experience/projects must come from source evidence.
@@ -618,9 +741,92 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
     personal = profile.get("personal", {})
     lines: list[str] = []
 
+    def _smart_role_title_case(s: str) -> str:
+        # Apply light normalization to role titles only (not company names).
+        # Goal: prevent obvious casing inconsistencies like "technical support Analyst".
+        txt = sanitize_text(s)
+        if not txt:
+            return txt
+
+        repl = {
+            "it": "IT",
+            "nhs": "NHS",
+            "sql": "SQL",
+            "api": "API",
+            "mfa": "MFA",
+            "vpn": "VPN",
+            "dns": "DNS",
+            "sla": "SLA",
+            "kpi": "KPI",
+            "bi": "BI",
+            "wfh": "WFH",
+            "l1": "L1",
+            "l2": "L2",
+            "l3": "L3",
+            "saas": "SaaS",
+            "macos": "macOS",
+            "id": "ID",
+            "ad": "AD",
+        }
+        keep_lower = {"and", "or", "of", "for", "to", "in", "on", "with"}
+
+        def _cap_word(w: str) -> str:
+            if not w:
+                return w
+            # Preserve mixed-case words (e.g. DevOps) and obvious acronyms.
+            if any(c.isupper() for c in w[1:]) and any(c.islower() for c in w):
+                return w
+            low = w.lower()
+            if low in repl:
+                return repl[low]
+            if low in keep_lower:
+                return low
+            if re.search(r"\d", w):
+                # Keep ordinals and numeric tokens stable (e.g. 1st, 2nd).
+                if low in repl:
+                    return repl[low]
+                return w
+            return low[:1].upper() + low[1:]
+
+        out_parts: list[str] = []
+        for token in re.split(r"(\s+)", txt):
+            if token.isspace() or token == "":
+                out_parts.append(token)
+                continue
+            m = re.match(r"^(\W*)([A-Za-z0-9][A-Za-z0-9'&./-]*)(\W*)$", token)
+            if not m:
+                out_parts.append(token)
+                continue
+            pre, core, post = m.group(1), m.group(2), m.group(3)
+            # Title-case core, supporting hyphenated forms.
+            core_parts = []
+            for sub in re.split(r"([-/])", core):
+                if sub in {"-", "/"}:
+                    core_parts.append(sub)
+                else:
+                    core_parts.append(_cap_word(sub))
+            out_parts.append(pre + "".join(core_parts) + post)
+
+        out = "".join(out_parts).strip()
+
+        # Final hardening for role titles: ensure "IT" is uppercase when used as
+        # a standalone token, and ensure the title starts with a capital letter.
+        out = re.sub(r"\bit\b", "IT", out, flags=re.IGNORECASE)
+        if out and out[0].isalpha() and out[0].islower():
+            out = out[0].upper() + out[1:]
+        return out
+
+    def _normalize_role_line(s: str) -> str:
+        txt = sanitize_text(s)
+        if "|" not in txt:
+            return _smart_role_title_case(txt)
+        parts = [p.strip() for p in txt.split("|")]
+        parts = [_smart_role_title_case(p) for p in parts if p]
+        return " | ".join(parts).strip()
+
     # Header -- always code-injected from profile
     lines.append(personal.get("full_name", ""))
-    lines.append(sanitize_text(data.get("title", "Software Engineer")))
+    lines.append(_normalize_role_line(str(data.get("title", "Software Engineer") or "")))
 
     # Location from search config or profile -- leave blank if not available
     # The location line is optional; the original used a hardcoded city.
@@ -691,6 +897,37 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
                 out.append(s)
         return out
 
+    def _projects_enabled() -> bool:
+        # Projects are helpful for data/analytics roles, but noisy for support-focused CVs.
+        # Enable when the tailored title is clearly data/analytics/BI, or when the
+        # profile explicitly includes projects.
+        try:
+            extras_obj = profile.get("resume_sections", {}) or {}
+            if extras_obj.get("projects"):
+                return True
+            rv = profile.get("resume_validation", {}) or {}
+            req = rv.get("required_sections")
+            if isinstance(req, list) and any(str(x).strip().upper() == "PROJECTS" for x in req):
+                return True
+        except Exception:
+            pass
+
+        title = str(data.get("title") or "").lower()
+        title = re.sub(r"\s+", " ", title).strip()
+        is_data_like = bool(
+            re.search(
+                r"\bdata\b|\banalytics?\b|\breporting\b|\bbusiness\s+intelligence\b|\bbi\b",
+                title,
+                flags=re.IGNORECASE,
+            )
+        )
+        if is_data_like:
+            # Exclude "support" titles that happen to include other keywords.
+            if any(k in title for k in ("support", "service desk", "helpdesk", "help desk")):
+                return False
+            return True
+        return False
+
     # Technical Environment (optional, profile-driven)
     tech_env_lines = _section_lines(extras.get("technical_environment"))
     if tech_env_lines:
@@ -703,146 +940,156 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
     # Professional Experience
     lines.append("PROFESSIONAL EXPERIENCE")
     for entry in data.get("experience", []):
-        lines.append(sanitize_text(entry.get("header", "")))
+        raw_header = sanitize_text(entry.get("header", ""))
+        if raw_header:
+            # Normalize only the role segment (before " at ") and keep company casing.
+            parts = re.split(r"\s+at\s+", raw_header, maxsplit=1, flags=re.IGNORECASE)
+            if len(parts) == 2:
+                role_seg = _smart_role_title_case(parts[0])
+                company_seg = sanitize_text(parts[1])
+                lines.append(f"{role_seg} at {company_seg}".strip())
+            else:
+                lines.append(_smart_role_title_case(raw_header))
         if entry.get("subtitle"):
             lines.append(sanitize_text(entry["subtitle"]))
         for b in entry.get("bullets", []):
             lines.append(f"- {sanitize_text(strip_fact_citations(str(b)))}")
         lines.append("")
 
-    # Projects
-    lines.append("PROJECTS")
+    # Projects (optional)
+    if _projects_enabled():
+        lines.append("PROJECTS")
 
-    def _allowed_skills_lower(p: dict) -> set[str]:
-        boundary = p.get("skills_boundary", {}) or {}
-        out: set[str] = set()
-        for items in boundary.values():
-            if isinstance(items, list):
-                for it in items:
-                    s = str(it).strip().lower()
-                    if s:
-                        out.add(s)
-        return out
+        def _allowed_skills_lower(p: dict) -> set[str]:
+            boundary = p.get("skills_boundary", {}) or {}
+            out: set[str] = set()
+            for items in boundary.values():
+                if isinstance(items, list):
+                    for it in items:
+                        s = str(it).strip().lower()
+                        if s:
+                            out.add(s)
+            return out
 
-    def _guess_year_from_education(extras_obj: dict) -> str:
-        for line in _section_lines(extras_obj.get("education")):
-            m = re.search(r"\b(20\d{2})\b", str(line))
-            if m:
-                return m.group(1)
-        return ""
+        def _guess_year_from_education(extras_obj: dict) -> str:
+            for line in _section_lines(extras_obj.get("education")):
+                m = re.search(r"\b(20\d{2})\b", str(line))
+                if m:
+                    return m.group(1)
+            return ""
 
-    def _fallback_project_subtitle(allowed: set[str], year: str) -> str:
-        tech: list[str] = []
-        if "power bi" in allowed:
-            tech.append("Power BI")
-        if "sql" in allowed:
-            tech.append("SQL")
-        if "python" in allowed:
-            tech.append("Python")
-        left = ", ".join(tech[:3])
-        if year and left:
-            return f"{left} | {year}"
-        if year:
-            return year
-        return left
+        def _fallback_project_subtitle(allowed: set[str], year: str) -> str:
+            tech: list[str] = []
+            if "power bi" in allowed:
+                tech.append("Power BI")
+            if "sql" in allowed:
+                tech.append("SQL")
+            if "python" in allowed:
+                tech.append("Python")
+            left = ", ".join(tech[:3])
+            if year and left:
+                return f"{left} | {year}"
+            if year:
+                return year
+            return left
 
-    def _fallback_project_bullets(project_name: str, allowed: set[str]) -> list[str]:
-        name_l = project_name.lower()
-        has_pbi = "power bi" in allowed
-        has_sql = "sql" in allowed
-        if "supply chain" in name_l:
-            b1 = "Built a dashboard to analyse and visualise supply chain performance and bottlenecks."
-        elif has_pbi:
-            b1 = "Built a Power BI dashboard to analyse performance trends and support decision-making."
-        else:
-            b1 = "Delivered an analytics project focused on turning raw data into actionable insights."
+        def _fallback_project_bullets(project_name: str, allowed: set[str]) -> list[str]:
+            name_l = project_name.lower()
+            has_pbi = "power bi" in allowed
+            has_sql = "sql" in allowed
+            if "supply chain" in name_l:
+                b1 = "Built a dashboard to analyse and visualise supply chain performance and bottlenecks."
+            elif has_pbi:
+                b1 = "Built a Power BI dashboard to analyse performance trends and support decision-making."
+            else:
+                b1 = "Delivered an analytics project focused on turning raw data into actionable insights."
 
-        if has_sql:
-            b2 = "Used SQL to model, validate, and prepare datasets for reliable reporting."
-        else:
-            b2 = "Applied structured data validation and clear storytelling to communicate outcomes."
+            if has_sql:
+                b2 = "Used SQL to model, validate, and prepare datasets for reliable reporting."
+            else:
+                b2 = "Applied structured data validation and clear storytelling to communicate outcomes."
 
-        return [b1, b2]
+            return [b1, b2]
 
-    allowed = _allowed_skills_lower(profile)
-    year = _guess_year_from_education(extras)
+        allowed = _allowed_skills_lower(profile)
+        year = _guess_year_from_education(extras)
 
-    # Prefer LLM-provided projects, but ensure each has at least 1 bullet.
-    project_entries: list[dict] = []
-    raw_projects = data.get("projects")
-    if isinstance(raw_projects, list):
-        for entry in raw_projects:
-            header = sanitize_text(str(entry.get("header", "") or ""))
-            if not header:
-                continue
-            subtitle = sanitize_text(str(entry.get("subtitle", "") or ""))
-            bullets = [sanitize_text(str(b)) for b in (entry.get("bullets", []) or []) if str(b).strip()]
-            if not bullets:
-                bullets = _fallback_project_bullets(header, allowed)
-            project_entries.append({"header": header, "subtitle": subtitle, "bullets": bullets[:2]})
+        # Prefer LLM-provided projects, but ensure each has at least 1 bullet.
+        project_entries: list[dict] = []
+        raw_projects = data.get("projects")
+        if isinstance(raw_projects, list):
+            for entry in raw_projects:
+                header = sanitize_text(str(entry.get("header", "") or ""))
+                if not header:
+                    continue
+                subtitle = sanitize_text(str(entry.get("subtitle", "") or ""))
+                bullets = [sanitize_text(str(b)) for b in (entry.get("bullets", []) or []) if str(b).strip()]
+                if not bullets:
+                    bullets = _fallback_project_bullets(header, allowed)
+                project_entries.append({"header": header, "subtitle": subtitle, "bullets": bullets[:2]})
 
-    # Hardening: if no projects were generated, inject a safe project from the profile.
-    if not project_entries:
-        preserved_projects = (profile.get("resume_facts", {}) or {}).get("preserved_projects", []) or []
-        if preserved_projects:
-            proj_name = str(preserved_projects[0]).strip()
-            if proj_name:
-                dissertation_line = ""
-                edu_lines = extras.get("education")
-                if isinstance(edu_lines, list):
-                    for ln in edu_lines:
-                        s = str(ln)
-                        if s.lower().startswith("dissertation:") and proj_name.lower() in s.lower():
-                            dissertation_line = s
+        # Hardening: if no projects were generated, inject a safe project from the profile.
+        if not project_entries:
+            preserved_projects = (profile.get("resume_facts", {}) or {}).get("preserved_projects", []) or []
+            if preserved_projects:
+                proj_name = str(preserved_projects[0]).strip()
+                if proj_name:
+                    dissertation_line = ""
+                    edu_lines = extras.get("education")
+                    if isinstance(edu_lines, list):
+                        for ln in edu_lines:
+                            s = str(ln)
+                            if s.lower().startswith("dissertation:") and proj_name.lower() in s.lower():
+                                dissertation_line = s
+                                break
+
+                    header = proj_name
+                    if dissertation_line and "dissertation" not in header.lower():
+                        header = f"{proj_name} - Master's Dissertation"
+
+                    project_entries.append(
+                        {
+                            "header": header,
+                            "subtitle": _fallback_project_subtitle(allowed, year),
+                            "bullets": _fallback_project_bullets(proj_name, allowed)[:2],
+                        }
+                    )
+
+        # Last-resort hardening: mirror proven work from recent experience so
+        # PROJECTS is never rendered as an empty section.
+        if not project_entries:
+            exp_entries = data.get("experience")
+            if isinstance(exp_entries, list):
+                for e in exp_entries:
+                    if not isinstance(e, dict):
+                        continue
+                    header_raw = sanitize_text(str(e.get("header", "") or ""))
+                    if not header_raw:
+                        continue
+                    title_only = header_raw.split(" at ", 1)[0].strip() or header_raw
+                    proj_header = f"Selected {title_only} Project Work"
+                    proj_subtitle = sanitize_text(str(e.get("subtitle", "") or "")) or _fallback_project_subtitle(
+                        allowed, year
+                    )
+                    proj_bullets: list[str] = []
+                    for b in e.get("bullets", []) or []:
+                        s = sanitize_text(strip_fact_citations(str(b)))
+                        if s:
+                            proj_bullets.append(s)
+                        if len(proj_bullets) >= 2:
                             break
+                    if not proj_bullets:
+                        proj_bullets = _fallback_project_bullets(title_only, allowed)[:2]
+                    project_entries.append({"header": proj_header, "subtitle": proj_subtitle, "bullets": proj_bullets})
+                    break
 
-                header = proj_name
-                if dissertation_line and "dissertation" not in header.lower():
-                    header = f"{proj_name} - Master's Dissertation"
-
-                project_entries.append(
-                    {
-                        "header": header,
-                        "subtitle": _fallback_project_subtitle(allowed, year),
-                        "bullets": _fallback_project_bullets(proj_name, allowed)[:2],
-                    }
-                )
-
-    # Last-resort hardening: mirror proven work from recent experience so
-    # PROJECTS is never rendered as an empty section.
-    if not project_entries:
-        exp_entries = data.get("experience")
-        if isinstance(exp_entries, list):
-            for e in exp_entries:
-                if not isinstance(e, dict):
-                    continue
-                header_raw = sanitize_text(str(e.get("header", "") or ""))
-                if not header_raw:
-                    continue
-                title_only = header_raw.split(" at ", 1)[0].strip() or header_raw
-                proj_header = f"Selected {title_only} Project Work"
-                proj_subtitle = sanitize_text(str(e.get("subtitle", "") or "")) or _fallback_project_subtitle(
-                    allowed, year
-                )
-                proj_bullets: list[str] = []
-                for b in e.get("bullets", []) or []:
-                    s = sanitize_text(strip_fact_citations(str(b)))
-                    if s:
-                        proj_bullets.append(s)
-                    if len(proj_bullets) >= 2:
-                        break
-                if not proj_bullets:
-                    proj_bullets = _fallback_project_bullets(title_only, allowed)[:2]
-                project_entries.append({"header": proj_header, "subtitle": proj_subtitle, "bullets": proj_bullets})
-                break
-
-    for entry in project_entries:
-        lines.append(entry["header"])
-        if entry.get("subtitle"):
-            lines.append(entry["subtitle"])
-        for b in entry.get("bullets", []) or []:
-            lines.append(f"- {sanitize_text(strip_fact_citations(str(b)))}")
-        lines.append("")
+            for entry in project_entries:
+                lines.append(entry["header"])
+                if entry.get("subtitle"):
+                    lines.append(entry["subtitle"])
+                for b in entry.get("bullets", []) or []:
+                    lines.append(f"- {sanitize_text(strip_fact_citations(str(b)))}")
+                lines.append("")
 
     # Education (prefer profile-driven entries so courses/certs are preserved)
     lines.append("EDUCATION")
@@ -963,6 +1210,7 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
         f"LOCATION: {job.get('location', 'N/A')}\n\n"
         f"DESCRIPTION:\n{job_desc}"
     )
+    responsibilities = extract_job_responsibilities(job_desc, limit=6)
 
     # Keyword bank: prompt guidance + PDF highlighting.
     kw_bank = None
@@ -971,6 +1219,7 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
             job_description=(job.get("full_description") or ""),
             profile=profile,
             resume_text=resume_text,
+            seeded_phrases=[str(x) for x in responsibilities[:6]],
         )
     except Exception:
         kw_bank = None
@@ -1001,6 +1250,16 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
     jd_targets_text = ", ".join(jd_targets) if jd_targets else "No explicit targets extracted."
 
     evidence_numbers = collect_evidence_numbers(resume_text, profile, fact_library)
+    jd_requirements = extract_jd_requirements(
+        job_title=str(job.get("title") or ""),
+        job_description=job_desc,
+        profile=profile,
+        keyword_bank=(kw_bank if isinstance(kw_bank, dict) else None),
+    )
+    requirement_gaps = evaluate_requirement_gaps(jd_requirements, resume_text, profile)
+    responsibility_map = map_responsibilities_to_evidence(responsibilities, fact_library, per_resp_limit=2)
+    responsibility_map_text = format_responsibility_map_for_prompt(responsibility_map, limit=5)
+    summary_gap_guidance = build_summary_gap_guidance(requirement_gaps)
 
     tailoring_cfg = profile.get("tailoring") if isinstance(profile, dict) else {}
     try:
@@ -1022,6 +1281,10 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
             "adaptive_budget": adaptive,
             "fact_library_count": len(fact_library),
             "jd_targets": jd_targets,
+            "jd_requirements": jd_requirements,
+            "requirement_gaps": requirement_gaps,
+            "responsibilities": responsibilities,
+            "responsibility_map": responsibility_map,
             "draft_candidates": draft_count,
         },
         "draft_ranking": [],
@@ -1029,15 +1292,35 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
     lenient_tailor = _lenient_tailor_enabled(profile)
     strict_evidence = _strict_evidence_enabled(profile)
     min_coverage_required = _min_coverage_required(profile)
+    hard_requirement_gate = _hard_requirement_gating_enabled(profile)
+    max_missing_must_haves = _max_missing_must_haves(profile)
+    max_missing_domain_requirements = _max_missing_domain_requirements(profile)
     report["mode"] = "lenient" if lenient_tailor else "strict"
 
     def _normalize_title(s: str) -> str:
         return re.sub(r"[^a-z0-9]+", " ", str(s).lower()).strip()
 
     def _should_align_current_role(job_title: str) -> bool:
+        if not _current_role_alignment_enabled(profile):
+            return False
         t = _normalize_title(job_title)
-        # Only align for data/analytics/BI type roles.
-        return any(k in t for k in ["data", "analytics", "analyst", "bi", "business intelligence", "report"])
+        # Align for more role families, but keep market-title mapping logic narrow.
+        return any(
+            k in t
+            for k in [
+                "data",
+                "analytics",
+                "analyst",
+                "bi",
+                "business intelligence",
+                "report",
+                "application support",
+                "technical support",
+                "systems support",
+                "service desk",
+                "it support",
+            ]
+        )
 
     def _align_current_role_header(data_obj: dict) -> None:
         try:
@@ -1158,7 +1441,12 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
                 return best
 
             # Prefer whatever the model wrote as the title, then map to an allowed
-            # market-equivalent title list.
+            # market-equivalent title list for data-focused roles only.
+            if not any(
+                k in _normalize_title(str(job.get("title", "") or "")) for k in ["data", "analytics", "bi", "report"]
+            ):
+                return
+
             title_part = header0
             if " at " in header0.lower():
                 title_part = header0[: header0.lower().rfind(" at ")]
@@ -1243,6 +1531,50 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
         except Exception:
             return
 
+    def _ensure_minimum_shape(data_obj: dict) -> None:
+        """Patch common near-miss JSON shapes to reduce strict-mode rejects."""
+
+        try:
+            # Some models occasionally omit the `skills` dict even when other required
+            # fields are present. We can safely populate a minimal, truthful skills
+            # section from core_skills and the profile boundary to pass validation.
+            skills = data_obj.get("skills")
+            if not isinstance(skills, dict):
+                skills = {}
+            core = data_obj.get("core_skills")
+            core_items: list[str] = []
+            if isinstance(core, list):
+                core_items = [sanitize_text(str(x)) for x in core if str(x).strip()]
+            boundary_items: list[str] = []
+            boundary = profile.get("skills_boundary", {}) if isinstance(profile, dict) else {}
+            if isinstance(boundary, dict):
+                for v in boundary.values():
+                    if isinstance(v, list):
+                        for it in v:
+                            s = sanitize_text(str(it))
+                            if s:
+                                boundary_items.append(s)
+            merged: list[str] = []
+            seen: set[str] = set()
+            for x in core_items + boundary_items:
+                k = x.lower()
+                if k in seen:
+                    continue
+                seen.add(k)
+                merged.append(x)
+                if len(merged) >= 18:
+                    break
+
+            if "skills" not in data_obj or not isinstance(data_obj.get("skills"), dict):
+                data_obj["skills"] = skills
+            if isinstance(data_obj.get("skills"), dict) and not any(
+                str(v).strip() for v in data_obj["skills"].values()
+            ):
+                if merged:
+                    data_obj["skills"]["Core"] = ", ".join(merged)
+        except Exception:
+            return
+
     avoid_notes: list[str] = []
     tailored = ""
     tailor_prompt_base = _build_tailor_prompt(
@@ -1251,6 +1583,8 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
         adaptive_budget_hint=str((adaptive or {}).get("hint") or ""),
         fact_library_text=fact_block,
         jd_targets_text=jd_targets_text,
+        responsibility_map_text=responsibility_map_text,
+        summary_gap_guidance=summary_gap_guidance,
     )
 
     for attempt in range(max_retries + 1):
@@ -1318,6 +1652,7 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
             if isinstance(data, dict):
                 _align_current_role_header(data)
                 _soften_banned_phrases(data)
+                _ensure_minimum_shape(data)
 
                 # Keep the strict anti-invention guard for specific chronic tools.
                 try:
@@ -1456,11 +1791,40 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
         report["citation"] = best.get("citation")
         report["coverage"] = best.get("coverage")
         report["quant_check"] = best.get("quant")
+        report["requirements"] = jd_requirements
+        report["requirement_gaps"] = requirement_gaps
 
         hard_errors: list[str] = []
         coverage_ratio = float((best.get("coverage") or {}).get("ratio") or 0.0)
         if min_coverage_required > 0.0 and coverage_ratio < min_coverage_required:
             hard_errors.append(f"JD coverage too low ({coverage_ratio:.2f} < {min_coverage_required:.2f})")
+        missing_hard = list((requirement_gaps or {}).get("missing_hard_requirements") or [])
+        missing_must = list((requirement_gaps or {}).get("missing_must_have_skills") or [])
+        missing_domains = list((requirement_gaps or {}).get("missing_domains") or [])
+        if hard_requirement_gate:
+            if missing_hard:
+                hard_errors.append("Missing hard requirements: " + ", ".join(missing_hard[:5]))
+            if len(missing_must) > max_missing_must_haves:
+                hard_errors.append(
+                    f"Too many must-have gaps ({len(missing_must)} > {max_missing_must_haves}): "
+                    + ", ".join(missing_must[:6])
+                )
+            if len(missing_domains) > max_missing_domain_requirements:
+                hard_errors.append(
+                    f"Domain mismatch ({len(missing_domains)} > {max_missing_domain_requirements}): "
+                    + ", ".join(missing_domains[:4])
+                )
+        else:
+            req_warnings = []
+            if missing_hard:
+                req_warnings.append("Missing hard requirements: " + ", ".join(missing_hard[:5]))
+            if missing_must:
+                req_warnings.append("Must-have gaps: " + ", ".join(missing_must[:6]))
+            if missing_domains:
+                req_warnings.append("Domain gaps: " + ", ".join(missing_domains[:4]))
+            if req_warnings:
+                report.setdefault("requirement_warnings", [])
+                report["requirement_warnings"].extend(req_warnings)
         validation_errors = list((best.get("validation") or {}).get("errors") or [])
         if lenient_tailor:
             hard_errors.extend([e for e in validation_errors if _is_fatal_json_error(str(e))])
@@ -1509,6 +1873,7 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
                 job_description=(job.get("full_description") or ""),
                 profile=profile,
                 resume_text=tailored,
+                seeded_phrases=[str(x) for x in responsibilities[:6]],
             )
             if isinstance(kw2, dict) and isinstance(kw2.get("highlight_keywords"), list):
                 highlight_keywords = [str(x).strip() for x in (kw2.get("highlight_keywords") or []) if str(x).strip()]
@@ -1633,26 +1998,82 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
             log.info("Skipped %d jobs due to skip_titles.", skipped)
         jobs = kept
 
-    strict_title_filter = _strict_title_filter_enabled(profile)
+    # If the user explicitly selected jobs, do not block them by focus-role title
+    # filtering. Selection is the strongest intent signal.
+    strict_title_filter = False if selected_only else _strict_title_filter_enabled(profile)
     focus_roles = _load_focus_roles(profile) if strict_title_filter else []
     if jobs and strict_title_filter and focus_roles:
         kept: list[dict] = []
         skipped = 0
+        skipped_titles: list[str] = []
         for j in jobs:
             if _title_matches_focus_roles(j.get("title"), focus_roles):
                 kept.append(j)
             else:
                 skipped += 1
+                if len(skipped_titles) < 3:
+                    skipped_titles.append(str(j.get("title") or "").strip())
         jobs = kept
         if skipped:
             preview = ", ".join(focus_roles[:4])
             if len(focus_roles) > 4:
                 preview += ", ..."
-            log.info("Strict title filter skipped %d jobs (focus roles: %s)", skipped, preview)
+            sample = ", ".join([t for t in skipped_titles if t])
+            if sample:
+                log.info(
+                    "Strict title filter skipped %d jobs (examples: %s) (focus roles: %s)",
+                    skipped,
+                    sample,
+                    preview,
+                )
+            else:
+                log.info("Strict title filter skipped %d jobs (focus roles: %s)", skipped, preview)
 
     if not jobs:
         if selected_only:
-            log.info("No selected untailored jobs with score >= %d.", min_score)
+            # Help users diagnose why "selected" jobs are not getting tailored.
+            try:
+                total_sel = int(conn.execute("SELECT COUNT(*) FROM jobs WHERE apply_status='selected'").fetchone()[0])
+                if total_sel:
+                    missing_desc = int(
+                        conn.execute(
+                            "SELECT COUNT(*) FROM jobs WHERE apply_status='selected' AND full_description IS NULL"
+                        ).fetchone()[0]
+                    )
+                    missing_score = int(
+                        conn.execute(
+                            "SELECT COUNT(*) FROM jobs WHERE apply_status='selected' AND full_description IS NOT NULL AND fit_score IS NULL"
+                        ).fetchone()[0]
+                    )
+                    low_score = int(
+                        conn.execute(
+                            "SELECT COUNT(*) FROM jobs WHERE apply_status='selected' AND fit_score IS NOT NULL AND fit_score < ?",
+                            (min_score,),
+                        ).fetchone()[0]
+                    )
+                    already_tailored = int(
+                        conn.execute(
+                            "SELECT COUNT(*) FROM jobs WHERE apply_status='selected' AND tailored_resume_path IS NOT NULL"
+                        ).fetchone()[0]
+                    )
+                    attempts_blocked = int(
+                        conn.execute(
+                            "SELECT COUNT(*) FROM jobs WHERE apply_status='selected' AND tailored_resume_path IS NULL AND COALESCE(tailor_attempts,0) >= 5"
+                        ).fetchone()[0]
+                    )
+                    log.info(
+                        "No selected jobs eligible for tailoring. Selected=%d (missing_desc=%d, missing_score=%d, low_score=%d, already_tailored=%d, attempts_blocked=%d).",
+                        total_sel,
+                        missing_desc,
+                        missing_score,
+                        low_score,
+                        already_tailored,
+                        attempts_blocked,
+                    )
+                else:
+                    log.info("No selected jobs eligible for tailoring.")
+            except Exception:
+                log.info("No selected jobs eligible for tailoring.")
         else:
             log.info("No untailored jobs with score >= %d.", min_score)
         return {"approved": 0, "failed": 0, "errors": 0, "elapsed": 0.0}
@@ -1664,9 +2085,8 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
     title_filter_label = "on" if strict_title_filter else "off"
     if selected_only:
         log.info(
-            "Tailoring resumes for %d selected jobs (score >= %d, mode=%s, strict_evidence=%s, min_cov=%.2f, title_filter=%s)...",
+            "Tailoring resumes for %d selected jobs (mode=%s, strict_evidence=%s, min_cov=%.2f, title_filter=%s)...",
             len(jobs),
-            min_score,
             mode_label,
             evidence_label,
             min_cov,
@@ -1741,11 +2161,16 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
                 "url": job["url"],
                 "path": str(txt_path),
                 "pdf_path": pdf_path,
+                "report_path": str(report_path),
                 "title": job["title"],
                 "site": job["site"],
                 "status": report["status"],
                 "attempts": report["attempts"],
                 "failure_detail": "",
+                "requirement_gaps": report.get("requirement_gaps") if isinstance(report, dict) else None,
+                "responsibility_map": (
+                    ((report.get("strategy") or {}).get("responsibility_map")) if isinstance(report, dict) else None
+                ),
             }
 
             if result["status"] in ("failed_validation", "failed_full_validation"):
@@ -1758,6 +2183,24 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
                     err_list = [str(e).strip() for e in base_v.get("errors", []) if str(e).strip()]
                 if err_list:
                     result["failure_detail"] = "; ".join(err_list[:3])
+                gaps = report.get("requirement_gaps") if isinstance(report, dict) else None
+                if isinstance(gaps, dict):
+                    gap_bits: list[str] = []
+                    mh = [str(x) for x in (gaps.get("missing_must_have_skills") or []) if str(x).strip()]
+                    hr = [str(x) for x in (gaps.get("missing_hard_requirements") or []) if str(x).strip()]
+                    dm = [str(x) for x in (gaps.get("missing_domains") or []) if str(x).strip()]
+                    if hr:
+                        gap_bits.append("hard: " + ", ".join(hr[:3]))
+                    if mh:
+                        gap_bits.append("must-have: " + ", ".join(mh[:3]))
+                    if dm:
+                        gap_bits.append("domain: " + ", ".join(dm[:2]))
+                    if gap_bits:
+                        extra = " | ".join(gap_bits)
+                        if result["failure_detail"]:
+                            result["failure_detail"] += " | " + extra
+                        else:
+                            result["failure_detail"] = extra
             elif result["status"] == "failed_judge":
                 judge = report.get("judge") if isinstance(report, dict) else None
                 issues = judge.get("issues") if isinstance(judge, dict) else ""
@@ -1772,7 +2215,10 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
                 "attempts": 0,
                 "path": None,
                 "pdf_path": None,
+                "report_path": None,
                 "failure_detail": str(e),
+                "requirement_gaps": None,
+                "responsibility_map": None,
             }
             log.error("%d/%d [ERROR] %s -- %s", completed, len(jobs), job["title"][:40], e)
 
@@ -1798,14 +2244,31 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
     for r in results:
         if r["status"] == "approved":
             conn.execute(
-                "UPDATE jobs SET tailored_resume_path=?, tailored_at=?, "
+                "UPDATE jobs SET tailored_resume_path=?, tailored_at=?, tailor_status=?, tailor_failure_detail=?, tailor_report_path=?, tailor_requirement_gaps=?, tailor_responsibility_map=?, "
                 "tailor_attempts=COALESCE(tailor_attempts,0)+1 WHERE url=?",
-                (r["path"], now, r["url"]),
+                (
+                    r["path"],
+                    now,
+                    r["status"],
+                    None,
+                    r.get("report_path"),
+                    json.dumps(r.get("requirement_gaps") or {}, ensure_ascii=False),
+                    json.dumps(r.get("responsibility_map") or [], ensure_ascii=False),
+                    r["url"],
+                ),
             )
         else:
             conn.execute(
-                "UPDATE jobs SET tailor_attempts=COALESCE(tailor_attempts,0)+1 WHERE url=?",
-                (r["url"],),
+                "UPDATE jobs SET tailor_status=?, tailor_failure_detail=?, tailor_report_path=?, tailor_requirement_gaps=?, tailor_responsibility_map=?, "
+                "tailor_attempts=COALESCE(tailor_attempts,0)+1 WHERE url=?",
+                (
+                    r["status"],
+                    (str(r.get("failure_detail") or "")[:1200] or None),
+                    r.get("report_path"),
+                    json.dumps(r.get("requirement_gaps") or {}, ensure_ascii=False),
+                    json.dumps(r.get("responsibility_map") or [], ensure_ascii=False),
+                    r["url"],
+                ),
             )
     conn.commit()
 

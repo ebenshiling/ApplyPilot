@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import webbrowser
 from html import escape
 from pathlib import Path
@@ -107,8 +108,13 @@ def generate_dashboard(
     active = conn.execute(
         "SELECT COUNT(*) FROM jobs WHERE COALESCE(apply_status, '') NOT IN ('applied','failed','skipped') AND applied_at IS NULL"
     ).fetchone()[0]
+    # "Ready" in the dashboard means we have the docs needed to apply.
     ready = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE full_description IS NOT NULL AND application_url IS NOT NULL"
+        "SELECT COUNT(*) FROM jobs "
+        "WHERE tailored_resume_path IS NOT NULL "
+        "AND cover_letter_path IS NOT NULL "
+        "AND applied_at IS NULL "
+        "AND COALESCE(apply_status, '') != 'skipped'"
     ).fetchone()[0]
     scored = conn.execute("SELECT COUNT(*) FROM jobs WHERE fit_score IS NOT NULL").fetchone()[0]
     high_fit = conn.execute("SELECT COUNT(*) FROM jobs WHERE fit_score >= 7").fetchone()[0]
@@ -170,6 +176,8 @@ def generate_dashboard(
                 sponsor_licensed, sponsor_match_name, sponsor_match_confidence,
                  fit_score, score_reasoning,
                  tailored_resume_path, supporting_statement_path, cover_letter_path,
+                 tailor_status, tailor_failure_detail, tailor_report_path, tailor_requirement_gaps, tailor_responsibility_map,
+                 cover_letter_status, cover_letter_failure_detail, cover_letter_report_path, cover_letter_diagnostics,
                  applied_at, apply_status, apply_error
           FROM jobs
           WHERE fit_score >= 5
@@ -279,7 +287,7 @@ def generate_dashboard(
         location = escape(j["location"] or "")
         site = escape(j["site"] or "")
         site_color = colors.get(j["site"] or "", "#6b7280")
-        apply_url = escape(j["application_url"] or "")
+        apply_url = escape(j["application_url"] or j["url"] or "")
 
         sponsor_policy = str(j["sponsorship_explicit"] or "Unknown").strip() or "Unknown"
         sponsor_licensed = str(j["sponsor_licensed"] or "Unknown").strip() or "Unknown"
@@ -313,9 +321,103 @@ def generate_dashboard(
         keywords = reasoning_lines[0][:120] if reasoning_lines else ""
         reasoning = reasoning_lines[1][:200] if len(reasoning_lines) > 1 else ""
 
-        desc_preview = escape(j["full_description"] or "")[:300]
-        full_desc_html = escape(j["full_description"] or "").replace("\n", "<br>")
-        desc_len = len(j["full_description"] or "")
+        tailor_status = str(j["tailor_status"] or "").strip().lower()
+        tailor_failure_detail = str(j["tailor_failure_detail"] or "").strip()
+        tailor_report_path = str(j["tailor_report_path"] or "").strip()
+        raw_gap_json = str(j["tailor_requirement_gaps"] or "").strip()
+        raw_resp_map_json = str(j["tailor_responsibility_map"] or "").strip()
+        cover_status = str(j["cover_letter_status"] or "").strip().lower()
+        cover_failure_detail = str(j["cover_letter_failure_detail"] or "").strip()
+        cover_report_path = str(j["cover_letter_report_path"] or "").strip()
+        raw_cover_diag_json = str(j["cover_letter_diagnostics"] or "").strip()
+        gap_summary = ""
+        gap_tags: list[str] = []
+        responsibility_details = ""
+        cover_diag_details = ""
+        if raw_gap_json:
+            try:
+                gap_obj = json.loads(raw_gap_json)
+                if isinstance(gap_obj, dict):
+                    hard = [str(x) for x in (gap_obj.get("missing_hard_requirements") or []) if str(x).strip()]
+                    must = [str(x) for x in (gap_obj.get("missing_must_have_skills") or []) if str(x).strip()]
+                    domain = [str(x) for x in (gap_obj.get("missing_domains") or []) if str(x).strip()]
+                    if hard:
+                        gap_tags.append(f"Hard gaps: {', '.join(hard[:3])}")
+                    if must:
+                        gap_tags.append(f"Must-have gaps: {', '.join(must[:4])}")
+                    if domain:
+                        gap_tags.append(f"Domain gaps: {', '.join(domain[:3])}")
+                    gap_summary = " | ".join(gap_tags)
+            except Exception:
+                gap_summary = ""
+        if raw_resp_map_json:
+            try:
+                resp_map = json.loads(raw_resp_map_json)
+                if isinstance(resp_map, list):
+                    resp_rows: list[str] = []
+                    for item in resp_map[:5]:
+                        if not isinstance(item, dict):
+                            continue
+                        resp = str(item.get("responsibility") or "").strip()
+                        evidence = item.get("evidence") or []
+                        if not resp:
+                            continue
+                        ev_text = []
+                        if isinstance(evidence, list):
+                            for ev in evidence[:2]:
+                                if not isinstance(ev, dict):
+                                    continue
+                                fid = str(ev.get("id") or "").strip()
+                                ftxt = str(ev.get("text") or "").strip()
+                                if ftxt:
+                                    ev_text.append(f"{fid}: {ftxt}" if fid else ftxt)
+                        if ev_text:
+                            responsibility_details += (
+                                f"<div style='margin-bottom:0.65rem'><div><strong>Responsibility:</strong> {escape(resp)}</div>"
+                                f"<div style='margin-top:0.2rem;color:#5b6474'><strong>Matched evidence:</strong> {escape(' | '.join(ev_text))}</div></div>"
+                            )
+                        else:
+                            responsibility_details += (
+                                f"<div style='margin-bottom:0.65rem'><div><strong>Responsibility:</strong> {escape(resp)}</div>"
+                                "<div style='margin-top:0.2rem;color:#5b6474'><strong>Matched evidence:</strong> none found</div></div>"
+                            )
+            except Exception:
+                responsibility_details = ""
+        if raw_cover_diag_json:
+            try:
+                diag = json.loads(raw_cover_diag_json)
+                if isinstance(diag, dict):
+                    pack = str(diag.get("role_pack") or "").strip()
+                    signals = [str(x) for x in (diag.get("job_signals") or []) if str(x).strip()]
+                    evidence = [str(x) for x in (diag.get("evidence") or []) if str(x).strip()]
+                    responsibilities = [str(x) for x in (diag.get("responsibilities") or []) if str(x).strip()]
+                    skills = [str(x) for x in (diag.get("relevant_skills") or []) if str(x).strip()]
+                    rows: list[str] = []
+                    if pack:
+                        rows.append(f"<div><strong>Cover pack:</strong> {escape(pack)}</div>")
+                    if responsibilities:
+                        rows.append(
+                            f"<div style='margin-top:0.35rem'><strong>Responsibilities:</strong> {escape(' | '.join(responsibilities[:4]))}</div>"
+                        )
+                    if evidence:
+                        rows.append(
+                            f"<div style='margin-top:0.35rem'><strong>Evidence used:</strong> {escape(' | '.join(evidence[:4]))}</div>"
+                        )
+                    if signals:
+                        rows.append(
+                            f"<div style='margin-top:0.35rem'><strong>Job signals:</strong> {escape(' | '.join(signals[:4]))}</div>"
+                        )
+                    if skills:
+                        rows.append(
+                            f"<div style='margin-top:0.35rem'><strong>Relevant skills:</strong> {escape(', '.join(skills[:6]))}</div>"
+                        )
+                    cover_diag_details = "".join(rows)
+            except Exception:
+                cover_diag_details = ""
+
+        full_desc_raw = str(j["full_description"] or "")
+        desc_preview = escape(full_desc_raw[:300])
+        desc_len = len(full_desc_raw)
 
         meta_parts = []
         meta_parts.append(
@@ -345,10 +447,14 @@ def generate_dashboard(
             )
         if j["tailored_resume_path"]:
             meta_parts.append('<span class="meta-tag artifact">Tailored</span>')
+        elif tailor_status and tailor_status.startswith("failed"):
+            meta_parts.append('<span class="meta-tag meta-tag-failed">Tailor failed</span>')
         if j["supporting_statement_path"]:
             meta_parts.append('<span class="meta-tag artifact">Statement</span>')
         if j["cover_letter_path"]:
             meta_parts.append('<span class="meta-tag artifact">Cover</span>')
+        elif cover_status == "failed":
+            meta_parts.append('<span class="meta-tag meta-tag-failed">Cover failed</span>')
         if salary:
             meta_parts.append(f'<span class="meta-tag salary">{salary}</span>')
         if location:
@@ -356,6 +462,21 @@ def generate_dashboard(
         if role_query_raw:
             meta_parts.append(f'<span class="meta-tag">{escape(role_query_raw[:36])}</span>')
         meta_html = " ".join(meta_parts)
+
+        # Precompute a compact searchable blob to avoid expensive `textContent` scans
+        # over large hidden sections (full description, diagnostics, etc.).
+        search_blob = " ".join(
+            [
+                str(title or ""),
+                str(company or ""),
+                str(site or ""),
+                str(status_label or ""),
+                str(salary or ""),
+                str(location or ""),
+                str(role_query_label or ""),
+            ]
+        )
+        search_blob = re.sub(r"\s+", " ", search_blob).strip().lower()[:420]
 
         footer_links: list[str] = []
         if url:
@@ -370,7 +491,7 @@ def generate_dashboard(
             )
         else:
             footer_links.append(
-                f'<button class="apply-link primary" data-live="1" onclick="selectJob({jid}, true)">Pick</button>'
+                f'<button class="apply-link primary" data-live="1" onclick="selectJob({jid}, true, true)">Pick</button>'
             )
         footer_links.append(f'<button class="apply-link" data-live="1" onclick="markApplied({jid})">Applied</button>')
         footer_links.append(f'<button class="apply-link" data-live="1" onclick="markFailed({jid})">Failed</button>')
@@ -388,7 +509,7 @@ def generate_dashboard(
         apply_html = "".join(footer_links)
 
         job_sections += f"""
-        <div class="job-card" data-id="{jid}" data-score="{score}" data-site="{escape(j["site"] or "")}" data-status="{escape(status_raw)}" data-location="{location.lower()}" data-role="{escape(role_query_label.lower())}" data-company="{company}" data-sponsor-policy="{escape(sponsor_policy.lower())}" data-sponsor-licensed="{escape(sponsor_licensed.lower())}">
+        <div class="job-card" data-id="{jid}" data-score="{score}" data-group="{score}" data-text="{escape(search_blob)}" data-site="{escape(j["site"] or "")}" data-status="{escape(status_raw)}" data-location="{location.lower()}" data-role="{escape(role_query_label.lower())}" data-company="{company}" data-sponsor-policy="{escape(sponsor_policy.lower())}" data-sponsor-licensed="{escape(sponsor_licensed.lower())}">
           <div class="card-header">
             <span class="score-pill" style="background:{"#10b981" if score >= 7 else "#f59e0b"}">{score}</span>
             <span class="meta-tag" title="Stable job ID for manual marking">#{jid}</span>
@@ -397,8 +518,15 @@ def generate_dashboard(
           <div class="meta-row">{meta_html}</div>
           {f'<div class="keywords-row">{escape(keywords)}</div>' if keywords else ""}
           {f'<div class="reasoning-row">{escape(reasoning)}</div>' if reasoning else ""}
+          {f'<div class="reasoning-row diag-block diag-error">Tailor rejection: {escape(tailor_failure_detail[:420])}</div>' if tailor_failure_detail else ""}
+          {f'<div class="keywords-row diag-block diag-warn">Requirement gaps: {escape(gap_summary[:420])}</div>' if gap_summary else ""}
+          {f'<div class="reasoning-row diag-block diag-error">Cover rejection: {escape(cover_failure_detail[:420])}</div>' if cover_failure_detail else ""}
           <p class="desc-preview">{desc_preview}...</p>
-          {"<details class='full-desc-details'><summary class='expand-btn'>Full Description (" + f"{desc_len:,}" + " chars)</summary><div class='full-desc'>" + full_desc_html + "</div></details>" if j["full_description"] else ""}
+          {f"<details class='full-desc-details lazy' data-job-id='{jid}' data-field='full_description' data-loaded='0'><summary class='expand-btn'>Full Description ({desc_len:,} chars)</summary><div class='full-desc'>Loading...</div></details>" if full_desc_raw else ""}
+          {f"<details class='full-desc-details'><summary class='expand-btn'>Responsibility mapping used for CV</summary><div class='full-desc'>{responsibility_details}</div></details>" if responsibility_details else ""}
+          {f"<details class='full-desc-details'><summary class='expand-btn'>Cover letter diagnostics</summary><div class='full-desc'>{cover_diag_details}</div></details>" if cover_diag_details else ""}
+          {f"<details class='full-desc-details'><summary class='expand-btn'>Tailor report path</summary><div class='full-desc'>{escape(tailor_report_path)}</div></details>" if tailor_report_path and not j["tailored_resume_path"] else ""}
+          {f"<details class='full-desc-details'><summary class='expand-btn'>Cover report path</summary><div class='full-desc'>{escape(cover_report_path)}</div></details>" if cover_report_path and not j["cover_letter_path"] else ""}
           <div class="card-footer">{apply_html}</div>
         </div>"""
 
@@ -419,6 +547,7 @@ def generate_dashboard(
   :root {{
     --paper: #f6f2e8;
     --paper-2: #fbf7ee;
+    --paper-3: #f0e7d6;
     --ink: #0b0f14;
     --muted: #4b5563;
     --muted-2: #6b7280;
@@ -426,6 +555,17 @@ def generate_dashboard(
     --card: rgba(255, 255, 255, 0.72);
     --card-2: rgba(255, 255, 255, 0.55);
     --shadow: 0 18px 50px rgba(2, 6, 23, 0.16);
+    --surface: rgba(255,255,255,0.62);
+    --surface-strong: rgba(255,255,255,0.78);
+    --text-soft: rgba(2,6,23,0.78);
+    --text-strong: rgba(2,6,23,0.90);
+    --grid-1: rgba(2,6,23,0.05);
+    --grid-2: rgba(2,6,23,0.03);
+    --hint-bg: rgba(29,78,216,0.08);
+    --hint-border: rgba(29,78,216,0.22);
+    --hint-title: rgba(29,78,216,0.92);
+    --hint-code-bg: rgba(255,255,255,0.65);
+    --hint-code-text: rgba(2,6,23,0.86);
 
     --accent: #e85d2a;
     --accent-2: #0f766e;
@@ -434,6 +574,127 @@ def generate_dashboard(
     --good: #0f766e;
     --warn: #b45309;
     --bad: #b91c1c;
+  }}
+
+  html[data-theme="dark"] {{
+    color-scheme: dark;
+    --paper: #08111b;
+    --paper-2: #0d1723;
+    --paper-3: #111d2c;
+    --ink: #edf4ff;
+    --muted: #b8c6d9;
+    --muted-2: #93a4ba;
+    --line: rgba(148, 163, 184, 0.22);
+    --card: rgba(10, 18, 30, 0.80);
+    --card-2: rgba(15, 23, 42, 0.68);
+    --shadow: 0 18px 50px rgba(0, 0, 0, 0.42);
+    --surface: rgba(15,23,42,0.72);
+    --surface-strong: rgba(30,41,59,0.90);
+    --text-soft: rgba(226,232,240,0.82);
+    --text-strong: rgba(241,245,249,0.96);
+    --grid-1: rgba(148,163,184,0.06);
+    --grid-2: rgba(148,163,184,0.04);
+    --hint-bg: rgba(30,64,175,0.16);
+    --hint-border: rgba(96,165,250,0.26);
+    --hint-title: rgba(191,219,254,0.98);
+    --hint-code-bg: rgba(15,23,42,0.76);
+    --hint-code-text: rgba(226,232,240,0.92);
+    --setup-nav-bg: rgba(15, 23, 42, 0.78);
+    --setup-nav-btn-bg: rgba(30, 41, 59, 0.88);
+    --setup-nav-btn-hover: rgba(51, 65, 85, 0.96);
+    --setup-panel-bg: rgba(9, 15, 25, 0.84);
+    --setup-card-bg: rgba(17, 24, 39, 0.88);
+    --setup-soft-border: rgba(148, 163, 184, 0.20);
+    --setup-title: rgba(248, 250, 252, 0.98);
+    --setup-desc: rgba(203, 213, 225, 0.82);
+    --setup-pill-bg: rgba(30, 41, 59, 0.92);
+    --setup-pill-text: rgba(241, 245, 249, 0.88);
+    --panel-bg: rgba(10, 18, 30, 0.82);
+    --panel-bg-2: rgba(15, 23, 42, 0.78);
+    --panel-title: rgba(241, 245, 249, 0.96);
+    --panel-text: rgba(226, 232, 240, 0.80);
+    --panel-soft: rgba(148, 163, 184, 0.14);
+    --meta-pill-bg: rgba(30, 41, 59, 0.90);
+    --meta-pill-text: rgba(226, 232, 240, 0.82);
+    --job-card-bg: rgba(8, 15, 26, 0.86);
+    --job-card-border: rgba(148, 163, 184, 0.18);
+    --job-title: rgba(248, 250, 252, 0.98);
+    --reasoning-text: rgba(191, 219, 254, 0.82);
+    --desc-text: rgba(226, 232, 240, 0.78);
+    --button-bg: rgba(30, 41, 59, 0.88);
+    --button-hover: rgba(51, 65, 85, 0.96);
+    --diag-error-bg: rgba(127, 29, 29, 0.34);
+    --diag-error-border: rgba(248, 113, 113, 0.28);
+    --diag-error-text: rgba(254, 202, 202, 0.96);
+    --diag-warn-bg: rgba(120, 53, 15, 0.34);
+    --diag-warn-border: rgba(251, 191, 36, 0.26);
+    --diag-warn-text: rgba(254, 240, 138, 0.96);
+    --status-failed-bg: rgba(127, 29, 29, 0.28);
+    --status-failed-border: rgba(248, 113, 113, 0.26);
+    --status-failed-text: rgba(254, 202, 202, 0.96);
+
+    --tag-salary-bg: rgba(16,185,129,0.20);
+    --tag-salary-border: rgba(16,185,129,0.34);
+    --tag-salary-text: rgba(167,243,208,0.96);
+    --tag-location-bg: rgba(59,130,246,0.22);
+    --tag-location-border: rgba(96,165,250,0.36);
+    --tag-location-text: rgba(191,219,254,0.96);
+    --tag-artifact-bg: rgba(232,93,42,0.20);
+    --tag-artifact-border: rgba(251,146,60,0.34);
+    --tag-artifact-text: rgba(254,215,170,0.96);
+    --tag-status-bg: rgba(148,163,184,0.10);
+    --tag-status-text: rgba(226,232,240,0.86);
+  }}
+
+  html:not([data-theme="dark"]) {{
+    --panel-bg: var(--card);
+    --panel-bg-2: var(--card-2);
+    --panel-title: rgba(2,6,23,0.86);
+    --panel-text: rgba(2,6,23,0.62);
+    --panel-soft: rgba(2,6,23,0.06);
+    --meta-pill-bg: rgba(255,255,255,0.55);
+    --meta-pill-text: rgba(2,6,23,0.70);
+    --job-card-bg: var(--card);
+    --job-card-border: rgba(2,6,23,0.10);
+    --job-title: rgba(2,6,23,0.92);
+    --reasoning-text: rgba(2,6,23,0.66);
+    --desc-text: rgba(2,6,23,0.68);
+    --button-bg: rgba(255,255,255,0.55);
+    --button-hover: rgba(255,255,255,0.78);
+    --diag-error-bg: rgba(254,242,242,0.90);
+    --diag-error-border: rgba(239,68,68,0.22);
+    --diag-error-text: #991b1b;
+    --diag-warn-bg: rgba(255,247,237,0.94);
+    --diag-warn-border: rgba(217,119,6,0.18);
+    --diag-warn-text: rgba(146,64,14,0.96);
+    --status-failed-bg: rgba(239,68,68,0.12);
+    --status-failed-border: rgba(239,68,68,0.22);
+    --status-failed-text: #b91c1c;
+
+    --tag-salary-bg: rgba(15,118,110,0.10);
+    --tag-salary-border: rgba(15,118,110,0.20);
+    --tag-salary-text: rgba(2,6,23,0.82);
+    --tag-location-bg: rgba(29,78,216,0.08);
+    --tag-location-border: rgba(29,78,216,0.18);
+    --tag-location-text: rgba(2,6,23,0.82);
+    --tag-artifact-bg: rgba(232,93,42,0.10);
+    --tag-artifact-border: rgba(232,93,42,0.20);
+    --tag-artifact-text: rgba(2,6,23,0.82);
+    --tag-status-bg: rgba(2,6,23,0.06);
+    --tag-status-text: rgba(2,6,23,0.78);
+  }}
+
+  html:not([data-theme="dark"]) {{
+    --setup-nav-bg: rgba(255,255,255,0.55);
+    --setup-nav-btn-bg: rgba(255,255,255,0.62);
+    --setup-nav-btn-hover: rgba(255,255,255,0.82);
+    --setup-panel-bg: var(--card);
+    --setup-card-bg: rgba(255,255,255,0.52);
+    --setup-soft-border: rgba(2,6,23,0.10);
+    --setup-title: rgba(2,6,23,0.90);
+    --setup-desc: rgba(2,6,23,0.62);
+    --setup-pill-bg: rgba(255,255,255,0.60);
+    --setup-pill-text: rgba(2,6,23,0.78);
   }}
 
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
@@ -454,7 +715,7 @@ def generate_dashboard(
       radial-gradient(1100px 700px at 18% 8%, rgba(29, 78, 216, 0.16), transparent 60%),
       radial-gradient(900px 650px at 88% 14%, rgba(232, 93, 42, 0.13), transparent 58%),
       radial-gradient(900px 700px at 46% 88%, rgba(15, 118, 110, 0.14), transparent 56%),
-      linear-gradient(180deg, var(--paper-2), var(--paper) 56%, #f0e7d6);
+      linear-gradient(180deg, var(--paper-2), var(--paper) 56%, var(--paper-3));
   }}
   body::after {{
     content: "";
@@ -464,8 +725,8 @@ def generate_dashboard(
     pointer-events: none;
     opacity: 0.22;
     background-image:
-      repeating-linear-gradient(0deg, rgba(2,6,23,0.05) 0px, rgba(2,6,23,0.05) 1px, transparent 1px, transparent 14px),
-      repeating-linear-gradient(90deg, rgba(2,6,23,0.03) 0px, rgba(2,6,23,0.03) 1px, transparent 1px, transparent 18px);
+      repeating-linear-gradient(0deg, var(--grid-1) 0px, var(--grid-1) 1px, transparent 1px, transparent 14px),
+      repeating-linear-gradient(90deg, var(--grid-2) 0px, var(--grid-2) 1px, transparent 1px, transparent 18px);
     mix-blend-mode: multiply;
   }}
 
@@ -502,8 +763,8 @@ def generate_dashboard(
     padding: 0.22rem 0.55rem;
     border-radius: 999px;
     border: 1px solid var(--line);
-    background: rgba(255,255,255,0.55);
-    color: rgba(2,6,23,0.78);
+    background: var(--surface);
+    color: var(--text-soft);
   }}
   .chip strong {{ font-family: 'IBM Plex Mono', ui-monospace, monospace; font-weight: 600; }}
   .chip.good {{ border-color: rgba(15,118,110,0.25); background: rgba(15,118,110,0.10); }}
@@ -543,30 +804,30 @@ def generate_dashboard(
     box-shadow: 0 10px 26px rgba(2,6,23,0.06);
     backdrop-filter: blur(10px);
   }}
-  .filter-label {{ color: rgba(2,6,23,0.72); font-size: 0.78rem; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; }}
+  .filter-label {{ color: var(--text-soft); font-size: 0.78rem; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; }}
   .filter-btn {{
-    background: rgba(255,255,255,0.58);
+    background: var(--surface);
     border: 1px solid var(--line);
-    color: rgba(2,6,23,0.78);
+    color: var(--text-soft);
     padding: 0.42rem 0.75rem;
     border-radius: 999px;
     cursor: pointer;
     font-size: 0.8rem;
     transition: transform 0.12s, background 0.12s, border-color 0.12s;
   }}
-  .filter-btn:hover {{ transform: translateY(-1px); border-color: rgba(2,6,23,0.20); background: rgba(255,255,255,0.78); }}
-  .filter-btn.active {{ background: rgba(29,78,216,0.14); border-color: rgba(29,78,216,0.25); color: rgba(2,6,23,0.90); }}
+  .filter-btn:hover {{ transform: translateY(-1px); border-color: rgba(2,6,23,0.20); background: var(--surface-strong); }}
+  .filter-btn.active {{ background: rgba(29,78,216,0.14); border-color: rgba(29,78,216,0.25); color: var(--text-strong); }}
   .filter-btn:disabled {{ opacity: 0.45; cursor: not-allowed; transform: none; }}
   .search-input, .select-input {{
-    background: rgba(255,255,255,0.62);
+    background: var(--surface);
     border: 1px solid var(--line);
-    color: rgba(2,6,23,0.86);
+    color: var(--text-strong);
     padding: 0.42rem 0.65rem;
     border-radius: 12px;
     font-size: 0.82rem;
   }}
   .search-input {{ width: 220px; }}
-  .search-input::placeholder {{ color: rgba(75,85,99,0.85); }}
+  .search-input::placeholder {{ color: var(--muted); }}
   .search-input:focus, .select-input:focus {{ outline: none; border-color: rgba(29,78,216,0.35); box-shadow: 0 0 0 3px rgba(29,78,216,0.10); }}
   .search-input.input-error, .select-input.input-error, .full-desc.input-error {{
     border-color: rgba(185, 28, 28, 0.55) !important;
@@ -581,13 +842,15 @@ def generate_dashboard(
     line-height: 1.3;
   }}
 
-  .toggle {{ display: inline-flex; align-items: center; gap: 0.45rem; color: rgba(2,6,23,0.78); font-size: 0.82rem; user-select: none; }}
+  .toggle {{ display: inline-flex; align-items: center; gap: 0.45rem; color: var(--text-soft); font-size: 0.82rem; user-select: none; }}
   .toggle input {{ accent-color: var(--accent-3); }}
+
+  .theme-toggle {{ min-width: 124px; text-align: center; }}
 
   /* Live-mode hint (file:// dashboards can't write to SQLite) */
   .live-hint {{
-    background: rgba(29,78,216,0.08);
-    border: 1px solid rgba(29,78,216,0.22);
+    background: var(--hint-bg);
+    border: 1px solid var(--hint-border);
     border-radius: 16px;
     padding: 0.9rem 1rem;
     margin: 1rem 0;
@@ -597,22 +860,22 @@ def generate_dashboard(
     align-items: center;
     flex-wrap: wrap;
   }}
-  .live-hint-title {{ color: rgba(29,78,216,0.92); font-weight: 800; letter-spacing: 0.01em; margin-bottom: 0.25rem; }}
-  .live-hint-body {{ color: rgba(2,6,23,0.78); font-size: 0.92rem; line-height: 1.4; }}
-  .live-hint code {{ background: rgba(255,255,255,0.65); border: 1px solid rgba(2,6,23,0.10); padding: 0.08rem 0.35rem; border-radius: 10px; color: rgba(2,6,23,0.86); }}
+  .live-hint-title {{ color: var(--hint-title); font-weight: 800; letter-spacing: 0.01em; margin-bottom: 0.25rem; }}
+  .live-hint-body {{ color: var(--text-soft); font-size: 0.92rem; line-height: 1.4; }}
+  .live-hint code {{ background: var(--hint-code-bg); border: 1px solid var(--line); padding: 0.08rem 0.35rem; border-radius: 10px; color: var(--hint-code-text); }}
   .live-hint-actions {{ display: flex; gap: 0.5rem; align-items: center; }}
 
   /* Score distribution */
   .score-section {{ display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0 1.25rem; }}
-  .score-dist, .sites-section {{ background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 1rem; box-shadow: 0 10px 26px rgba(2,6,23,0.06); backdrop-filter: blur(10px); }}
-  .score-dist h3, .sites-section h3 {{ font-family: 'Fraunces', serif; font-size: 1.08rem; margin-bottom: 0.75rem; color: rgba(2,6,23,0.86); }}
+  .score-dist, .sites-section {{ background: var(--panel-bg); border: 1px solid var(--line); border-radius: 16px; padding: 1rem; box-shadow: var(--shadow); backdrop-filter: blur(10px); }}
+  .score-dist h3, .sites-section h3 {{ font-family: 'Fraunces', serif; font-size: 1.08rem; margin-bottom: 0.75rem; color: var(--panel-title); }}
 
   .panel {{ border: none; }}
   .panel > summary {{
     font-family: 'Fraunces', serif;
     font-size: 1.08rem;
     font-weight: 800;
-    color: rgba(2,6,23,0.86);
+    color: var(--panel-title);
     list-style: none;
     cursor: pointer;
     display: flex;
@@ -622,7 +885,7 @@ def generate_dashboard(
   }}
   .panel > summary::-webkit-details-marker {{ display: none; }}
   .panel > summary::marker {{ content: ""; }}
-  .panel > summary::after {{ content: "+"; margin-left: auto; color: rgba(2,6,23,0.55); font-weight: 900; }}
+  .panel > summary::after {{ content: "+"; margin-left: auto; color: var(--panel-text); font-weight: 900; }}
   .panel[open] > summary::after {{ content: "-"; }}
   .panel-body {{
     margin-top: 0.75rem;
@@ -635,43 +898,44 @@ def generate_dashboard(
 
   /* Subtle scrollbars */
   .panel-body::-webkit-scrollbar {{ width: 10px; }}
-  .panel-body::-webkit-scrollbar-track {{ background: rgba(2,6,23,0.06); border-radius: 999px; }}
-  .panel-body::-webkit-scrollbar-thumb {{ background: rgba(2,6,23,0.22); border-radius: 999px; border: 2px solid rgba(2,6,23,0.06); }}
-  .panel-body::-webkit-scrollbar-thumb:hover {{ background: rgba(2,6,23,0.30); }}
+  .panel-body::-webkit-scrollbar-track {{ background: var(--panel-soft); border-radius: 999px; }}
+  .panel-body::-webkit-scrollbar-thumb {{ background: rgba(148,163,184,0.26); border-radius: 999px; border: 2px solid var(--panel-soft); }}
+  .panel-body::-webkit-scrollbar-thumb:hover {{ background: rgba(148,163,184,0.38); }}
   .score-row {{ display: flex; align-items: center; gap: 0.55rem; margin-bottom: 0.45rem; }}
-  .score-label {{ width: 1.6rem; text-align: right; font-size: 0.85rem; font-weight: 800; color: rgba(2,6,23,0.70); }}
-  .score-bar-track {{ flex: 1; height: 12px; background: rgba(2,6,23,0.08); border-radius: 999px; overflow: hidden; border: 1px solid rgba(2,6,23,0.06); }}
+  .score-label {{ width: 1.6rem; text-align: right; font-size: 0.85rem; font-weight: 800; color: var(--panel-text); }}
+  .score-bar-track {{ flex: 1; height: 12px; background: var(--panel-soft); border-radius: 999px; overflow: hidden; border: 1px solid var(--panel-soft); }}
   .score-bar-fill {{ height: 100%; border-radius: 999px; transition: width 0.3s; }}
-  .score-count {{ width: 2.7rem; font-size: 0.8rem; color: rgba(2,6,23,0.60); font-family: 'IBM Plex Mono', ui-monospace, monospace; }}
+  .score-count {{ width: 2.7rem; font-size: 0.8rem; color: var(--panel-text); font-family: 'IBM Plex Mono', ui-monospace, monospace; }}
 
   /* Site bars */
   .site-row {{ margin-bottom: 0.85rem; }}
   .site-name {{ font-weight: 800; font-size: 0.92rem; letter-spacing: -0.01em; }}
-  .site-nums {{ color: rgba(2,6,23,0.62); font-size: 0.78rem; margin: 0.15rem 0 0.35rem; }}
-  .bar-track {{ height: 10px; background: rgba(2,6,23,0.08); border-radius: 999px; display: flex; overflow: hidden; border: 1px solid rgba(2,6,23,0.06); }}
+  .site-nums {{ color: var(--panel-text); font-size: 0.78rem; margin: 0.15rem 0 0.35rem; }}
+  .bar-track {{ height: 10px; background: var(--panel-soft); border-radius: 999px; display: flex; overflow: hidden; border: 1px solid var(--panel-soft); }}
   .bar-fill {{ height: 100%; transition: width 0.3s; }}
 
   /* Score group headers */
   .score-group {{ margin: 1.25rem 0 0; }}
+  .score-group {{ content-visibility: auto; contain-intrinsic-size: 900px; }}
   .score-header {{
     font-family: 'Fraunces', serif;
     font-size: 1.18rem;
     font-weight: 800;
     margin: 0 0 0.85rem;
     padding: 0.55rem 0.65rem 0.55rem;
-    border: 1px solid rgba(2,6,23,0.10);
+    border: 1px solid var(--job-card-border);
     border-left: 6px solid;
     border-radius: 14px;
     display: flex;
     align-items: center;
     gap: 0.75rem;
     cursor: pointer;
-    background: var(--card-2);
-    box-shadow: 0 10px 26px rgba(2,6,23,0.05);
+    background: var(--panel-bg-2);
+    box-shadow: var(--shadow);
   }}
   .score-header::-webkit-details-marker {{ display: none; }}
   .score-header::marker {{ content: ""; }}
-  .score-header::after {{ content: "+"; margin-left: auto; color: rgba(2,6,23,0.55); font-weight: 900; }}
+  .score-header::after {{ content: "+"; margin-left: auto; color: var(--panel-text); font-weight: 900; }}
   .score-group[open] .score-header::after {{ content: "-"; }}
   .score-badge {{
     display: inline-flex;
@@ -680,24 +944,27 @@ def generate_dashboard(
     width: 2rem;
     height: 2rem;
     border-radius: 12px;
-    color: rgba(2,6,23,0.92);
+    color: var(--panel-title);
     font-weight: 900;
     font-size: 1rem;
-    border: 1px solid rgba(2,6,23,0.10);
+    border: 1px solid var(--job-card-border);
   }}
 
   /* Job grid */
   .job-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 0.9rem; }}
 
   .job-card {{
-    background: var(--card);
+    background: var(--job-card-bg);
     border-radius: 16px;
     padding: 0.95rem 0.95rem 0.85rem;
-    border: 1px solid rgba(2,6,23,0.10);
+    border: 1px solid var(--job-card-border);
     border-left: 6px solid rgba(2,6,23,0.15);
     transition: transform 0.14s, box-shadow 0.14s, border-color 0.14s;
-    box-shadow: 0 10px 26px rgba(2,6,23,0.06);
+    box-shadow: var(--shadow);
     backdrop-filter: blur(10px);
+    content-visibility: auto;
+    contain: layout paint style;
+    contain-intrinsic-size: 520px;
   }}
   .job-card:hover {{ transform: translateY(-2px); box-shadow: var(--shadow); border-color: rgba(2,6,23,0.16); }}
   .job-card[data-score="9"], .job-card[data-score="10"] {{ border-left-color: rgba(15,118,110,0.92); }}
@@ -714,14 +981,14 @@ def generate_dashboard(
     min-width: 1.7rem;
     height: 1.7rem;
     border-radius: 10px;
-    color: rgba(2,6,23,0.92);
+    color: var(--panel-title);
     font-weight: 900;
     font-size: 0.82rem;
     flex-shrink: 0;
     border: 1px solid rgba(2,6,23,0.10);
   }}
 
-  .job-title {{ color: rgba(2,6,23,0.92); text-decoration: none; font-weight: 800; font-size: 0.98rem; letter-spacing: -0.01em; line-height: 1.15; }}
+  .job-title {{ color: var(--job-title); text-decoration: none; font-weight: 800; font-size: 0.98rem; letter-spacing: -0.01em; line-height: 1.15; }}
   .job-title:hover {{ color: var(--accent-3); }}
 
   .meta-row {{ display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.45rem; }}
@@ -729,15 +996,15 @@ def generate_dashboard(
     font-size: 0.72rem;
     padding: 0.16rem 0.5rem;
     border-radius: 999px;
-    border: 1px solid rgba(2,6,23,0.10);
-    background: rgba(255,255,255,0.55);
-    color: rgba(2,6,23,0.70);
+    border: 1px solid var(--job-card-border);
+    background: var(--meta-pill-bg);
+    color: var(--meta-pill-text);
     font-weight: 600;
   }}
-  .meta-tag.salary {{ background: rgba(15,118,110,0.10); color: rgba(2,6,23,0.82); border-color: rgba(15,118,110,0.20); }}
-  .meta-tag.location {{ background: rgba(29,78,216,0.08); color: rgba(2,6,23,0.82); border-color: rgba(29,78,216,0.18); }}
-  .meta-tag.artifact {{ background: rgba(232,93,42,0.10); color: rgba(2,6,23,0.82); border-color: rgba(232,93,42,0.20); }}
-  .meta-tag.status {{ background: rgba(2,6,23,0.06); color: rgba(2,6,23,0.78); }}
+  .meta-tag.salary {{ background: var(--tag-salary-bg); color: var(--tag-salary-text); border-color: var(--tag-salary-border); }}
+  .meta-tag.location {{ background: var(--tag-location-bg); color: var(--tag-location-text); border-color: var(--tag-location-border); }}
+  .meta-tag.artifact {{ background: var(--tag-artifact-bg); color: var(--tag-artifact-text); border-color: var(--tag-artifact-border); }}
+  .meta-tag.status {{ background: var(--tag-status-bg); color: var(--tag-status-text); }}
   .meta-tag.status-ready {{ background: rgba(29,78,216,0.10); border-color: rgba(29,78,216,0.22); }}
   .meta-tag.status-selected {{ background: rgba(180,83,9,0.12); border-color: rgba(180,83,9,0.28); }}
   .meta-tag.status-prepared {{ background: rgba(180,83,9,0.10); border-color: rgba(180,83,9,0.22); }}
@@ -746,28 +1013,44 @@ def generate_dashboard(
   .meta-tag.status-failed {{ background: rgba(185,28,28,0.10); border-color: rgba(185,28,28,0.22); }}
   .meta-tag.status-skipped {{ background: rgba(75,85,99,0.10); border-color: rgba(75,85,99,0.18); }}
   .meta-tag.status-blocked {{ background: rgba(180,83,9,0.10); border-color: rgba(180,83,9,0.22); }}
+  .meta-tag-failed {{ background: var(--status-failed-bg); color: var(--status-failed-text); border-color: var(--status-failed-border); }}
 
-  .keywords-row {{ font-size: 0.76rem; color: rgba(15,118,110,0.96); margin-bottom: 0.25rem; line-height: 1.35; font-weight: 600; }}
-  .reasoning-row {{ font-size: 0.78rem; color: rgba(2,6,23,0.66); margin-bottom: 0.55rem; font-style: italic; line-height: 1.35; }}
+  .keywords-row {{ font-size: 0.76rem; color: rgba(52,211,153,0.96); margin-bottom: 0.25rem; line-height: 1.35; font-weight: 600; }}
+  .reasoning-row {{ font-size: 0.78rem; color: var(--reasoning-text); margin-bottom: 0.55rem; font-style: italic; line-height: 1.35; }}
+  .diag-block {{
+    border: 1px solid transparent;
+    border-radius: 12px;
+    padding: 0.55rem 0.65rem;
+  }}
+  .diag-error {{
+    background: var(--diag-error-bg);
+    border-color: var(--diag-error-border);
+    color: var(--diag-error-text);
+  }}
+  .diag-warn {{
+    background: var(--diag-warn-bg);
+    border-color: var(--diag-warn-border);
+    color: var(--diag-warn-text);
+  }}
 
-  .desc-preview {{ font-size: 0.84rem; color: rgba(2,6,23,0.68); line-height: 1.45; margin-bottom: 0.7rem; max-height: 3.8em; overflow: hidden; }}
+  .desc-preview {{ font-size: 0.84rem; color: var(--desc-text); line-height: 1.45; margin-bottom: 0.7rem; max-height: 3.8em; overflow: hidden; }}
 
   .card-footer {{ display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 0.4rem; }}
   .apply-link {{
     font-size: 0.82rem;
-    color: rgba(2,6,23,0.86);
+    color: var(--text-strong);
     text-decoration: none;
     padding: 0.32rem 0.78rem;
-    border: 1px solid rgba(2,6,23,0.14);
+    border: 1px solid var(--job-card-border);
     border-radius: 999px;
     font-weight: 700;
-    background: rgba(255,255,255,0.55);
+    background: var(--button-bg);
     cursor: pointer;
   }}
-  .apply-link:hover {{ background: rgba(255,255,255,0.78); transform: translateY(-1px); }}
+  .apply-link:hover {{ background: var(--button-hover); transform: translateY(-1px); }}
   .apply-link.primary {{ background: rgba(29,78,216,0.14); border-color: rgba(29,78,216,0.25); }}
   .apply-link.primary:hover {{ background: rgba(29,78,216,0.20); }}
-  .copy-btn {{ background: rgba(255,255,255,0.55); }}
+  .copy-btn {{ background: var(--button-bg); }}
   .copy-btn:active {{ transform: translateY(0); }}
   .apply-link.danger {{ background: rgba(185,28,28,0.08); border-color: rgba(185,28,28,0.22); }}
   .apply-link.danger:hover {{ background: rgba(185,28,28,0.12); }}
@@ -803,7 +1086,7 @@ def generate_dashboard(
     .toast.show {{ opacity: 1; transform: translateY(0); }}
 
   .meta {{
-    color: rgba(2,6,23,0.64);
+    color: var(--panel-text);
     font-size: 0.78rem;
     line-height: 1.25;
   }}
@@ -843,11 +1126,11 @@ def generate_dashboard(
         position: sticky;
         top: 14px;
         align-self: start;
-        background: rgba(255,255,255,0.55);
+        background: var(--setup-nav-bg);
         border: 1px solid var(--line);
         border-radius: 16px;
         padding: 0.75rem;
-        box-shadow: 0 10px 26px rgba(2,6,23,0.06);
+        box-shadow: var(--shadow);
         backdrop-filter: blur(10px);
       }}
       .setup-nav h3 {{
@@ -855,10 +1138,10 @@ def generate_dashboard(
         font-size: 1.02rem;
         font-weight: 800;
         margin: 0 0 0.55rem 0;
-        color: rgba(2,6,23,0.88);
+        color: var(--setup-title);
       }}
       .setup-nav .nav-help {{
-        color: rgba(2,6,23,0.64);
+        color: var(--setup-desc);
         font-size: 0.82rem;
         line-height: 1.35;
         margin: 0 0 0.55rem 0;
@@ -868,9 +1151,9 @@ def generate_dashboard(
         text-align: left;
         border-radius: 12px;
         padding: 0.45rem 0.6rem;
-        border: 1px solid rgba(2,6,23,0.10);
-        background: rgba(255,255,255,0.62);
-        color: rgba(2,6,23,0.82);
+        border: 1px solid var(--setup-soft-border);
+        background: var(--setup-nav-btn-bg);
+        color: var(--text-strong);
         cursor: pointer;
         font-size: 0.84rem;
         font-weight: 700;
@@ -880,7 +1163,7 @@ def generate_dashboard(
       .setup-nav button:hover {{
         transform: translateY(-1px);
         border-color: rgba(2,6,23,0.20);
-        background: rgba(255,255,255,0.82);
+        background: var(--setup-nav-btn-hover);
       }}
       .setup-nav button.active {{
         background: rgba(29,78,216,0.12);
@@ -894,11 +1177,11 @@ def generate_dashboard(
         min-width: 0;
       }}
       .setup-section {{
-        background: var(--card);
+        background: var(--setup-panel-bg);
         border: 1px solid var(--line);
         border-radius: 16px;
         padding: 0.95rem;
-        box-shadow: 0 10px 26px rgba(2,6,23,0.06);
+        box-shadow: var(--shadow);
         backdrop-filter: blur(10px);
       }}
       .setup-section .section-head {{
@@ -912,10 +1195,10 @@ def generate_dashboard(
         font-family: 'Fraunces', serif;
         font-size: 1.12rem;
         font-weight: 800;
-        color: rgba(2,6,23,0.90);
+        color: var(--setup-title);
       }}
       .setup-section .section-desc {{
-        color: rgba(2,6,23,0.62);
+        color: var(--setup-desc);
         font-size: 0.86rem;
         line-height: 1.35;
       }}
@@ -939,12 +1222,12 @@ def generate_dashboard(
 
       /* Setup textarea/input overrides for readability */
       .setup-body .full-desc {{
-        background: rgba(255,255,255,0.66);
-        color: rgba(2,6,23,0.86);
-        border-color: rgba(2,6,23,0.12);
+        background: var(--surface);
+        color: var(--text-strong);
+        border-color: var(--setup-soft-border);
         box-shadow: 0 8px 18px rgba(2,6,23,0.06);
       }}
-      .setup-body .full-desc::placeholder {{ color: rgba(75,85,99,0.80); }}
+      .setup-body .full-desc::placeholder {{ color: var(--muted); }}
       .setup-body .search-input, .setup-body .select-input {{
         width: 100%;
       }}
@@ -955,8 +1238,8 @@ def generate_dashboard(
       }}
 
       .setup-card {{
-        background: rgba(255,255,255,0.52);
-        border: 1px solid rgba(2,6,23,0.10);
+        background: var(--setup-card-bg);
+        border: 1px solid var(--setup-soft-border);
         border-radius: 16px;
         padding: 0.85rem;
       }}
@@ -975,9 +1258,9 @@ def generate_dashboard(
         flex-wrap: wrap;
       }}
       .tab-btn {{
-        border: 1px solid rgba(2,6,23,0.12);
-        background: rgba(255,255,255,0.62);
-        color: rgba(2,6,23,0.82);
+        border: 1px solid var(--setup-soft-border);
+        background: var(--setup-nav-btn-bg);
+        color: var(--text-strong);
         border-radius: 999px;
         padding: 0.32rem 0.6rem;
         font-weight: 800;
@@ -1007,8 +1290,8 @@ def generate_dashboard(
         gap: 0.55rem;
         flex-wrap: wrap;
         padding: 0.7rem 0.75rem;
-        background: rgba(255,255,255,0.52);
-        border: 1px solid rgba(2,6,23,0.10);
+        background: var(--setup-card-bg);
+        border: 1px solid var(--setup-soft-border);
         border-radius: 16px;
       }}
       .status-group {{
@@ -1022,9 +1305,9 @@ def generate_dashboard(
         font-weight: 800;
         padding: 0.16rem 0.5rem;
         border-radius: 999px;
-        border: 1px solid rgba(2,6,23,0.10);
-        background: rgba(255,255,255,0.60);
-        color: rgba(2,6,23,0.78);
+        border: 1px solid var(--setup-soft-border);
+        background: var(--setup-pill-bg);
+        color: var(--setup-pill-text);
       }}
       .status-pill.ok {{
         border-color: rgba(15,118,110,0.22);
@@ -1047,8 +1330,8 @@ def generate_dashboard(
         align-items: start;
       }}
       .studio-pane {{
-        background: rgba(255,255,255,0.52);
-        border: 1px solid rgba(2,6,23,0.10);
+        background: var(--setup-card-bg);
+        border: 1px solid var(--setup-soft-border);
         border-radius: 16px;
         padding: 0.85rem;
       }}
@@ -1103,17 +1386,18 @@ def generate_dashboard(
 
  <div class="wrap">
 
- <header class="page-head motion-1">
+  <header class="page-head motion-1">
    <div>
      <h1>ApplyPilot Dashboard</h1>
      <p class="subtitle">{active} active jobs &middot; {scored} scored &middot; {high_fit} strong matches (7+)</p>
    </div>
    <div class="head-meta" aria-label="Key metrics">
-     <span class="chip"><strong>{active}</strong> active</span>
-     <span class="chip"><strong>{ready}</strong> ready</span>
-     <span class="chip"><strong>{scored}</strong> scored</span>
-     <span class="chip good"><strong>{high_fit}</strong> 7+</span>
-     <span class="chip warn"><strong>{blocked}</strong> blocked</span>
+      <button type="button" class="filter-btn theme-toggle" id="theme-toggle" onclick="toggleTheme()">Dark mode</button>
+      <span class="chip"><strong>{active}</strong> active</span>
+      <span class="chip"><strong>{ready}</strong> ready</span>
+      <span class="chip"><strong>{scored}</strong> scored</span>
+      <span class="chip good"><strong>{high_fit}</strong> 7+</span>
+      <span class="chip warn"><strong>{blocked}</strong> blocked</span>
    </div>
  </header>
 
@@ -1132,9 +1416,9 @@ def generate_dashboard(
 
  <div class="summary motion-2">
    <div class="stat-card stat-total"><div class="stat-num">{active}</div><div class="stat-label">Active Jobs</div></div>
-  <div class="stat-card stat-ok"><div class="stat-num">{
+   <div class="stat-card stat-ok"><div class="stat-num">{
         ready
-    }</div><div class="stat-label">Ready (desc + URL)</div></div>
+    }</div><div class="stat-label">Ready (tailor + cover)</div></div>
   <div class="stat-card stat-scored"><div class="stat-num">{
         scored
     }</div><div class="stat-label">Scored by LLM</div></div>
@@ -1609,11 +1893,18 @@ def generate_dashboard(
             <div class="variants-head">
               <div>
                 <div class="section-title" style="font-size:1.02rem">Resume Variants</div>
-                <div class="section-desc">Keep separate base resumes for data/support/testing and route jobs deterministically.</div>
+                <div class="section-desc">Keep separate base resumes for role families and sector mains, then route jobs deterministically.</div>
               </div>
               <div class="variants-tabs" role="tablist" aria-label="Resume variants">
-                <button type="button" class="tab-btn active" data-variant-key="data_analyst" onclick="variantsSelect('data_analyst', this)">Data</button>
-                <button type="button" class="tab-btn" data-variant-key="it_support" onclick="variantsSelect('it_support', this)">Support</button>
+                <button type="button" class="tab-btn active" data-variant-key="it_support_analyst" onclick="variantsSelect('it_support_analyst', this)">IT Support</button>
+                <button type="button" class="tab-btn" data-variant-key="application_support_engineer" onclick="variantsSelect('application_support_engineer', this)">App Support</button>
+                <button type="button" class="tab-btn" data-variant-key="technical_systems_analyst" onclick="variantsSelect('technical_systems_analyst', this)">Tech Systems</button>
+                <button type="button" class="tab-btn" data-variant-key="public_sector_main" onclick="variantsSelect('public_sector_main', this)">Public</button>
+                <button type="button" class="tab-btn" data-variant-key="commercial_main" onclick="variantsSelect('commercial_main', this)">Commercial</button>
+                <button type="button" class="tab-btn" data-variant-key="public_it_support" onclick="variantsSelect('public_it_support', this)">Public IT</button>
+                <button type="button" class="tab-btn" data-variant-key="public_application_support" onclick="variantsSelect('public_application_support', this)">Public App</button>
+                <button type="button" class="tab-btn" data-variant-key="commercial_technical_support" onclick="variantsSelect('commercial_technical_support', this)">Commercial Tech</button>
+                <button type="button" class="tab-btn" data-variant-key="data_analyst" onclick="variantsSelect('data_analyst', this)">Data</button>
                 <button type="button" class="tab-btn" data-variant-key="software_testing" onclick="variantsSelect('software_testing', this)">Testing</button>
               </div>
             </div>
@@ -1623,7 +1914,7 @@ def generate_dashboard(
               <button type="button" class="apply-link copy-btn" data-live="1" onclick="variantsLoad()">Load saved</button>
               <button type="button" class="apply-link copy-btn" data-live="1" onclick="variantsUseMainResume()">Copy from resume.txt</button>
               <button type="button" class="apply-link copy-btn" data-live="1" onclick="variantsSave(this)">Save variant</button>
-              <span class="meta-tag" id="variants-status">active: data_analyst</span>
+              <span class="meta-tag" id="variants-status">active: it_support_analyst</span>
             </div>
           </div>
       </section>
@@ -1648,6 +1939,10 @@ def generate_dashboard(
                 <option value="data_bi">Data / BI</option>
                 <option value="engineering">Engineering</option>
                 <option value="support">Support / IT Ops</option>
+                <option value="application_support">Application Support</option>
+                <option value="qa_testing">QA / Testing</option>
+                <option value="cloud_platform">Cloud / Platform</option>
+                <option value="business_analysis">Business Analysis</option>
               </select>
             </label>
             <label class="job-desc" style="margin:0">Draft candidates (2-3)
@@ -1840,6 +2135,12 @@ let hideModerate = true;
 const SMART_SITE_CATALOG = {smart_catalog_js};
 const SMART_UK_DEFAULTS = {uk_smart_defaults_js};
 
+// Performance: cache DOM lists once; avoid repeated expensive queries.
+const _jobCards = Array.from(document.querySelectorAll('.job-card[data-id]'));
+const _scoreGroups = Array.from(document.querySelectorAll('.score-group[data-score-group]'));
+const _jobCountEl = document.getElementById('job-count');
+let _filterTimer = null;
+
 let _pipeSince = 0;
 let _pipeTimer = null;
 let _pipeStatusTimer = null;
@@ -1901,12 +2202,12 @@ function setupInitNavObserver() {{
 }}
 
 // Resume variants manager
-let _variantKey = 'data_analyst';
+let _variantKey = 'it_support_analyst';
 let _variantCache = {{}};
 let _variantLoaded = {{}};
 
 function variantsSelect(key, btn) {{
-  _variantKey = String(key || '').trim().toLowerCase() || 'data_analyst';
+  _variantKey = String(key || '').trim().toLowerCase() || 'it_support_analyst';
   const tabs = document.querySelectorAll('.tab-btn[data-variant-key]');
   tabs.forEach(t => t.classList.remove('active'));
   if (btn) btn.classList.add('active');
@@ -2072,18 +2373,20 @@ function filterSponsorship(val) {{
 
 function filterText(text) {{
   searchText = text.toLowerCase();
-  applyFilters();
-}}
+  // Debounce typing; filtering can touch thousands of cards.
+  try {{ if (_filterTimer) clearTimeout(_filterTimer); }} catch (e) {{}}
+  _filterTimer = setTimeout(() => {{ try {{ applyFilters(); }} catch (e) {{}} }}, 140);
+ }}
 
 function applyFilters() {{
   let shown = 0;
-  let total = 0;
-  // Only filter real job cards; pipeline console uses the same card styles.
-  const jobCards = document.querySelectorAll('.job-card[data-id]');
-  total = jobCards.length;
-  jobCards.forEach(card => {{
+  const total = _jobCards.length;
+  const groupVisible = {{}};
+
+  for (let i = 0; i < _jobCards.length; i++) {{
+    const card = _jobCards[i];
     const score = parseInt(card.dataset.score) || 0;
-    const text = card.textContent.toLowerCase();
+    const text = card.dataset.text || '';
     const scoreMatch = score >= (minScore || 5);
     const moderateMatch = !hideModerate || score >= 7;
     const textMatch = !searchText || text.includes(searchText);
@@ -2104,21 +2407,68 @@ function applyFilters() {{
     else if (sponsorFilter === 'not_no') sponsorMatch = (pol !== 'no');
     else if (sponsorFilter === 'unknown') sponsorMatch = (!pol || pol === 'unknown') && (!lic || lic === 'unknown');
 
-    if (scoreMatch && moderateMatch && textMatch && siteMatch && statusMatch && roleMatch && sponsorMatch) {{
+    const ok = scoreMatch && moderateMatch && textMatch && siteMatch && statusMatch && roleMatch && sponsorMatch;
+    if (ok) {{
       card.classList.remove('hidden');
       shown++;
+      const g = card.dataset.group || card.dataset.score || '';
+      if (g) groupVisible[g] = (groupVisible[g] || 0) + 1;
     }} else {{
       card.classList.add('hidden');
     }}
-  }});
-  document.getElementById('job-count').textContent = `Showing ${{shown}} of ${{total}} jobs`;
+  }}
 
-  // Hide empty score groups
-  document.querySelectorAll('.score-group[data-score-group]').forEach(group => {{
-    const visible = group.querySelectorAll('.job-card[data-id]:not(.hidden)').length;
-    group.style.display = visible ? '' : 'none';
-  }});
+  if (_jobCountEl) _jobCountEl.textContent = `Showing ${{shown}} of ${{total}} jobs`;
+
+  // Hide empty score groups without re-querying the DOM.
+  for (let i = 0; i < _scoreGroups.length; i++) {{
+    const group = _scoreGroups[i];
+    const k = (group.dataset.scoreGroup || '').toString();
+    group.style.display = (groupVisible[k] || 0) ? '' : 'none';
+  }}
  }}
+
+// Lazy-load heavy job fields (e.g. full descriptions) to keep the dashboard fast.
+async function _lazyLoadJobField(detailsEl) {{
+  try {{
+    if (!detailsEl || !detailsEl.open) return;
+    if ((detailsEl.dataset.loaded || '') === '1') return;
+    const field = (detailsEl.dataset.field || '').trim();
+    const jobId = (detailsEl.dataset.jobId || '').trim();
+    const box = detailsEl.querySelector('.full-desc');
+    if (!field || !jobId || !box) return;
+
+    detailsEl.dataset.loaded = '1';
+    if (window.location.protocol === 'file:') {{
+      box.textContent = 'Open in served mode to load this section.';
+      return;
+    }}
+
+    box.textContent = 'Loading...';
+    const url = '/api/job/full-description?job_id=' + encodeURIComponent(jobId);
+    const res = await fetch(url);
+    const txt = await res.text();
+    let j = {{}};
+    try {{ j = JSON.parse(txt || '{{}}'); }} catch (e) {{ j = {{ ok: false, detail: txt }}; }}
+    if (!res.ok || !j.ok) throw new Error((j && (j.detail || j.error)) || ('HTTP ' + res.status));
+    box.textContent = String(j.text || '').trim();
+  }} catch (e) {{
+    try {{
+      const box = detailsEl ? detailsEl.querySelector('.full-desc') : null;
+      if (box) box.textContent = 'Load failed: ' + _errMsg(e);
+    }} catch (e2) {{}}
+  }}
+}}
+
+function _initLazyDetails() {{
+  try {{
+    document.querySelectorAll('details.full-desc-details.lazy[data-field]').forEach(d => {{
+      d.addEventListener('toggle', () => {{
+        try {{ if (d.open) _lazyLoadJobField(d); }} catch (e) {{}}
+      }});
+    }});
+  }} catch (e) {{}}
+}}
 
  // Debug helper: if clicks appear to do nothing, check if buttons are disabled.
  document.addEventListener('click', (ev) => {{
@@ -2135,6 +2485,7 @@ function applyFilters() {{
 
 toggleHideModerate(true);
 applyFilters();
+_initLazyDetails();
 
   function copyCmd(text) {{
   if (!text) return;
@@ -2230,6 +2581,34 @@ applyFilters();
   }});
 
 let _setupApiOk = true;
+
+const _THEME_KEY = 'applypilot-theme:{escape(str(setup.get("app_dir") or base_dir))}';
+
+function _applyTheme(theme) {{
+  const root = document.documentElement;
+  const next = (theme === 'dark') ? 'dark' : 'light';
+  root.setAttribute('data-theme', next);
+  try {{ localStorage.setItem(_THEME_KEY, next); }} catch (e) {{}}
+  const btn = document.getElementById('theme-toggle');
+  if (btn) btn.textContent = next === 'dark' ? 'Light mode' : 'Dark mode';
+}}
+
+function _initTheme() {{
+  let theme = 'light';
+  try {{
+    const saved = localStorage.getItem(_THEME_KEY);
+    if (saved === 'dark' || saved === 'light') theme = saved;
+    else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) theme = 'dark';
+  }} catch (e) {{}}
+  _applyTheme(theme);
+}}
+
+function toggleTheme() {{
+  const current = (document.documentElement.getAttribute('data-theme') || 'light').toLowerCase();
+  _applyTheme(current === 'dark' ? 'light' : 'dark');
+}}
+
+_initTheme();
 
 async function setupRefresh(btn) {{
   if (window.location.protocol === 'file:') return;
@@ -3032,8 +3411,8 @@ async function setupSaveTailoring(btn) {{
   draftCount = Math.max(2, Math.min(3, draftCount));
 
   let rolePack = (((document.getElementById('setup-role-pack') || {{}}).value || '').trim() || 'auto').toLowerCase();
-  if (!['auto', 'data_bi', 'engineering', 'support'].includes(rolePack)) {{
-    _setFieldError('setup-role-pack', 'Role pack must be one of: auto, data_bi, engineering, support');
+  if (!['auto', 'data_bi', 'engineering', 'support', 'application_support', 'qa_testing', 'cloud_platform', 'business_analysis'].includes(rolePack)) {{
+    _setFieldError('setup-role-pack', 'Role pack must be one of: auto, data_bi, engineering, support, application_support, qa_testing, cloud_platform, business_analysis');
     toast('Invalid role pack', 'warn', 3200);
     return;
   }}
@@ -3099,9 +3478,9 @@ async function setupValidateTailoring(btn) {{
     draftCount = Math.max(2, Math.min(3, draftCount));
 
     let rolePack = (((document.getElementById('setup-role-pack') || {{}}).value || '').trim() || 'auto').toLowerCase();
-    if (!['auto', 'data_bi', 'engineering', 'support'].includes(rolePack)) {{
-      _setFieldError('setup-role-pack', 'Role pack must be one of: auto, data_bi, engineering, support');
-      throw new Error('role_pack must be one of: auto, data_bi, engineering, support');
+    if (!['auto', 'data_bi', 'engineering', 'support', 'application_support', 'qa_testing', 'cloud_platform', 'business_analysis'].includes(rolePack)) {{
+      _setFieldError('setup-role-pack', 'Role pack must be one of: auto, data_bi, engineering, support, application_support, qa_testing, cloud_platform, business_analysis');
+      throw new Error('role_pack must be one of: auto, data_bi, engineering, support, application_support, qa_testing, cloud_platform, business_analysis');
     }}
 
     const skillsBoundary = _parseJsonField('setup-skills-boundary', 'skills_boundary', {{}});
@@ -3517,11 +3896,11 @@ async function apiBlock(id) {{
   return await _apiJson('/api/jobs/block', {{ id: parseInt(id) }});
 }}
 
-async function apiSelect(id, selected) {{
+async function apiSelect(id, selected, exclusive) {{
   if (window.location.protocol === 'file:') {{
      throw new Error('Live actions require `applypilot dashboard-serve`');
   }}
-  return await _apiJson('/api/jobs/select', {{ id: parseInt(id), selected: !!selected }});
+  return await _apiJson('/api/jobs/select', {{ id: parseInt(id), selected: !!selected, exclusive: !!exclusive }});
 }}
 
 async function apiDeleteJob(id) {{
@@ -4106,12 +4485,17 @@ async function markFailed(id) {{
   }}
 }}
 
-async function selectJob(id, selected) {{
+async function selectJob(id, selected, exclusive) {{
   try {{
-    await apiSelect(id, selected);
+    const r = await apiSelect(id, selected, exclusive);
     if (selected) {{
       updateCardStatus(id, 'selected', 'Selected');
-      toast('Picked for apply: #' + id, 'success');
+      if ((r && r.cleared ? r.cleared : 0) > 0) {{
+        toast('Picked only job #' + id + ' and cleared ' + r.cleared + ' old picks', 'success');
+        setTimeout(() => window.location.reload(), 250);
+      }} else {{
+        toast('Picked for apply: #' + id, 'success');
+      }}
     }} else {{
       updateCardStatus(id, 'ready', 'Ready');
       toast('Removed from picked list: #' + id, 'info');
