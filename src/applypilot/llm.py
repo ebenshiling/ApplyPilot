@@ -16,6 +16,7 @@ import os
 import random
 import threading
 import time
+from contextlib import contextmanager
 
 import httpx
 
@@ -412,3 +413,17 @@ def get_client() -> LLMClient:
         log.info("LLM provider: %s  base_url: %s  model: %s", provider, base_url, model)
         _instance = LLMClient(provider, base_url, model, api_key)
     return _instance
+
+
+@contextmanager
+def temporary_model(model: str | None):
+    """Temporarily override the active client model for the duration of a block."""
+
+    client = get_client()
+    old_model = client.model
+    try:
+        if model:
+            client.model = _pick_gemini_model(model) if (client.provider or "").lower() == "gemini" else str(model)
+        yield client
+    finally:
+        client.model = old_model

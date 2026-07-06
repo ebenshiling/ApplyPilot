@@ -17,6 +17,7 @@ from jobspy import scrape_jobs
 
 from applypilot import config
 from applypilot.database import find_existing_job_url, get_connection, init_db, normalize_url
+from applypilot.discovery.salary_filter import jobspy_salary_ok, load_salary_preference
 
 log = logging.getLogger(__name__)
 
@@ -132,6 +133,47 @@ def _normalize_search_cfg(cfg: dict) -> dict:
             out["location_accept"] = accept
         if reject and not out.get("location_reject_non_remote"):
             out["location_reject_non_remote"] = reject
+
+    # Normalize location labels for workspaces that only define raw location values.
+    locs = out.get("locations")
+    if isinstance(locs, list):
+        normalized_locs = []
+        fallback_labels: list[str] = []
+        for loc in locs:
+            if not isinstance(loc, dict):
+                normalized_locs.append(loc)
+                continue
+            item = dict(loc)
+            label = item.get("label") or item.get("location")
+            if label:
+                item["label"] = label
+                fallback_labels.append(str(label))
+            normalized_locs.append(item)
+        out["locations"] = normalized_locs
+        if fallback_labels and not out.get("location_labels"):
+            out["location_labels"] = fallback_labels
+
+    board_cfg = out.get("board_overrides")
+    if isinstance(board_cfg, dict):
+        normalized_overrides: dict[str, dict] = {}
+        for raw_name, raw_cfg in board_cfg.items():
+            name = str(raw_name or "").strip().lower()
+            if not name or not isinstance(raw_cfg, dict):
+                continue
+            item = dict(raw_cfg)
+            if "location_labels" not in item and isinstance(item.get("locations"), list):
+                labels: list[str] = []
+                for loc in item.get("locations") or []:
+                    if isinstance(loc, dict):
+                        label = loc.get("label") or loc.get("location")
+                    else:
+                        label = loc
+                    if label:
+                        labels.append(str(label))
+                if labels:
+                    item["location_labels"] = labels
+            normalized_overrides[name] = item
+        out["board_overrides"] = normalized_overrides
 
     return out
 
@@ -300,6 +342,7 @@ def _run_one_search(
     reject_locs: list[str],
     glassdoor_map: dict,
     exclude_titles: list[str] | None = None,
+    salary_pref: dict | None = None,
 ) -> dict:
     """Run a single search query and store results in DB."""
     s = search
@@ -399,6 +442,12 @@ def _run_one_search(
     ]
     filtered = before - len(df)
 
+    salary_filtered = 0
+    if salary_pref is not None:
+        before_salary = len(df)
+        df = df[df.apply(lambda row: jobspy_salary_ok(row, salary_pref), axis=1)]
+        salary_filtered = before_salary - len(df)
+
     conn = get_connection()
     new, existing = store_jobspy_results(conn, df, s["query"], search_query=s.get("query"))
 
@@ -407,9 +456,18 @@ def _run_one_search(
         msg += f", {excluded} filtered (title)"
     if filtered:
         msg += f", {filtered} filtered (location)"
+    if salary_filtered:
+        msg += f", {salary_filtered} filtered (salary)"
     log.info(msg)
 
-    return {"new": new, "existing": existing, "errors": 0, "filtered": filtered, "total": before, "label": label}
+    return {
+        "new": new,
+        "existing": existing,
+        "errors": 0,
+        "filtered": filtered + salary_filtered,
+        "total": before,
+        "label": label,
+    }
 
 
 # -- Single query search -----------------------------------------------------
@@ -493,6 +551,7 @@ def _full_crawl(
     hours_old: int = 72,
     proxy: str | None = None,
     max_retries: int = 2,
+    salary_pref: dict | None = None,
 ) -> dict:
     """Run all search queries from search config across all locations."""
     if sites is None:
@@ -549,6 +608,7 @@ def _full_crawl(
             reject_locs,
             glassdoor_map,
             exclude_titles=exclude_titles,
+            salary_pref=salary_pref,
         )
         completed += 1
         total_new += result["new"]
@@ -612,18 +672,63 @@ def run_discovery(cfg: dict | None = None) -> dict:
         return {"new": 0, "existing": 0, "errors": 0, "db_total": 0, "queries": 0}
 
     proxy = cfg.get("proxy")
-    sites = cfg.get("sites")
-    results_per_site = cfg.get("defaults", {}).get("results_per_site", 100)
-    hours_old = cfg.get("defaults", {}).get("hours_old", 72)
+    sites = list(cfg.get("sites") or [])
+    defaults = cfg.get("defaults", {}) or {}
+    results_per_site = defaults.get("results_per_site", 100)
+    hours_old = defaults.get("hours_old", 72)
     tiers = cfg.get("tiers")
     locations = cfg.get("location_labels")
+    board_overrides = cfg.get("board_overrides") or {}
+    try:
+        salary_pref = load_salary_preference(config.load_profile())
+    except Exception:
+        salary_pref = None
 
-    return _full_crawl(
-        search_cfg=cfg,
-        tiers=tiers,
-        locations=locations,
-        sites=sites,
-        results_per_site=results_per_site,
-        hours_old=hours_old,
-        proxy=proxy,
-    )
+    if not sites:
+        return _full_crawl(
+            search_cfg=cfg,
+            tiers=tiers,
+            locations=locations,
+            sites=sites,
+            results_per_site=results_per_site,
+            hours_old=hours_old,
+            proxy=proxy,
+            salary_pref=salary_pref,
+        )
+
+    combined = {"new": 0, "existing": 0, "errors": 0, "db_total": 0, "queries": 0}
+    for site in sites:
+        override = board_overrides.get(str(site or "").strip().lower(), {})
+        site_cfg = dict(cfg)
+        site_cfg["sites"] = [site]
+        if "tiers" in override:
+            site_cfg["tiers"] = override.get("tiers")
+        if "location_labels" in override:
+            site_cfg["location_labels"] = override.get("location_labels")
+        if "queries" in override:
+            keep_queries = {str(q).strip() for q in (override.get("queries") or []) if str(q).strip()}
+            if keep_queries:
+                site_cfg["queries"] = [q for q in (cfg.get("queries") or []) if str(q.get("query") or "").strip() in keep_queries]
+        site_defaults = dict(defaults)
+        if "results_per_site" in override:
+            site_defaults["results_per_site"] = override.get("results_per_site")
+        if "hours_old" in override:
+            site_defaults["hours_old"] = override.get("hours_old")
+        site_cfg["defaults"] = site_defaults
+        result = _full_crawl(
+            search_cfg=site_cfg,
+            tiers=site_cfg.get("tiers"),
+            locations=site_cfg.get("location_labels"),
+            sites=[site],
+            results_per_site=site_defaults.get("results_per_site", 100),
+            hours_old=site_defaults.get("hours_old", 72),
+            proxy=proxy,
+            salary_pref=salary_pref,
+        )
+        combined["new"] += result.get("new", 0)
+        combined["existing"] += result.get("existing", 0)
+        combined["errors"] += result.get("errors", 0)
+        combined["queries"] += result.get("queries", 0)
+        combined["db_total"] = result.get("db_total", combined["db_total"])
+
+    return combined

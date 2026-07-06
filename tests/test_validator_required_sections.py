@@ -1,4 +1,4 @@
-from applypilot.scoring.validator import validate_json_fields, validate_tailored_resume
+from applypilot.scoring.validator import _lint_bullet, validate_json_fields, validate_tailored_resume
 
 
 def _sample_resume_without_projects() -> str:
@@ -80,3 +80,17 @@ def test_validate_json_fields_allows_two_experience_entries_by_default() -> None
 
     result = validate_json_fields(data, profile)
     assert result["passed"] is True
+
+
+def test_lint_bullet_treats_assisted_as_warning_not_error() -> None:
+    errors, warnings = _lint_bullet(
+        "Assisted with OS installation, device deployment, and configuration changes.",
+        {"device deployment", "configuration changes"},
+        {
+            "min_words": 8,
+            "error_phrases": ["responsible for", "worked on", "helped"],
+            "warning_phrases": ["assisted"],
+        },
+    )
+    assert errors == []
+    assert any("assisted" in w for w in warnings)

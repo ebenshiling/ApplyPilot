@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -985,6 +986,32 @@ def uk_sponsors_update(
         console.print(f"[green]OK[/green] Cached sponsor register: {path}")
     else:
         console.print("[red]Failed[/red] Could not download sponsor register (no cache present).")
+
+
+@app.command("pdf-info")
+def pdf_info_cmd(
+    pdf_path: str = typer.Argument(..., help="Path to a generated PDF file."),
+) -> None:
+    """Print PDF metadata including the stored ApplyPilot job ID."""
+    from applypilot.scoring.pdf import pdf_job_id, read_pdf_metadata
+
+    path = Path(pdf_path)
+    if not path.exists() or not path.is_file():
+        console.print(f"[red]PDF not found:[/red] {path}")
+        raise typer.Exit(code=2)
+
+    try:
+        meta = read_pdf_metadata(path)
+    except Exception as e:
+        console.print(f"[red]Failed to read PDF metadata:[/red] {e}")
+        raise typer.Exit(code=1)
+
+    payload = {
+        "path": str(path),
+        "job_id": pdf_job_id(path),
+        "metadata": meta,
+    }
+    console.print(json.dumps(payload, indent=2, ensure_ascii=True))
 
 
 if __name__ == "__main__":

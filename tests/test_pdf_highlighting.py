@@ -48,3 +48,34 @@ University Example
     assert '<strong class="kw">Microsoft 365</strong>' in html
     assert '<strong class="kw">resolve access issues</strong>' in html
     assert '<strong class="kw"><strong' not in html
+
+
+def test_pdf_build_html_renders_technical_projects_section() -> None:
+    text = """Ebenezer Otchere Brefo
+APPLICATION SUPPORT ENGINEER
+ebenezer@example.com | 0700000000
+
+SUMMARY
+Support engineer focused on production incidents and business application stability.
+
+CORE TECHNICAL SKILLS
+- SQL
+- REST APIs
+
+PROFESSIONAL EXPERIENCE
+Application Support Engineer at Example Org
+2025-Present
+- Investigated production incidents and restored service quickly.
+
+TECHNICAL PROJECTS
+Poultry ERP Management System
+Technologies: Django REST Framework, React, SQL, REST APIs
+- Developed and supported an integrated ERP platform for poultry farm operations.
+
+EDUCATION
+University Example
+"""
+    resume = parse_resume(text)
+    html = build_html(resume)
+    assert '<div class="section-title">Technical Projects</div>' in html
+    assert 'Poultry ERP Management System' in html

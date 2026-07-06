@@ -5,11 +5,11 @@ and exports to PDF using headless Chromium via Playwright.
 """
 
 import logging
-import json
 import re
 from pathlib import Path
 
 from applypilot.config import TAILORED_DIR
+from applypilot.naming import display_name, job_number_token
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +71,7 @@ def parse_resume(text: str) -> dict:
         "PROFESSIONAL EXPERIENCE",
         "EXPERIENCE",
         "WORK EXPERIENCE",
+        "TECHNICAL PROJECTS",
         "PROJECTS",
         "EDUCATION",
         "CERTIFICATIONS",
@@ -182,31 +183,8 @@ def build_html(resume: dict) -> str:
     """
     sections = resume["sections"]
 
-    keywords: list[str] = resume.get("keywords") or []
-
-    def _highlight_keywords(s: str, kws: list[str]) -> str:
-        out = _escape_html(s)
-        if not kws:
-            return out
-        # Longer first to reduce partial overlaps
-        uniq = [k.strip() for k in kws if str(k).strip()]
-        uniq = sorted(set(uniq), key=len, reverse=True)[:24]
-        replaced: list[tuple[str, str]] = []
-        for kw in uniq:
-            if len(kw) < 3:
-                continue
-            kw_e = _escape_html(kw)
-            token = f"__APPLYPILOT_HL_{len(replaced)}__"
-            pat = re.compile(r"(?i)(?<![A-Za-z0-9])(" + re.escape(kw_e) + r")(?![A-Za-z0-9])")
-            m = pat.search(out)
-            if m:
-                # Preserve the exact casing from the rendered resume text.
-                matched = m.group(1)
-                out = pat.sub(token, out, count=1)
-                replaced.append((token, matched))
-        for token, matched in replaced:
-            out = out.replace(token, f'<strong class="kw">{matched}</strong>')
-        return out
+    def _highlight_keywords(s: str, kws: list[str] | None = None) -> str:
+        return _escape_html(s)
 
     def _render_simple_bullets(section_key: str, title: str, bold_label: bool = False) -> str:
         if section_key not in sections:
@@ -226,7 +204,7 @@ def build_html(resume: dict) -> str:
                 right_h = _escape_html(right.strip())
                 items.append(f"<strong>{left_h}:</strong> {right_h}" if right_h else f"<strong>{left_h}</strong>")
             else:
-                items.append(_highlight_keywords(s, keywords))
+                items.append(_escape_html(s))
         if not items:
             return ""
         li = "".join(f"<li>{x}</li>" for x in items)
@@ -253,23 +231,29 @@ def build_html(resume: dict) -> str:
         entries = parse_entries(sections[exp_key])
         items = ""
         for e in entries:
-            bullets = "".join(f"<li>{_highlight_keywords(b, keywords)}</li>" for b in e["bullets"])
+            bullets = "".join(f"<li>{_escape_html(b)}</li>" for b in e["bullets"])
             subtitle = f'<div class="entry-subtitle">{_escape_html(e["subtitle"])}</div>' if e["subtitle"] else ""
-            title = _highlight_keywords(e["title"], keywords)
+            title = _escape_html(e["title"])
             items += f'<div class="entry"><div class="entry-title">{title}</div>{subtitle}<ul>{bullets}</ul></div>'
         exp_html = f'<div class="section"><div class="section-title">Professional Experience</div>{items}</div>'
 
     # Projects
     proj_html = ""
-    if "PROJECTS" in sections:
-        entries = parse_entries(sections["PROJECTS"])
+    proj_key = ""
+    if "TECHNICAL PROJECTS" in sections:
+        proj_key = "TECHNICAL PROJECTS"
+    elif "PROJECTS" in sections:
+        proj_key = "PROJECTS"
+    if proj_key:
+        entries = parse_entries(sections[proj_key])
         items = ""
         for e in entries:
-            bullets = "".join(f"<li>{_highlight_keywords(b, keywords)}</li>" for b in e["bullets"])
+            bullets = "".join(f"<li>{_escape_html(b)}</li>" for b in e["bullets"])
             subtitle = f'<div class="entry-subtitle">{_escape_html(e["subtitle"])}</div>' if e["subtitle"] else ""
-            title = _highlight_keywords(e["title"], keywords)
+            title = _escape_html(e["title"])
             items += f'<div class="entry"><div class="entry-title">{title}</div>{subtitle}<ul>{bullets}</ul></div>'
-        proj_html = f'<div class="section"><div class="section-title">Projects</div>{items}</div>'
+        proj_title = "Technical Projects" if proj_key == "TECHNICAL PROJECTS" else "Projects"
+        proj_html = f'<div class="section"><div class="section-title">{proj_title}</div>{items}</div>'
 
     # Education
     edu_html = ""
@@ -282,7 +266,7 @@ def build_html(resume: dict) -> str:
     # Summary
     summary_html = ""
     if "SUMMARY" in sections:
-        summary_html = f'<div class="section"><div class="section-title">Professional Summary</div><div class="summary">{_highlight_keywords(sections["SUMMARY"].strip(), keywords)}</div></div>'
+        summary_html = f'<div class="section"><div class="section-title">Professional Summary</div><div class="summary">{_escape_html(sections["SUMMARY"].strip())}</div></div>'
 
     # Contact line parsing
     contact = resume["contact"]
@@ -445,10 +429,112 @@ def render_pdf(html: str, output_path: str) -> None:
         browser.close()
 
 
+def build_pdf_metadata(document_kind: str, *, personal: dict | None = None, job: dict | None = None) -> dict[str, str]:
+    """Build visible PDF document properties for generated files."""
+    personal = personal or {}
+    job = job or {}
+    doc_label = "CV" if document_kind == "resume" else "Cover Letter"
+    candidate = display_name(personal)
+    title = f"{candidate} {doc_label}".strip() or doc_label
+    job_num = job_number_token(job)
+    subject_parts = [f"ApplyPilot tailored {doc_label}"]
+    if job_num:
+        subject_parts.append(job_num)
+    if job.get("title"):
+        subject_parts.append(str(job.get("title")))
+    if job.get("site"):
+        subject_parts.append(str(job.get("site")))
+    keywords = ["ApplyPilot", doc_label]
+    if job_num:
+        keywords.append(job_num)
+        keywords.append(f"job-id:{job_num}")
+    if job.get("site"):
+        keywords.append(str(job.get("site")))
+
+    meta = {
+        "/Title": title,
+        "/Creator": "ApplyPilot",
+        "/Producer": "ApplyPilot",
+        "/Subject": " | ".join(p for p in subject_parts if p),
+        "/Keywords": ", ".join(p for p in keywords if p),
+    }
+    if candidate:
+        meta["/Author"] = candidate
+    if job_num:
+        meta["/ApplyPilotJobId"] = job_num
+    return meta
+
+
+def _write_pdf_metadata(pdf_path: Path, metadata: dict[str, str] | None) -> None:
+    if not metadata:
+        return
+    try:
+        from pypdf import PdfReader, PdfWriter
+    except Exception:
+        log.debug("pypdf not available; skipping PDF metadata for %s", pdf_path)
+        return
+
+    try:
+        reader = PdfReader(str(pdf_path))
+        writer = PdfWriter()
+        for page in reader.pages:
+            writer.add_page(page)
+        merged: dict[str, str] = {}
+        if reader.metadata:
+            for key, value in reader.metadata.items():
+                if isinstance(key, str) and value is not None:
+                    merged[key] = str(value)
+        for key, value in metadata.items():
+            if not value:
+                continue
+            merged[key if str(key).startswith("/") else f"/{key}"] = str(value)
+        writer.add_metadata(merged)
+        tmp = pdf_path.with_name(pdf_path.stem + "_meta" + pdf_path.suffix)
+        with tmp.open("wb") as fh:
+            writer.write(fh)
+        tmp.replace(pdf_path)
+    except Exception:
+        log.debug("Failed to write PDF metadata for %s", pdf_path, exc_info=True)
+
+
+def read_pdf_metadata(pdf_path: Path | str) -> dict[str, str]:
+    """Read PDF document properties as plain strings."""
+    from pypdf import PdfReader
+
+    reader = PdfReader(str(pdf_path))
+    meta = reader.metadata or {}
+    out: dict[str, str] = {}
+    for key, value in meta.items():
+        if not isinstance(key, str) or value is None:
+            continue
+        out[key] = str(value)
+    return out
+
+
+def pdf_job_id(pdf_path: Path | str) -> str:
+    """Return the stored ApplyPilot job ID from a generated PDF, if present."""
+    meta = read_pdf_metadata(pdf_path)
+    direct = str(meta.get("/ApplyPilotJobId") or "").strip()
+    if direct:
+        return direct
+
+    for key in ("/Keywords", "/Subject"):
+        value = str(meta.get(key) or "")
+        match = re.search(r"\bJ\d+\b", value)
+        if match:
+            return match.group(0)
+    return ""
+
+
 # ── Public API ───────────────────────────────────────────────────────────
 
 
-def convert_to_pdf(text_path: Path, output_path: Path | None = None, html_only: bool = False) -> Path:
+def convert_to_pdf(
+    text_path: Path,
+    output_path: Path | None = None,
+    html_only: bool = False,
+    pdf_metadata: dict[str, str] | None = None,
+) -> Path:
     """Convert a text resume/cover letter to PDF.
 
     Args:
@@ -477,6 +563,7 @@ def convert_to_pdf(text_path: Path, output_path: Path | None = None, html_only: 
         out = output_path or text_path.with_suffix(".pdf")
         out = Path(out)
         render_pdf(html, str(out))
+        _write_pdf_metadata(out, pdf_metadata)
         log.info("PDF generated: %s", out)
         return out
 
@@ -486,16 +573,6 @@ def convert_to_pdf(text_path: Path, output_path: Path | None = None, html_only: 
 
     resume = parse_resume(text)
 
-    # Load highlight keywords from the tailoring report, if present.
-    try:
-        report_path = text_path.with_name(text_path.stem + "_REPORT.json")
-        if report_path.exists():
-            report = json.loads(report_path.read_text(encoding="utf-8"))
-            kws = report.get("keywords")
-            if isinstance(kws, list):
-                resume["keywords"] = [str(k).strip() for k in kws if str(k).strip()]
-    except Exception:
-        pass
     if not resume.get("sections"):
         raise ValueError(f"No resume sections parsed from: {text_path}")
     html = build_html(resume)
@@ -511,12 +588,14 @@ def convert_to_pdf(text_path: Path, output_path: Path | None = None, html_only: 
     out = Path(out)
     try:
         render_pdf(html, str(out))
+        _write_pdf_metadata(out, pdf_metadata)
         log.info("PDF generated: %s", out)
         return out
     except PermissionError:
         # Common on Windows when the PDF is open in a viewer.
         fresh = out.with_name(out.stem + "_fresh" + out.suffix)
         render_pdf(html, str(fresh))
+        _write_pdf_metadata(fresh, pdf_metadata)
         log.info("PDF generated (fresh): %s", fresh)
         return fresh
 
@@ -565,7 +644,7 @@ def _escape_html(s: str) -> str:
 def batch_convert(limit: int = 50) -> int:
     """Convert .txt files in TAILORED_DIR that don't have corresponding PDFs.
 
-    Scans for .txt files (excluding _JOB.txt and _REPORT.json), checks if a
+    Scans for .txt files (excluding legacy _JOB.txt helper files), checks if a
     .pdf with the same stem already exists, and converts any that are missing.
 
     Args:
@@ -603,7 +682,7 @@ def batch_convert(limit: int = 50) -> int:
                 return True
 
     txt_files = sorted(TAILORED_DIR.glob("*.txt"))
-    # Exclude _JOB.txt files from resume conversion.
+    # Exclude legacy _JOB.txt helper files from resume conversion.
     candidates = [f for f in txt_files if not f.name.endswith("_JOB.txt")]
     candidates = [f for f in candidates if _is_approved_tailored_resume(f)]
 

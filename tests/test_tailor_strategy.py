@@ -157,6 +157,31 @@ def test_extract_jd_requirements_and_gap_evaluation() -> None:
     assert "healthcare" in gaps["missing_domains"]
 
 
+def test_private_healthcare_benefit_does_not_trigger_healthcare_domain() -> None:
+    profile = _profile()
+    req = extract_jd_requirements(
+        job_title="Application Support Engineer",
+        job_description=(
+            "Growing SaaS company offering flexible working, private healthcare, recognition rewards, healthcare, progression and bonus scheme. "
+            "Required: SQL and application support."
+        ),
+        profile=profile,
+        keyword_bank={"prompt_keywords": ["SQL", "application support"]},
+    )
+    assert "healthcare" not in req["domains"]
+
+
+def test_nhs_signal_still_triggers_healthcare_domain() -> None:
+    profile = _profile()
+    req = extract_jd_requirements(
+        job_title="Application Support Engineer",
+        job_description="NHS trust experience is desirable. Support clinical systems and hospital users.",
+        profile=profile,
+        keyword_bank={"prompt_keywords": ["clinical systems"]},
+    )
+    assert "healthcare" in req["domains"]
+
+
 def test_extract_responsibilities_and_map_to_evidence() -> None:
     responsibilities = extract_job_responsibilities(
         "Support users across Microsoft 365 and Entra ID.\n"

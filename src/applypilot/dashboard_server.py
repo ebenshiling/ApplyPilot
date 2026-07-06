@@ -16,7 +16,8 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+import hashlib
+from datetime import datetime, timedelta, timezone
 from collections import deque
 import base64
 import re
@@ -56,6 +57,221 @@ _LOGIN_MAX_FAILURES_PER_WINDOW = 8
 _LOGIN_LOCKOUT_SECONDS = 5 * 60
 _LOGIN_FAILURES: dict[str, deque[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
+
+
+def _job_status_label(status_raw: str, applied_at: str | None) -> tuple[str, str]:
+    status = str(status_raw or "").strip().lower()
+    if not status and applied_at:
+        status = "applied"
+    if not status:
+        status = "ready"
+    if status == "skipped":
+        status = "skipped"
+    label = {
+        "ready": "Ready",
+        "selected": "Selected",
+        "prepared": "Prepared",
+        "in_progress": "In progress",
+        "applied": "Applied",
+        "failed": "Failed",
+        "skipped": "Skipped",
+        "blocked": "Blocked",
+        "manual": "Manual",
+    }.get(status, status[:20] if status else "Ready")
+    return status, label
+
+
+def _qs_first(query: dict[str, Any], key: str, default: Any = "") -> Any:
+    value = query.get(key, default)
+    if isinstance(value, list):
+        return value[0] if value else default
+    return value
+
+
+def _job_summaries(db_path: Path, *, query: dict[str, Any]) -> dict[str, Any]:
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        """
+        SELECT rowid AS id,
+               url, title, company, search_query, salary, description, location, site,
+               discovered_at,
+               full_description, application_url,
+               sponsorship_explicit, sponsor_licensed, sponsor_match_name,
+               fit_score, score_reasoning,
+               tailored_resume_path, supporting_statement_path, cover_letter_path,
+               tailor_status, cover_letter_status,
+               applied_at, apply_status, apply_error
+          FROM jobs
+         WHERE fit_score >= 5
+         ORDER BY fit_score DESC, site, title
+        """
+    ).fetchall()
+
+    min_score = max(5, min(10, int(_qs_first(query, "min_score", 7) or 7)))
+    hide_moderate = str(_qs_first(query, "hide_moderate", "1") or "1").strip().lower() in {"1", "true", "yes", "on"}
+    status_text = str(_qs_first(query, "status", "active") or "active").strip().lower()
+    role_text = str(_qs_first(query, "role", "") or "").strip().lower()
+    site_text = str(_qs_first(query, "site", "") or "").strip().lower()
+    search_text = str(_qs_first(query, "search", "") or "").strip().lower()
+    sponsor_filter = str(_qs_first(query, "sponsorship", "") or "").strip().lower()
+    age_days = max(0, int(str(_qs_first(query, "age_days", "0") or "0").strip() or 0))
+    score_limits_raw = query.get("score_limit") or []
+    if not isinstance(score_limits_raw, list):
+        score_limits_raw = [score_limits_raw]
+    score_limits: dict[str, int] = {}
+    for raw in score_limits_raw:
+        txt = str(raw or "").strip()
+        if ":" not in txt:
+            continue
+        k, v = txt.split(":", 1)
+        try:
+            score_limits[str(int(k))] = max(1, int(v))
+        except Exception:
+            continue
+
+    colors = {
+        "RemoteOK": "#10b981",
+        "WelcomeToTheJungle": "#f59e0b",
+        "Job Bank Canada": "#3b82f6",
+        "CareerJet Canada": "#8b5cf6",
+        "Hacker News Jobs": "#ff6600",
+        "BuiltIn Remote": "#ec4899",
+        "TD Bank": "#00a651",
+        "CIBC": "#c41f3e",
+        "RBC": "#003168",
+        "indeed": "#2164f3",
+        "linkedin": "#0a66c2",
+        "Dice": "#eb1c26",
+        "Glassdoor": "#0caa41",
+        "GOV.UK Find a job": "#1d70b8",
+        "NHS Jobs": "#005eb8",
+        "Reed": "#d1001c",
+        "Adzuna UK": "#111827",
+        "Guardian Jobs": "#052962",
+        "jobs.ac.uk": "#0f766e",
+        "Jobs Go Public": "#6d28d9",
+        "LG Jobs": "#7c3aed",
+    }
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    totals: dict[str, int] = {}
+    shown = 0
+    total = 0
+    for r in rows:
+        score = int(r["fit_score"] or 0)
+        if score < min_score:
+            continue
+        if hide_moderate and score < 7:
+            continue
+
+        role_raw = str(r["search_query"] or "").strip()
+        role_label = role_raw or "Unassigned"
+        status, status_label = _job_status_label(str(r["apply_status"] or ""), str(r["applied_at"] or ""))
+        if status == "skipped" and str(r["apply_error"] or "").strip().lower() == "user_deleted":
+            status = "blocked"
+            status_label = "Blocked"
+
+        site = str(r["site"] or "")
+        company = str(r["company"] or "")
+        salary = str(r["salary"] or "")
+        location = str(r["location"] or "")
+        discovered_at = str(r["discovered_at"] or "").strip()
+        sponsor_policy = (str(r["sponsorship_explicit"] or "Unknown").strip() or "Unknown").lower()
+        sponsor_licensed = (str(r["sponsor_licensed"] or "Unknown").strip() or "Unknown").lower()
+
+        age_days_value: int | None = None
+        if discovered_at:
+            try:
+                parsed = datetime.fromisoformat(discovered_at.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                age_days_value = max(0, int((datetime.now(timezone.utc) - parsed).total_seconds() // 86400))
+            except Exception:
+                age_days_value = None
+
+        hay = re.sub(
+            r"\s+",
+            " ",
+            " ".join([str(r["title"] or ""), company, site, status_label, salary, location, role_label]),
+        ).strip().lower()[:420]
+
+        if search_text and search_text not in hay:
+            continue
+        if site_text and site.lower() != site_text:
+            continue
+        if role_text and role_label.lower() != role_text:
+            continue
+        if status_text:
+            if status_text == "active":
+                if status in {"applied", "failed", "skipped", "blocked", "manual"}:
+                    continue
+            elif status != status_text:
+                continue
+        if sponsor_filter == "licensed_yes" and sponsor_licensed != "yes":
+            continue
+        if sponsor_filter == "policy_yes" and sponsor_policy != "yes":
+            continue
+        if sponsor_filter == "policy_conditional" and sponsor_policy != "conditional":
+            continue
+        if sponsor_filter == "policy_no" and sponsor_policy != "no":
+            continue
+        if sponsor_filter == "not_no" and sponsor_policy == "no":
+            continue
+        if sponsor_filter == "unknown" and not ((not sponsor_policy or sponsor_policy == "unknown") and (not sponsor_licensed or sponsor_licensed == "unknown")):
+            continue
+        if age_days > 0 and (age_days_value is None or age_days_value < age_days):
+            continue
+
+        total += 1
+        key = str(score)
+        totals[key] = totals.get(key, 0) + 1
+        limit = score_limits.get(key, 50)
+        arr = grouped.setdefault(key, [])
+        if len(arr) >= limit:
+            continue
+
+        reasoning_raw = str(r["score_reasoning"] or "")
+        reasoning_lines = reasoning_raw.split("\n")
+        preview_source = str(r["description"] or "") or str(r["full_description"] or "")
+        arr.append(
+            {
+                "id": int(r["id"] or 0),
+                "score": score,
+                "title": str(r["title"] or "Untitled"),
+                "company": company,
+                "role": role_label.lower(),
+                "role_label": role_label,
+                "url": str(r["url"] or ""),
+                "apply_url": str(r["application_url"] or r["url"] or ""),
+                "salary": salary,
+                "location": location,
+                "discovered_at": discovered_at,
+                "age_days": age_days_value,
+                "site": site,
+                "site_color": colors.get(site or "", "#6b7280"),
+                "status": status,
+                "status_label": status_label,
+                "search_text": hay,
+                "sponsor_policy": sponsor_policy,
+                "sponsor_licensed": sponsor_licensed,
+                "sponsor_match_name": str(r["sponsor_match_name"] or ""),
+                "keywords": reasoning_lines[0][:120] if reasoning_lines else "",
+                "reasoning": reasoning_lines[1][:200] if len(reasoning_lines) > 1 else "",
+                "desc_preview": re.sub(r"\s+", " ", preview_source).strip()[:300],
+                "has_full_desc": bool(str(r["full_description"] or "")),
+                "full_desc_len": len(str(r["full_description"] or "")),
+                "has_tailored": bool(r["tailored_resume_path"]),
+                "tailor_failed": bool(str(r["tailor_status"] or "").strip().lower().startswith("failed")),
+                "has_statement": bool(r["supporting_statement_path"]),
+                "has_cover": bool(r["cover_letter_path"]),
+                "cover_failed": bool(str(r["cover_letter_status"] or "").strip().lower() == "failed"),
+            }
+        )
+        shown += 1
+
+    order = sorted((int(k) for k in totals.keys()), reverse=True)
+    groups = [{"score": s, "total": totals.get(str(s), 0), "jobs": grouped.get(str(s), [])} for s in order]
+    return {"ok": True, "shown": shown, "total": total, "groups": groups}
 
 
 def _run_history_path(app_dir: Path | None = None) -> Path:
@@ -173,6 +389,420 @@ def _get_latest_run_from_history(app_dir: Path | None = None) -> dict[str, Any] 
         if not runs:
             return None
         return dict(runs[0])
+
+
+def _job_match_history_path(app_dir: Path | None = None) -> Path:
+    base = Path(app_dir or APP_DIR)
+    log_dir = base / "logs" / "dashboard_runs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir / "job_match_history.json"
+
+
+def _load_job_match_history(app_dir: Path | None = None) -> list[dict[str, Any]]:
+    path = _job_match_history_path(app_dir)
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        runs = data.get("runs") if isinstance(data, dict) else None
+        if isinstance(runs, list):
+            return [r for r in runs if isinstance(r, dict)]
+    except Exception:
+        return []
+    return []
+
+
+def _save_job_match_history(runs: list[dict[str, Any]], app_dir: Path | None = None) -> None:
+    path = _job_match_history_path(app_dir)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    keep = runs[:_RUN_HISTORY_MAX]
+    tmp.write_text(json.dumps({"runs": keep}, indent=2, sort_keys=False), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _append_job_match_history(record: dict[str, Any], app_dir: Path | None = None) -> None:
+    runs = _load_job_match_history(app_dir)
+    runs.insert(0, dict(record))
+    _save_job_match_history(runs, app_dir)
+
+
+def _sanitize_job_match_record(record: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(record, dict):
+        raise ValueError("record must be an object")
+
+    out = {
+        "run_id": str(record.get("run_id") or "").strip()[:80],
+        "title": str(record.get("title") or "").strip()[:300],
+        "org": str(record.get("org") or "").strip()[:300],
+        "location": str(record.get("location") or "").strip()[:300],
+        "score": int(record.get("score") or 0),
+        "min_score": int(record.get("min_score") or 7),
+        "tailored": bool(record.get("tailored")),
+        "tailor_status": str(record.get("tailor_status") or "").strip()[:80] or None,
+        "started_at": float(record.get("started_at") or 0.0),
+        "ended_at": float(record.get("ended_at") or 0.0),
+        "tailored_path": str(record.get("tailored_path") or "").strip()[:1200] or None,
+        "pdf_path": str(record.get("pdf_path") or "").strip()[:1200] or None,
+        "report_path": str(record.get("report_path") or "").strip()[:1200] or None,
+        "keywords": str(record.get("keywords") or "").strip()[:1200],
+        "reasoning": str(record.get("reasoning") or "").strip()[:4000],
+        "resume_text": str(record.get("resume_text") or "")[:20000],
+        "job_text": str(record.get("job_text") or "")[:20000],
+        "tailored_text": str(record.get("tailored_text") or "")[:30000],
+        "notes": str(record.get("notes") or "")[:4000],
+        "favorite": bool(record.get("favorite")),
+    }
+    if not out["run_id"]:
+        raise ValueError("missing run_id")
+    out["score"] = max(0, min(10, out["score"]))
+    out["min_score"] = max(1, min(10, out["min_score"]))
+    return out
+
+
+def _import_job_match_history_records(app_dir: Path, records: list[dict[str, Any]]) -> int:
+    existing = _load_job_match_history(app_dir)
+    seen = {str(r.get("run_id") or "").strip() for r in existing}
+    added = 0
+    merged: list[dict[str, Any]] = list(existing)
+    for rec in records:
+        try:
+            clean = _sanitize_job_match_record(rec)
+        except Exception:
+            continue
+        rid = str(clean.get("run_id") or "")
+        if not rid or rid in seen:
+            continue
+        seen.add(rid)
+        merged.insert(0, clean)
+        added += 1
+    _save_job_match_history(merged, app_dir)
+    return added
+
+
+def _update_job_match_history_entry(app_dir: Path, run_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    rid = str(run_id or "").strip()
+    if not rid:
+        raise ValueError("missing_run_id")
+    runs = _load_job_match_history(app_dir)
+    for idx, rec in enumerate(runs):
+        if str(rec.get("run_id") or "") != rid:
+            continue
+        nxt = dict(rec)
+        if "notes" in patch:
+            nxt["notes"] = str(patch.get("notes") or "")[:4000]
+        if "favorite" in patch:
+            nxt["favorite"] = bool(patch.get("favorite"))
+        runs[idx] = _sanitize_job_match_record(nxt)
+        _save_job_match_history(runs, app_dir)
+        return runs[idx]
+    raise ValueError("not_found")
+
+
+def _job_match_artifact_paths(record: dict[str, Any]) -> list[Path]:
+    out: list[Path] = []
+    for key in ("tailored_path", "pdf_path", "report_path"):
+        raw = str(record.get(key) or "").strip()
+        if not raw:
+            continue
+        try:
+            out.append(Path(raw))
+        except Exception:
+            continue
+    return out
+
+
+def _delete_job_match_history_entry(app_dir: Path, run_id: str, *, delete_files: bool = True) -> int:
+    rid = str(run_id or "").strip()
+    if not rid:
+        return 0
+    runs = _load_job_match_history(app_dir)
+    keep: list[dict[str, Any]] = []
+    removed: list[dict[str, Any]] = []
+    for r in runs:
+        if str(r.get("run_id") or "") == rid:
+            removed.append(r)
+        else:
+            keep.append(r)
+    if not removed:
+        return 0
+    _save_job_match_history(keep, app_dir)
+
+    if delete_files:
+        base = Path(app_dir).resolve()
+        for rec in removed:
+            for p in _job_match_artifact_paths(rec):
+                try:
+                    rp = p.resolve()
+                except Exception:
+                    continue
+                try:
+                    rp.relative_to(base)
+                except Exception:
+                    continue
+                try:
+                    if rp.exists() and rp.is_file():
+                        rp.unlink()
+                except Exception:
+                    continue
+    return len(removed)
+
+
+def _clear_job_match_history(app_dir: Path, *, delete_files: bool = True) -> int:
+    runs = _load_job_match_history(app_dir)
+    count = len(runs)
+    if not runs:
+        return 0
+    if delete_files:
+        for r in list(runs):
+            _delete_job_match_history_entry(app_dir, str(r.get("run_id") or ""), delete_files=True)
+        return count
+    _save_job_match_history([], app_dir)
+    return count
+
+
+def _promote_job_match_to_resume(app_dir: Path, run_id: str) -> dict[str, Any]:
+    from applypilot.setup_workspace import write_resume_text
+
+    rid = str(run_id or "").strip()
+    if not rid:
+        raise ValueError("missing_run_id")
+
+    rec = None
+    for r in _load_job_match_history(app_dir):
+        if str(r.get("run_id") or "") == rid:
+            rec = r
+            break
+    if not isinstance(rec, dict):
+        raise ValueError("not_found")
+
+    raw_path = str(rec.get("tailored_path") or "").strip()
+    if not raw_path:
+        raise ValueError("no_tailored_cv")
+
+    p = Path(raw_path).resolve()
+    try:
+        p.relative_to(Path(app_dir).resolve())
+    except Exception as e:
+        raise ValueError("forbidden") from e
+    if not p.exists() or not p.is_file():
+        raise ValueError("not_found")
+
+    text = p.read_text(encoding="utf-8", errors="replace")
+    write_resume_text(app_dir, text)
+    return {"path": str(Path(app_dir) / "resume.txt"), "bytes": len(text.encode("utf-8"))}
+
+
+def _manual_tailor_failure_detail(report: dict[str, Any] | None) -> str:
+    if not isinstance(report, dict):
+        return ""
+
+    full_v = report.get("full_validator")
+    base_v = report.get("validator")
+    errors: list[str] = []
+
+    if isinstance(full_v, dict) and isinstance(full_v.get("errors"), list):
+        errors = [str(e).strip() for e in full_v.get("errors", []) if str(e).strip()]
+    if not errors and isinstance(base_v, dict) and isinstance(base_v.get("errors"), list):
+        errors = [str(e).strip() for e in base_v.get("errors", []) if str(e).strip()]
+    if errors:
+        return "; ".join(errors[:3])
+
+    judge = report.get("judge")
+    if isinstance(judge, dict):
+        issues = str(judge.get("issues") or "").strip()
+        if issues:
+            return issues
+
+    return str(report.get("status") or "").strip()
+
+
+def _run_manual_job_match(app_dir: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    from applypilot import naming
+    from applypilot.config import check_tier
+    from applypilot.scoring.pdf import build_pdf_metadata, convert_to_pdf
+    from applypilot.scoring.scorer import score_job
+    from applypilot.scoring.tailor import tailor_resume
+    from applypilot.setup_workspace import read_profile
+
+    check_tier(2, "manual job scoring/tailoring")
+
+    resume_text = payload.get("resume_text") if isinstance(payload, dict) else None
+    job_text = payload.get("job_text") if isinstance(payload, dict) else None
+    title = str(payload.get("title") or "").strip() if isinstance(payload, dict) else ""
+    org = str(payload.get("org") or "").strip() if isinstance(payload, dict) else ""
+    location = str(payload.get("location") or "").strip() if isinstance(payload, dict) else ""
+
+    min_score_raw = payload.get("min_score") if isinstance(payload, dict) else None
+    try:
+        min_score = int(str(min_score_raw).strip()) if min_score_raw is not None else 7
+    except Exception:
+        min_score = 7
+    min_score = max(1, min(10, min_score))
+
+    if not isinstance(resume_text, str) or not resume_text.strip():
+        raise ValueError("missing_resume")
+    if not isinstance(job_text, str) or not job_text.strip():
+        raise ValueError("missing_job_text")
+    if len(resume_text) > 600_000:
+        raise ValueError("resume_too_large")
+    if len(job_text) > 120_000:
+        raise ValueError("job_text_too_large")
+
+    profile = read_profile(app_dir)
+    if not isinstance(profile, dict) or not profile:
+        profile = {}
+
+    title = title or "Manual Job Match"
+    org = org or "Manual"
+    manual_basis = f"{title}\n{org}\n{location}\n{job_text[:8000]}"
+    manual_id = hashlib.sha1(manual_basis.encode("utf-8")).hexdigest()[:12]
+    started_at = time.time()
+    job = {
+        "title": title,
+        "company": org,
+        "site": org,
+        "location": location or "N/A",
+        "full_description": job_text,
+        "url": f"manual://{manual_id}",
+    }
+
+    score = score_job(resume_text, job)
+    score_value = int(score.get("score") or 0)
+    result: dict[str, Any] = {
+        "run_id": manual_id,
+        "score": score_value,
+        "confidence": float(score.get("confidence") or 0.0),
+        "keywords": str(score.get("keywords") or "").strip(),
+        "reasoning": str(score.get("reasoning") or "").strip(),
+        "min_score": min_score,
+        "score_below_threshold": bool(score_value < min_score),
+        "tailored": False,
+        "tailor_status": None,
+        "tailor_failure_detail": "",
+        "tailored_text": "",
+        "tailored_path": None,
+        "pdf_path": None,
+        "report_path": None,
+    }
+    if score_value < min_score:
+        result["message"] = f"Fit score {score_value} is below the tailoring threshold ({min_score})."
+        _append_job_match_history(
+            {
+                "run_id": manual_id,
+                "title": title,
+                "org": org,
+                "location": location,
+                "score": score_value,
+                "min_score": min_score,
+                "tailored": False,
+                "tailor_status": None,
+                "started_at": started_at,
+                "ended_at": time.time(),
+                "keywords": result.get("keywords") or "",
+                "reasoning": result.get("reasoning") or "",
+                "resume_text": resume_text,
+                "job_text": job_text,
+                "tailored_text": "",
+                "tailored_path": None,
+                "pdf_path": None,
+                "report_path": None,
+            },
+            app_dir,
+        )
+        return result
+
+    tailored_text, report = tailor_resume(resume_text, job, profile)
+    report = report if isinstance(report, dict) else {}
+    tailor_status = str(report.get("status") or "").strip() or "error"
+    result["tailor_status"] = tailor_status
+    result["tailor_failure_detail"] = _manual_tailor_failure_detail(report)
+
+    if tailor_status != "approved":
+        result["message"] = f"Tailoring finished with status: {tailor_status}."
+        _append_job_match_history(
+            {
+                "run_id": manual_id,
+                "title": title,
+                "org": org,
+                "location": location,
+                "score": score_value,
+                "min_score": min_score,
+                "tailored": False,
+                "tailor_status": tailor_status,
+                "started_at": started_at,
+                "ended_at": time.time(),
+                "keywords": result.get("keywords") or "",
+                "reasoning": result.get("reasoning") or "",
+                "resume_text": resume_text,
+                "job_text": job_text,
+                "tailored_text": tailored_text,
+                "tailored_path": None,
+                "pdf_path": None,
+                "report_path": None,
+            },
+            app_dir,
+        )
+        return result
+
+    personal = profile.get("personal") if isinstance(profile.get("personal"), dict) else {}
+    username = str(((profile.get("account") or {}).get("username") or os.environ.get("APPLYPILOT_USER") or "")).strip()
+
+    tailored_dir = Path(app_dir) / "tailored_resumes"
+    tailored_dir.mkdir(parents=True, exist_ok=True)
+
+    stem = naming.cv_filename(personal, ext="txt", username=username, job=job)
+    txt_path = tailored_dir / Path(stem).name
+    txt_path.write_text(tailored_text, encoding="utf-8")
+
+    report_path = tailored_dir / f"{txt_path.stem}_REPORT.json"
+    report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+    pdf_path: str | None = None
+    try:
+        pdf_path = str(
+            convert_to_pdf(
+                txt_path,
+                output_path=txt_path.with_suffix(".pdf"),
+                pdf_metadata=build_pdf_metadata("resume", personal=personal, job=job),
+            )
+        )
+    except Exception as e:
+        result["pdf_error"] = str(e)
+
+    result.update(
+        {
+            "tailored": True,
+            "tailored_text": tailored_text,
+            "tailored_path": str(txt_path),
+            "pdf_path": pdf_path,
+            "report_path": str(report_path),
+            "message": "Tailored CV generated.",
+        }
+    )
+    _append_job_match_history(
+        {
+            "run_id": manual_id,
+            "title": title,
+            "org": org,
+            "location": location,
+            "score": score_value,
+            "min_score": min_score,
+            "tailored": True,
+            "tailor_status": tailor_status,
+            "started_at": started_at,
+            "ended_at": time.time(),
+            "keywords": result.get("keywords") or "",
+            "reasoning": result.get("reasoning") or "",
+            "resume_text": resume_text,
+            "job_text": job_text,
+            "tailored_text": tailored_text,
+            "tailored_path": str(txt_path),
+            "pdf_path": pdf_path,
+            "report_path": str(report_path),
+        },
+        app_dir,
+    )
+    return result
 
 
 class _PipelineRunner:
@@ -1157,7 +1787,7 @@ def _cleanup_job_artifacts(rows: list[sqlite3.Row]) -> None:
             _add(str(p))
             _add(str(p.with_suffix(".pdf")))
             _add(str(p.with_suffix(".txt")))
-            # Tailor helper artifacts
+            # Tailor helper artifacts (including legacy _JOB.txt files)
             stem = p.with_suffix("")
             _add(str(stem) + "_JOB.txt")
             _add(str(stem) + "_REPORT.json")
@@ -1203,6 +1833,82 @@ def _delete_jobs_by_ids(db_path: Path, ids: list[int]) -> int:
     conn.execute("BEGIN IMMEDIATE")
     try:
         cur = conn.execute(f"DELETE FROM jobs WHERE rowid IN ({qs})", tuple(uniq))
+        conn.commit()
+        deleted = int(cur.rowcount or 0)
+    except Exception:
+        conn.rollback()
+        raise
+
+    _cleanup_job_artifacts(list(rows))
+    return deleted
+
+
+def _jobs_matching_delete_rule(
+    db_path: Path,
+    *,
+    rule: str,
+    threshold: int = 7,
+    days: int = 30,
+):
+    conn = get_connection(db_path)
+    rule_name = str(rule or "").strip().lower()
+    params: list[Any] = []
+    if rule_name == "low_score":
+        threshold = max(1, min(10, int(threshold or 7)))
+        where = "fit_score IS NOT NULL AND fit_score < ?"
+        params.append(threshold)
+    elif rule_name == "unscored":
+        where = "fit_score IS NULL"
+    elif rule_name == "older_than":
+        days = max(1, int(days or 30))
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        where = "discovered_at IS NOT NULL AND discovered_at < ?"
+        params.append(cutoff)
+    elif rule_name == "older_scored":
+        days = max(1, int(days or 30))
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        where = "fit_score IS NOT NULL AND discovered_at IS NOT NULL AND discovered_at < ?"
+        params.append(cutoff)
+    elif rule_name == "older_unscored":
+        days = max(1, int(days or 30))
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        where = "fit_score IS NULL AND discovered_at IS NOT NULL AND discovered_at < ?"
+        params.append(cutoff)
+    elif rule_name == "older_low_score":
+        days = max(1, int(days or 30))
+        threshold = max(1, min(10, int(threshold or 7)))
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        where = "fit_score IS NOT NULL AND fit_score < ? AND discovered_at IS NOT NULL AND discovered_at < ?"
+        params.extend([threshold, cutoff])
+    else:
+        raise ValueError("bad_rule")
+
+    return conn.execute(
+        f"SELECT rowid, tailored_resume_path, cover_letter_path FROM jobs WHERE {where}",
+        tuple(params),
+    ).fetchall()
+
+
+def _delete_jobs_by_rule(
+    db_path: Path,
+    *,
+    rule: str,
+    threshold: int = 7,
+    days: int = 30,
+) -> int:
+    rows = _jobs_matching_delete_rule(db_path, rule=rule, threshold=threshold, days=days)
+    if not rows:
+        return 0
+
+    conn = get_connection(db_path)
+    ids = [int(r[0]) for r in rows if r and r[0]]
+    if not ids:
+        return 0
+
+    qs = ",".join("?" for _ in ids)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        cur = conn.execute(f"DELETE FROM jobs WHERE rowid IN ({qs})", tuple(ids))
         conn.commit()
         deleted = int(cur.rowcount or 0)
     except Exception:
@@ -1653,6 +2359,15 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(400, {"ok": False, "error": "read_failed", "detail": str(e)})
             return
 
+        if path == "/api/jobs/list":
+            qs = parse_qs(parsed.query or "")
+            try:
+                payload = _job_summaries(db_path, query=qs)
+                self._send_json(200, payload)
+            except Exception as e:
+                self._send_json(400, {"ok": False, "error": "read_failed", "detail": str(e)})
+            return
+
         if path == "/api/setup/resume-variants":
             try:
                 from applypilot.setup_workspace import list_resume_variants
@@ -1673,6 +2388,71 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception:
                 limit = _RUN_HISTORY_MAX
             self._send_json(200, {"ok": True, "runs": runner.history(limit=limit)})
+            return
+
+        if path == "/api/job-match/history":
+            qs = parse_qs(parsed.query or "")
+            try:
+                limit = int((qs.get("limit") or [str(_RUN_HISTORY_MAX)])[0])
+            except Exception:
+                limit = _RUN_HISTORY_MAX
+            runs = _load_job_match_history(app_dir)
+            self._send_json(200, {"ok": True, "runs": runs[: max(1, min(_RUN_HISTORY_MAX, int(limit or _RUN_HISTORY_MAX)))]})
+            return
+
+        if path == "/api/job-match/history-export":
+            runs = _load_job_match_history(app_dir)
+            body = json.dumps({"runs": runs}, indent=2, sort_keys=False).encode("utf-8")
+            self._send(
+                200,
+                body,
+                "application/json; charset=utf-8",
+                headers={"Content-Disposition": 'attachment; filename="job_match_history.json"'},
+            )
+            return
+
+        if path == "/api/job-match/download":
+            qs = parse_qs(parsed.query or "")
+            rid = str((qs.get("run_id") or [""])[0] or "").strip()
+            kind = str((qs.get("kind") or ["txt"])[0] or "txt").strip().lower()
+            if not rid:
+                self._send_json(400, {"ok": False, "error": "missing_run_id"})
+                return
+            if kind not in {"txt", "pdf"}:
+                self._send_json(400, {"ok": False, "error": "invalid_kind"})
+                return
+
+            rec = None
+            for r in _load_job_match_history(app_dir):
+                if str(r.get("run_id") or "") == rid:
+                    rec = r
+                    break
+            if not isinstance(rec, dict):
+                self._send_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            raw_path = str(rec.get("pdf_path") if kind == "pdf" else rec.get("tailored_path") or "").strip()
+            if not raw_path:
+                self._send_json(404, {"ok": False, "error": "not_found"})
+                return
+            try:
+                p = Path(raw_path).resolve()
+                p.relative_to(Path(app_dir).resolve())
+            except Exception:
+                self._send_json(403, {"ok": False, "error": "forbidden"})
+                return
+            if not p.exists() or not p.is_file():
+                self._send_json(404, {"ok": False, "error": "not_found"})
+                return
+
+            body = p.read_bytes()
+            ctype = "application/pdf" if kind == "pdf" else "text/plain; charset=utf-8"
+            self._send(
+                200,
+                body,
+                ctype,
+                headers={"Content-Disposition": f'attachment; filename="{p.name}"'},
+            )
             return
 
         if path == "/api/pipeline/select":
@@ -1940,6 +2720,40 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(400, {"ok": False, "error": "write_failed", "detail": str(e)})
             return
 
+        if path == "/api/setup/resume-variant-rename":
+            try:
+                from applypilot.setup_workspace import duplicate_resume_variant, list_resume_variants, rename_resume_variant
+
+                old_key = str(data.get("old_key") or "").strip().lower() if isinstance(data, dict) else ""
+                new_key = str(data.get("new_key") or "").strip().lower() if isinstance(data, dict) else ""
+                if not old_key or not new_key:
+                    self._send_json(400, {"ok": False, "error": "bad_request"})
+                    return
+
+                renamed = rename_resume_variant(app_dir, old_key, new_key)
+                _regen_dashboard_async(app_dir=app_dir, db_path=db_path)
+                self._send_json(200, {"ok": True, "variant": renamed, "variants": list_resume_variants(app_dir)})
+            except Exception as e:
+                self._send_json(400, {"ok": False, "error": "write_failed", "detail": str(e)})
+            return
+
+        if path == "/api/setup/resume-variant-duplicate":
+            try:
+                from applypilot.setup_workspace import duplicate_resume_variant, list_resume_variants
+
+                source_key = str(data.get("source_key") or "").strip().lower() if isinstance(data, dict) else ""
+                new_key = str(data.get("new_key") or "").strip().lower() if isinstance(data, dict) else ""
+                if not source_key or not new_key:
+                    self._send_json(400, {"ok": False, "error": "bad_request"})
+                    return
+
+                duplicated = duplicate_resume_variant(app_dir, source_key, new_key)
+                _regen_dashboard_async(app_dir=app_dir, db_path=db_path)
+                self._send_json(200, {"ok": True, "variant": duplicated, "variants": list_resume_variants(app_dir)})
+            except Exception as e:
+                self._send_json(400, {"ok": False, "error": "write_failed", "detail": str(e)})
+            return
+
         if path == "/api/setup/resume-pdf":
             try:
                 from applypilot.setup_workspace import write_resume_pdf
@@ -1983,6 +2797,7 @@ class _Handler(BaseHTTPRequestHandler):
                 job_text = data.get("job_text") if isinstance(data, dict) else None
                 title = str(data.get("title") or "").strip() if isinstance(data, dict) else ""
                 org = str(data.get("org") or "").strip() if isinstance(data, dict) else ""
+                supplemental_facts = str(data.get("supplemental_facts") or "").strip() if isinstance(data, dict) else ""
                 max_words_raw = data.get("max_words") if isinstance(data, dict) else None
                 try:
                     max_words = int(str(max_words_raw).strip()) if max_words_raw is not None else 1500
@@ -2008,11 +2823,47 @@ class _Handler(BaseHTTPRequestHandler):
                     "full_description": job_text,
                 }
 
-                statement = generate_supporting_statement(resume_text, job, profile)
+                statement = generate_supporting_statement(
+                    resume_text,
+                    job,
+                    profile,
+                    supplemental_facts=supplemental_facts,
+                    min_words=max(80, min(int(max_words), int(max_words * 0.6))),
+                    max_words=max_words,
+                )
 
                 # If statement is over the requested word limit, do a deterministic tighten pass.
                 def _word_count(t: str) -> int:
                     return len(re.findall(r"[A-Za-z0-9%]+", (t or "").strip()))
+
+                def _trim_text_to_word_limit(text: str, limit: int) -> str:
+                    t = (text or "").strip()
+                    if not t or limit <= 0:
+                        return t
+                    if _word_count(t) <= limit:
+                        return t
+                    sentences = re.split(r"(?<=[.!?])\s+", t)
+                    kept: list[str] = []
+                    total = 0
+                    for s in sentences:
+                        s = s.strip()
+                        if not s:
+                            continue
+                        wc = _word_count(s)
+                        if kept and total + wc > limit:
+                            break
+                        if not kept and wc > limit:
+                            break
+                        kept.append(s)
+                        total += wc
+                        if total >= limit:
+                            break
+                    if kept:
+                        out = " ".join(kept).strip()
+                        if _word_count(out) <= limit:
+                            return out
+                    tokens = re.findall(r"\S+", t)
+                    return " ".join(tokens[:limit]).rstrip(" ,;:-")
 
                 wc = _word_count(statement)
                 if wc > max_words:
@@ -2038,10 +2889,14 @@ class _Handler(BaseHTTPRequestHandler):
                         obj = json.loads((out or "").strip())
                         if isinstance(obj, dict) and str(obj.get("statement") or "").strip():
                             statement2 = str(obj.get("statement") or "").strip()
-                            statement = statement2
+                            statement = _trim_text_to_word_limit(statement2, max_words)
                             wc = _word_count(statement)
                     except Exception:
                         pass
+
+                if wc > max_words:
+                    statement = _trim_text_to_word_limit(statement, max_words)
+                    wc = _word_count(statement)
 
                 self._send_json(
                     200, {"ok": True, "statement": statement, "word_count": int(wc), "max_words": int(max_words)}
@@ -2050,6 +2905,78 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(409, {"ok": False, "error": "tier_blocked", "detail": str(e)})
             except Exception as e:
                 self._send_json(400, {"ok": False, "error": "generate_failed", "detail": str(e)})
+            return
+
+        if path == "/api/job-match/generate":
+            try:
+                self._send_json(200, {"ok": True, **_run_manual_job_match(app_dir, data if isinstance(data, dict) else {})})
+            except SystemExit as e:
+                self._send_json(409, {"ok": False, "error": "tier_blocked", "detail": str(e)})
+            except ValueError as e:
+                self._send_json(400, {"ok": False, "error": str(e)})
+            except Exception as e:
+                self._send_json(400, {"ok": False, "error": "generate_failed", "detail": str(e)})
+            return
+
+        if path == "/api/job-match/history-delete":
+            try:
+                rid = str(data.get("run_id") or "").strip() if isinstance(data, dict) else ""
+                delete_files = bool(data.get("delete_files", True)) if isinstance(data, dict) else True
+                deleted = _delete_job_match_history_entry(app_dir, rid, delete_files=delete_files)
+                if deleted <= 0:
+                    self._send_json(404, {"ok": False, "error": "not_found"})
+                    return
+                self._send_json(200, {"ok": True, "deleted": deleted})
+            except Exception as e:
+                self._send_json(400, {"ok": False, "error": "delete_failed", "detail": str(e)})
+            return
+
+        if path == "/api/job-match/history-clear":
+            try:
+                delete_files = bool(data.get("delete_files", True)) if isinstance(data, dict) else True
+                cleared = _clear_job_match_history(app_dir, delete_files=delete_files)
+                self._send_json(200, {"ok": True, "cleared": cleared})
+            except Exception as e:
+                self._send_json(400, {"ok": False, "error": "clear_failed", "detail": str(e)})
+            return
+
+        if path == "/api/job-match/promote-resume":
+            try:
+                rid = str(data.get("run_id") or "").strip() if isinstance(data, dict) else ""
+                out = _promote_job_match_to_resume(app_dir, rid)
+                _regen_dashboard_async(app_dir=app_dir, db_path=db_path)
+                self._send_json(200, {"ok": True, **out})
+            except ValueError as e:
+                self._send_json(400, {"ok": False, "error": str(e)})
+            except Exception as e:
+                self._send_json(400, {"ok": False, "error": "promote_failed", "detail": str(e)})
+            return
+
+        if path == "/api/job-match/history-import":
+            try:
+                records = data.get("runs") if isinstance(data, dict) else None
+                if not isinstance(records, list):
+                    self._send_json(400, {"ok": False, "error": "bad_request"})
+                    return
+                imported = _import_job_match_history_records(app_dir, records)
+                self._send_json(200, {"ok": True, "imported": imported})
+            except Exception as e:
+                self._send_json(400, {"ok": False, "error": "import_failed", "detail": str(e)})
+            return
+
+        if path == "/api/job-match/history-update":
+            try:
+                rid = str(data.get("run_id") or "").strip() if isinstance(data, dict) else ""
+                patch = {
+                    "notes": data.get("notes", "") if isinstance(data, dict) else "",
+                    "favorite": bool(data.get("favorite")) if isinstance(data, dict) else False,
+                }
+                updated = _update_job_match_history_entry(app_dir, rid, patch)
+                self._send_json(200, {"ok": True, "record": updated})
+            except ValueError as e:
+                self._send_json(400, {"ok": False, "error": str(e)})
+            except Exception as e:
+                self._send_json(400, {"ok": False, "error": "update_failed", "detail": str(e)})
             return
 
         if path == "/api/jobs/mark":
@@ -2135,11 +3062,31 @@ class _Handler(BaseHTTPRequestHandler):
             if updated <= 0:
                 self._send_json(404, {"ok": False, "error": "not_found"})
                 return
-            _regen_dashboard_async(app_dir=app_dir, db_path=db_path)
             self._send_json(
                 200,
                 {"ok": True, "updated": updated, "selected": selected, "exclusive": exclusive, "cleared": cleared},
             )
+            return
+
+        if path == "/api/jobs/select-clear":
+            conn = get_connection(db_path)
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                cur = conn.execute(
+                    """
+                    UPDATE jobs
+                       SET apply_status = NULL,
+                           apply_error = NULL,
+                           agent_id = NULL
+                     WHERE apply_status = 'selected'
+                    """
+                )
+                conn.commit()
+                cleared = int(cur.rowcount or 0)
+            except Exception:
+                conn.rollback()
+                raise
+            self._send_json(200, {"ok": True, "cleared": cleared})
             return
 
         if path == "/api/jobs/delete":
@@ -2171,6 +3118,32 @@ class _Handler(BaseHTTPRequestHandler):
             deleted = _delete_jobs_by_ids(db_path, ids)
             _regen_dashboard_async(app_dir=app_dir, db_path=db_path)
             self._send_json(200, {"ok": True, "deleted": int(deleted)})
+            return
+
+        if path == "/api/jobs/delete-rule":
+            payload = dict(data) if isinstance(data, dict) else {}
+            rule = str(payload.get("rule") or "").strip().lower()
+            try:
+                threshold = int(payload.get("threshold") or 7)
+            except Exception:
+                threshold = 7
+            try:
+                days = int(payload.get("days") or 30)
+            except Exception:
+                days = 30
+            dry_run = bool(payload.get("dry_run"))
+            try:
+                rows = _jobs_matching_delete_rule(db_path, rule=rule, threshold=threshold, days=days)
+            except ValueError:
+                self._send_json(400, {"ok": False, "error": "bad_rule"})
+                return
+            matched = len(rows)
+            if dry_run:
+                self._send_json(200, {"ok": True, "matched": matched})
+                return
+            deleted = _delete_jobs_by_rule(db_path, rule=rule, threshold=threshold, days=days)
+            _regen_dashboard_async(app_dir=app_dir, db_path=db_path)
+            self._send_json(200, {"ok": True, "matched": matched, "deleted": int(deleted)})
             return
 
         if path == "/api/jobs/block":

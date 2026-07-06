@@ -19,11 +19,12 @@ import re
 import sqlite3
 import sys
 import time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 from typing import Any, cast
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urljoin
 
 import yaml
 from bs4 import BeautifulSoup
@@ -32,6 +33,7 @@ from playwright.sync_api import sync_playwright
 from applypilot import config
 from applypilot.config import CONFIG_DIR
 from applypilot.database import get_stats, init_db, normalize_url
+from applypilot.discovery.salary_filter import load_salary_preference, salary_text_ok
 from applypilot.llm import get_client
 
 log = logging.getLogger(__name__)
@@ -52,6 +54,16 @@ if getattr(sys.stdout, "encoding", None) and str(sys.stdout.encoding).lower() !=
 
 def _env_flag(name: str, default: str = "1") -> bool:
     return str(os.environ.get(name, default)).strip().lower() not in ("0", "false", "no", "off")
+
+
+def _headful_retry_allowed() -> bool:
+    raw = os.environ.get("SMARTE_HEADFUL_RETRY")
+    if raw is not None and str(raw).strip() != "":
+        return _env_flag("SMARTE_HEADFUL_RETRY", "0")
+    # Default to disabled on Linux/server environments without DISPLAY.
+    if os.name != "nt" and not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+        return False
+    return True
 
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -87,6 +99,150 @@ _GENERIC_LOCATION_TERMS = {
     "anywhere",
 }
 
+_PLACEHOLDER_FIELD_TEXT = {
+    "location": {"location"},
+    "salary": {"salary"},
+}
+
+_UK_OUTWARD_POSTCODE_RE = re.compile(r"\b[A-Z]{1,2}\d[A-Z\d]?\b", re.I)
+_DATE_LIKE_TEXT_RE = re.compile(
+    r"^\s*\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{4}\b",
+    re.I,
+)
+
+_SHORT_QUERY_TOKENS = {"it", "qa", "ui", "ux", "bi", "ai", "ml", "sql", "api", "etl", "erp", "euc", "ict"}
+_QUERY_STOPWORDS = {"and", "or", "for", "the", "a", "an", "to", "of", "in", "on", "at", "with", "from"}
+_QUERY_TOKEN_ALIASES = {"ict": "it", "helpdesk": "support", "desk": "support"}
+_GENERIC_OVERLAP_TOKENS = {
+    "analyst",
+    "engineer",
+    "specialist",
+    "officer",
+    "technician",
+    "assistant",
+    "developer",
+    "consultant",
+    "administrator",
+}
+_FAMILY_NEUTRAL_SUPPORT_TOKENS = _GENERIC_OVERLAP_TOKENS | {"support", "it", "system", "systems"}
+_SUPPORT_ROLE_FAMILIES: dict[str, tuple[str, ...]] = {
+    "it_support": (
+        "it support",
+        "service support",
+        "service desk",
+        "helpdesk",
+        "help desk",
+        "desktop support",
+        "1st line",
+        "first line",
+        "2nd line",
+        "second line",
+        "technical support officer",
+        "it support officer",
+        "user support",
+        "end user support",
+    ),
+    "application_support": (
+        "application support",
+        "application analyst",
+        "applications analyst",
+        "technical application support",
+        "business application support",
+        "software support",
+        "production support",
+        "platform support",
+        "clinical systems",
+        "epr support",
+        "care record",
+    ),
+    "technical_systems_support": (
+        "technical support",
+        "support engineer",
+        "technical systems",
+        "systems support",
+        "system support",
+        "cloud support",
+        "infrastructure support",
+        "product support",
+        "euc engineer",
+        "end user computing",
+    ),
+}
+_SUPPORT_ROLE_FAMILY_COMPATIBILITY: dict[str, set[str]] = {
+    "application_support": {"technical_systems_support"},
+    "technical_systems_support": {"application_support"},
+}
+
+_JOB_FIELD_HINTS = (
+    "job",
+    "title",
+    "salary",
+    "description",
+    "location",
+    "company",
+    "role",
+    "vacanc",
+    "posting",
+    "externalpath",
+    "posted",
+)
+
+_OBVIOUSLY_IRRELEVANT_API_HINTS = {
+    "crossdomain.cookie-script.com": "cookie script endpoint",
+    "cookieconsent": "cookie consent endpoint",
+    "_portalcookieuserconsent": "cookie consent endpoint",
+    "onetrust.com/cookieconsentpub/": "geolocation data",
+    "maps.googleapis.com/maps/api/js": "Google Maps API call",
+    "maps.googleapis.com/maps/api/mapsjs/gen_204": "Google Maps utility endpoint",
+    "googletagmanager.com": "analytics endpoint",
+    "google-analytics.com": "analytics endpoint",
+    "sentry.io": "telemetry endpoint",
+    "/api/gmapi": "utility endpoint",
+}
+
+_KNOWN_SITE_SELECTORS: dict[str, dict[str, str | None]] = {
+    "GOV.UK Find a job": {
+        "job_card": 'div[data-testid^="searchResultCard-"]',
+        "title": 'a[data-testid^="jobTitle-"]',
+        "salary": "p",
+        "description": 'p[data-testid="searchResultCardJobDescription"]',
+        "location": 'p[data-testid="searchResultCardEmployer"] span:nth-of-type(2)',
+        "url": 'a[data-testid^="jobTitle-"]',
+    },
+    "Jobs Go Public": {
+        "job_card": '[data-testid="jcl-job-teaser-wrapper"]',
+        "title": ".jcl-job-teaser-title a",
+        "salary": ".jcl-job-teaser-salary",
+        "description": ".jcl-job-teaser-description",
+        "location": '[data-testid="jcl-job-teaser-location"] .popoverlist-no-list-item',
+        "url": ".jcl-job-teaser-title a",
+    },
+    "LG Jobs": {
+        "job_card": '[data-testid="jcl-job-teaser-wrapper"]',
+        "title": ".jcl-job-teaser-title a",
+        "salary": ".jcl-job-teaser-salary",
+        "description": ".jcl-job-teaser-description",
+        "location": '[data-testid="jcl-job-teaser-location"] .popoverlist-no-list-item',
+        "url": ".jcl-job-teaser-title a",
+    },
+    "HealthJobsUK": {
+        "job_card": "#hj-job-list > ol > li.hj-job",
+        "title": ".hj-jobtitle",
+        "salary": ".hj-salary",
+        "description": None,
+        "location": ".hj-locationtown",
+        "url": "a[href]",
+    },
+    "NHS Jobs": {
+        "job_card": 'ul.search-results > li[data-test="search-result"]',
+        "title": 'a[data-test="search-result-job-title"]',
+        "salary": 'li[data-test="search-result-salary"]',
+        "description": None,
+        "location": '[data-test="search-result-location"] .location-font-size',
+        "url": 'a[data-test="search-result-job-title"]',
+    },
+}
+
 
 # -- Location filtering -------------------------------------------------------
 
@@ -114,6 +270,27 @@ def _load_location_filter(search_cfg: dict | None = None):
     return accept, reject
 
 
+def _location_country(search_cfg: dict | None = None) -> str:
+    if search_cfg is None:
+        search_cfg = config.load_search_config()
+    return _normalize_space(search_cfg.get("country")).upper()
+
+
+def _looks_like_uk_location(location: str | None) -> bool:
+    normalized = _normalize_space(location)
+    if not normalized:
+        return False
+    lowered = normalized.lower()
+    if any(term in lowered for term in ("england", "scotland", "wales", "northern ireland", " uk", "united kingdom")):
+        return True
+    if _UK_OUTWARD_POSTCODE_RE.search(normalized):
+        return True
+    comma_parts = [part.strip() for part in normalized.split(",") if part.strip()]
+    if len(comma_parts) >= 2:
+        return True
+    return False
+
+
 def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> bool:
     """Check if a job location passes the user's location filter."""
     if not location:
@@ -130,6 +307,8 @@ def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> 
     for a in accept:
         if a.lower() in loc:
             return True
+    if _location_country() == "UK" and _looks_like_uk_location(location):
+        return True
     return False
 
 
@@ -139,6 +318,309 @@ def _is_generic_location(location: str | None) -> bool:
         return False
     normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z]+", " ", location.lower())).strip()
     return normalized in _GENERIC_LOCATION_TERMS
+
+
+def _normalize_space(text: str | None) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def _normalized_phrase_text(text: str | None) -> str:
+    return _normalize_space(re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()))
+
+
+def _query_tokens(text: str | None) -> set[str]:
+    tokens: set[str] = set()
+    for raw in re.findall(r"[a-z0-9]+", str(text or "").lower()):
+        token = _QUERY_TOKEN_ALIASES.get(raw, raw)
+        if token in _QUERY_STOPWORDS:
+            continue
+        if len(token) >= 4 or token in _SHORT_QUERY_TOKENS:
+            tokens.add(token)
+    return tokens
+
+
+def _matches_exclude_titles(title: str | None, exclude_titles: list[str] | None) -> bool:
+    if not title or not exclude_titles:
+        return False
+    title_lower = str(title).lower()
+    return any(pat and str(pat).strip().lower() in title_lower for pat in exclude_titles)
+
+
+def _support_role_family_hits(text: str | None) -> set[str]:
+    normalized = _normalized_phrase_text(text)
+    if not normalized:
+        return set()
+
+    padded = f" {normalized} "
+    hits: set[str] = set()
+    for family, phrases in _SUPPORT_ROLE_FAMILIES.items():
+        for phrase in phrases:
+            phrase_norm = _normalized_phrase_text(phrase)
+            if phrase_norm and f" {phrase_norm} " in padded:
+                hits.add(family)
+                break
+    return hits
+
+
+def _support_families_compatible(query_families: set[str], title_families: set[str]) -> bool:
+    if not query_families or not title_families:
+        return False
+    if query_families & title_families:
+        return True
+    for family in query_families:
+        compatibles = _SUPPORT_ROLE_FAMILY_COMPATIBILITY.get(family) or set()
+        if compatibles & title_families:
+            return True
+    return False
+
+
+def _title_matches_query(title: str | None, search_query: str | None) -> bool:
+    """Keep obviously relevant titles while dropping generic mismatches."""
+    query = _normalize_space(search_query)
+    if not query:
+        return True
+
+    title_text = _normalize_space(title)
+    if not title_text:
+        return False
+
+    if query.lower() in title_text.lower():
+        return True
+
+    query_families = _support_role_family_hits(query)
+    title_families = _support_role_family_hits(title_text)
+    if _support_families_compatible(query_families, title_families):
+        return True
+
+    query_tokens = _query_tokens(query)
+    if not query_tokens:
+        return True
+
+    title_tokens = _query_tokens(title_text)
+    if not title_tokens:
+        return False
+
+    overlap = query_tokens & title_tokens
+    if query_families and not _support_families_compatible(query_families, title_families):
+        if not overlap or overlap.issubset(_FAMILY_NEUTRAL_SUPPORT_TOKENS):
+            return False
+    if overlap and overlap.issubset(_GENERIC_OVERLAP_TOKENS):
+        return False
+    if len(query_tokens) >= 3:
+        return len(overlap) >= 2
+    return len(overlap) >= 1
+
+
+def _prepare_site_location(site: dict, default_location: str) -> str:
+    """Apply site-specific location shaping before URL expansion."""
+    site_location = default_location
+    if site.get("omit_generic_location") and _is_generic_location(default_location):
+        site_location = ""
+    if site.get("location_first_segment") and site_location:
+        site_location = site_location.split(",", 1)[0].strip()
+    return site_location
+
+
+def _configured_locations(search_cfg: dict) -> list[str]:
+    locations_cfg = search_cfg.get("locations", []) or []
+    locations: list[str] = []
+    for item in locations_cfg:
+        if isinstance(item, dict):
+            value = _normalize_space(item.get("location"))
+        else:
+            value = _normalize_space(item)
+        if value:
+            locations.append(value)
+    return locations or [""]
+
+
+def _site_location_exclusions(search_cfg: dict | None, site_name: str | None) -> set[str]:
+    cfg = (search_cfg or {}).get("site_location_exclusions")
+    if not isinstance(cfg, dict):
+        return set()
+
+    site_name_norm = _normalize_space(site_name).lower()
+    if not site_name_norm:
+        return set()
+
+    excluded: set[str] = set()
+    for raw_site_name, raw_locations in cfg.items():
+        if _normalize_space(raw_site_name).lower() != site_name_norm:
+            continue
+        if not isinstance(raw_locations, list):
+            continue
+        for raw_location in raw_locations:
+            first_segment = _normalize_space(raw_location).split(",", 1)[0]
+            key = _normalized_phrase_text(first_segment)
+            if key:
+                excluded.add(key)
+    return excluded
+
+
+def _site_query_exclusions(search_cfg: dict | None, site_name: str | None) -> set[str]:
+    cfg = (search_cfg or {}).get("site_query_exclusions")
+    if not isinstance(cfg, dict):
+        return set()
+
+    site_name_norm = _normalize_space(site_name).lower()
+    if not site_name_norm:
+        return set()
+
+    excluded: set[str] = set()
+    for raw_site_name, raw_queries in cfg.items():
+        if _normalize_space(raw_site_name).lower() != site_name_norm:
+            continue
+        if not isinstance(raw_queries, list):
+            continue
+        for raw_query in raw_queries:
+            query_key = _normalize_space(raw_query).lower()
+            if query_key:
+                excluded.add(query_key)
+    return excluded
+
+
+def _site_query_location_exclusions(search_cfg: dict | None, site_name: str | None) -> set[tuple[str, str]]:
+    cfg = (search_cfg or {}).get("site_query_location_exclusions")
+    if not isinstance(cfg, dict):
+        return set()
+
+    site_name_norm = _normalize_space(site_name).lower()
+    if not site_name_norm:
+        return set()
+
+    excluded: set[tuple[str, str]] = set()
+    for raw_site_name, raw_entries in cfg.items():
+        if _normalize_space(raw_site_name).lower() != site_name_norm:
+            continue
+        if not isinstance(raw_entries, list):
+            continue
+        for raw_entry in raw_entries:
+            if not isinstance(raw_entry, dict):
+                continue
+            query_key = _normalize_space(raw_entry.get("query")).lower()
+            raw_location = _normalize_space(raw_entry.get("location"))
+            location_key = _normalized_phrase_text(raw_location.split(",", 1)[0]) if raw_location else ""
+            if query_key:
+                excluded.add((query_key, location_key))
+    return excluded
+
+
+def _query_tiers(search_cfg: dict | None) -> dict[str, int]:
+    queries_cfg = (search_cfg or {}).get("queries")
+    if not isinstance(queries_cfg, list):
+        return {}
+
+    tiers: dict[str, int] = {}
+    for entry in queries_cfg:
+        if not isinstance(entry, dict):
+            continue
+        query_key = _normalize_space(entry.get("query")).lower()
+        if not query_key:
+            continue
+        try:
+            tier = int(entry.get("tier"))
+        except Exception:
+            continue
+        tiers[query_key] = tier
+    return tiers
+
+
+def _site_tier_location_pruning_rules(search_cfg: dict | None, site_name: str | None) -> list[dict[str, object]]:
+    cfg = (search_cfg or {}).get("site_tier_location_pruning")
+    if not isinstance(cfg, dict):
+        return []
+
+    site_name_norm = _normalize_space(site_name).lower()
+    if not site_name_norm:
+        return []
+
+    rules: list[dict[str, object]] = []
+    for raw_site_name, raw_rules in cfg.items():
+        if _normalize_space(raw_site_name).lower() != site_name_norm:
+            continue
+        if not isinstance(raw_rules, list):
+            continue
+        for raw_rule in raw_rules:
+            if isinstance(raw_rule, dict):
+                rules.append(raw_rule)
+    return rules
+
+
+def _matches_site_tier_location_pruning(
+    search_cfg: dict | None,
+    site_name: str | None,
+    query: str | None,
+    location: str | None,
+) -> bool:
+    query_key = _normalize_space(query).lower()
+    if not query_key:
+        return False
+
+    query_tier = _query_tiers(search_cfg).get(query_key)
+    if query_tier is None:
+        return False
+
+    location_value = _normalize_space(location)
+    location_key = _normalized_phrase_text(location_value.split(",", 1)[0])
+    for rule in _site_tier_location_pruning_rules(search_cfg, site_name):
+        min_tier = rule.get("min_tier")
+        if isinstance(min_tier, int) and query_tier < min_tier:
+            continue
+
+        if rule.get("location_required") is True and not location_key:
+            continue
+        if rule.get("location_blank_only") is True and location_key:
+            continue
+
+        keep_queries = {_normalize_space(v).lower() for v in (rule.get("keep_queries") or []) if _normalize_space(v)}
+        if query_key in keep_queries:
+            continue
+
+        drop_queries = {_normalize_space(v).lower() for v in (rule.get("drop_queries") or []) if _normalize_space(v)}
+        if drop_queries and query_key not in drop_queries:
+            continue
+
+        return True
+
+    return False
+
+
+def _is_site_target_excluded(
+    search_cfg: dict | None,
+    site_name: str | None,
+    query: str | None,
+    location: str | None,
+) -> bool:
+    query_key = _normalize_space(query).lower()
+    if query_key and query_key in _site_query_exclusions(search_cfg, site_name):
+        return True
+    location_key = _normalized_phrase_text(_normalize_space(location).split(",", 1)[0])
+    if query_key and (query_key, location_key) in _site_query_location_exclusions(search_cfg, site_name):
+        return True
+    if _matches_site_tier_location_pruning(search_cfg, site_name, query, location):
+        return True
+    return False
+
+
+def _prepare_site_locations(site: dict, configured_locations: list[str], search_cfg: dict | None = None) -> list[str]:
+    prepared: list[str] = []
+    seen: set[str] = set()
+    excluded_location_keys = _site_location_exclusions(search_cfg, site.get("name"))
+    for location in configured_locations or [""]:
+        site_location = _prepare_site_location(site, location)
+        location_key = _normalized_phrase_text(site_location.split(",", 1)[0])
+        if location_key and location_key in excluded_location_keys:
+            continue
+        key = site_location.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        prepared.append(site_location)
+    return prepared or [""]
+
+
+def _site_uses_location_placeholder(site_url: str) -> bool:
+    return "{location_encoded}" in site_url or "{location}" in site_url
 
 
 def _has_captcha_signal(html: str | None) -> bool:
@@ -169,17 +651,31 @@ def _store_jobs_filtered(
     accept_locs: list[str],
     reject_locs: list[str],
     search_query: str | None = None,
+    salary_pref: dict | None = None,
+    exclude_titles: list[str] | None = None,
 ) -> tuple[int, int]:
     """Store jobs with location filtering. Returns (new, existing)."""
     now = datetime.now(timezone.utc).isoformat()
     new = 0
     existing = 0
+    excluded_title_filtered = 0
+    title_filtered = 0
     filtered = 0
+    salary_filtered = 0
 
     for job in jobs:
         url = job.get("url")
         if not url:
             continue
+
+        if _matches_exclude_titles(job.get("title"), exclude_titles):
+            excluded_title_filtered += 1
+            continue
+
+        if search_query and not _title_matches_query(job.get("title"), search_query):
+            title_filtered += 1
+            continue
+
         canonical_url = normalize_url(url) or url
 
         # Respect user-level URL blocking.
@@ -206,6 +702,9 @@ def _store_jobs_filtered(
             pass
         if not _location_ok(job.get("location"), accept_locs, reject_locs):
             filtered += 1
+            continue
+        if salary_pref is not None and not salary_text_ok(job.get("salary"), salary_pref):
+            salary_filtered += 1
             continue
         try:
             conn.execute(
@@ -235,8 +734,21 @@ def _store_jobs_filtered(
                 except Exception:
                     pass
 
-    if filtered:
-        log.info("Filtered %d jobs (wrong location)", filtered)
+    if excluded_title_filtered or title_filtered or filtered or salary_filtered:
+        details: list[str] = []
+        if excluded_title_filtered:
+            details.append(f"{excluded_title_filtered} excluded title")
+        if title_filtered:
+            details.append(f"{title_filtered} title mismatch")
+        if filtered:
+            details.append(f"{filtered} wrong location")
+        if salary_filtered:
+            details.append(f"{salary_filtered} salary")
+        log.info(
+            "Filtered %d jobs (%s)",
+            excluded_title_filtered + title_filtered + filtered + salary_filtered,
+            ", ".join(details),
+        )
     conn.commit()
     return new, existing
 
@@ -481,6 +993,40 @@ or
 No explanation, no markdown, no thinking."""
 
 
+def _api_response_has_job_hints(resp: dict) -> bool:
+    fields: list[str] = []
+
+    for key in ("first_item_keys", "keys"):
+        values = resp.get(key)
+        if isinstance(values, list):
+            fields.extend(str(v) for v in values if v)
+
+    for key, value in resp.items():
+        if not key.startswith("nested_") or not isinstance(value, dict):
+            continue
+        fields.append(key.replace("nested_", ""))
+        for nested_key in ("first_item_keys", "keys"):
+            nested_values = value.get(nested_key)
+            if isinstance(nested_values, list):
+                fields.extend(str(v) for v in nested_values if v)
+
+    normalized = [re.sub(r"[^a-z0-9]+", "", field.lower()) for field in fields if field]
+    return any(any(hint in field for hint in _JOB_FIELD_HINTS) for field in normalized)
+
+
+def _obvious_irrelevant_api_reason(resp: dict) -> str | None:
+    url = str(resp.get("url") or "").lower()
+    for needle, reason in _OBVIOUSLY_IRRELEVANT_API_HINTS.items():
+        if needle in url:
+            return reason
+
+    size = int(resp.get("size") or 0)
+    if size <= 2 and not _api_response_has_job_hints(resp):
+        return "empty/no structured data"
+
+    return None
+
+
 def judge_api_responses(api_responses: list[dict]) -> list[dict]:
     """Use the LLM to filter API responses, keeping only job-relevant ones."""
     if not api_responses:
@@ -495,6 +1041,11 @@ def judge_api_responses(api_responses: list[dict]) -> list[dict]:
     relevant: list[dict] = []
 
     for resp in api_responses:
+        irrelevant_reason = _obvious_irrelevant_api_reason(resp)
+        if irrelevant_reason:
+            log.info("Judge: %s -> DROP (%s)", resp.get("url", "?")[:80], irrelevant_reason)
+            continue
+
         fields = ""
         sample = ""
         resp_type = resp.get("type", "unknown")
@@ -528,8 +1079,15 @@ def judge_api_responses(api_responses: list[dict]) -> list[dict]:
             if is_relevant:
                 relevant.append(resp)
         except Exception as e:
-            log.warning("Judge ERROR for %s: %s -- keeping", resp.get("url", "?")[:80], e)
-            relevant.append(resp)
+            keep = _api_response_has_job_hints(resp)
+            log.warning(
+                "Judge ERROR for %s: %s -- %s",
+                resp.get("url", "?")[:80],
+                e,
+                "keeping" if keep else "dropping likely noise",
+            )
+            if keep:
+                relevant.append(resp)
 
     return relevant
 
@@ -830,6 +1388,161 @@ def _normalize_selector_for_bs4(selector: str | None) -> str | None:
     return re.sub(r"(?<!-soup):contains\(", ":-soup-contains(", selector)
 
 
+def _extract_visible_text(el) -> str:
+    clone = BeautifulSoup(str(el), "html.parser")
+    for node in clone.select("script, style, svg, noscript, iframe"):
+        node.decompose()
+    return _normalize_space(clone.get_text(" ", strip=True))
+
+
+def _is_placeholder_field_text(field: str, text: str | None) -> bool:
+    normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z]+", " ", str(text or "").lower())).strip()
+    if not normalized:
+        return True
+    return normalized in _PLACEHOLDER_FIELD_TEXT.get(field, set())
+
+
+def _extract_field_text(card, el, field: str) -> str | None:
+    text = _extract_visible_text(el)
+
+    if field in _PLACEHOLDER_FIELD_TEXT and _is_placeholder_field_text(field, text):
+        parent = getattr(el, "parent", None)
+        hops = 0
+        while parent is not None and hops < 3:
+            candidate = _extract_visible_text(parent)
+            if candidate and not _is_placeholder_field_text(field, candidate):
+                text = candidate
+                break
+            if parent == card:
+                break
+            parent = getattr(parent, "parent", None)
+            hops += 1
+
+    text = _normalize_space(text)
+    if field == "salary":
+        text = re.sub(r"^\s*salary\b[:\s-]*", "", text, flags=re.I)
+    elif field == "location":
+        text = re.sub(r"^\s*location\b[:\s-]*", "", text, flags=re.I)
+    return text or None
+
+
+def _salary_text_looks_valid(text: str | None) -> bool:
+    normalized = _normalize_space(text).lower()
+    if not normalized:
+        return False
+    if normalized in {"salary", "location", "description"}:
+        return False
+    if any(phrase in normalized for phrase in ("competitive", "negotiable", "depends on experience", "market rate")):
+        return True
+    if not re.search(r"\d", normalized):
+        return False
+    if _DATE_LIKE_TEXT_RE.match(normalized):
+        return False
+    if re.search(r"[£$€]", normalized):
+        return True
+    if re.search(r"\b(?:gbp|usd|eur|cad|aud)\b", normalized):
+        return True
+    if re.search(
+        r"\b(?:per\s+(?:year|annum|month|week|day|hour)|annual|annually|monthly|weekly|daily|hourly|p\.?a\.?|salary)\b",
+        normalized,
+    ):
+        return True
+    if re.search(r"\b\d{2,3}(?:,\d{3})*(?:\.\d+)?\s*(?:-|to)\s*\d{2,3}(?:,\d{3})*(?:\.\d+)?\b", normalized):
+        return True
+    return bool(re.search(r"\b\d{2,3}(?:\.\d+)?k\b", normalized))
+
+
+def _select_field_text(card, selector: str, field: str) -> str | None:
+    try:
+        matches = card.select(selector)
+    except Exception:
+        return None
+
+    if not matches:
+        return None
+
+    for el in matches:
+        candidate = _extract_field_text(card, el, field)
+        if not candidate:
+            continue
+        if field in _PLACEHOLDER_FIELD_TEXT and _is_placeholder_field_text(field, candidate):
+            continue
+        if field == "salary" and not _salary_text_looks_valid(candidate):
+            continue
+        if field == "location":
+            candidate = re.sub(r"^\s*[-–—]+\s*", "", candidate).strip()
+        return candidate
+    return None
+
+
+def _resolve_extracted_url(
+    raw_url: str | None, *, page_url: str | None = None, site_name: str | None = None
+) -> str | None:
+    raw = str(raw_url or "").strip()
+    if not raw:
+        return None
+    if raw.startswith(("http://", "https://")):
+        return raw
+    if page_url:
+        return urljoin(page_url, raw)
+    if site_name:
+        base = config.load_base_urls().get(site_name)
+        if base:
+            return urljoin(base, raw)
+    return raw
+
+
+def _extract_jobs_with_selectors(
+    full_html: str,
+    selectors: dict,
+    *,
+    site_name: str = "",
+    page_url: str = "",
+) -> list[dict]:
+    soup = BeautifulSoup(full_html, "html.parser")
+    card_sel = selectors.get("job_card", "")
+    cards = soup.select(card_sel) if card_sel else []
+
+    jobs: list[dict] = []
+    for card in cards:
+        job: dict = {}
+        for field in ["title", "salary", "description", "location", "url"]:
+            sel = selectors.get(field)
+            if not sel or sel == "null":
+                job[field] = None
+                continue
+            if field == "url":
+                try:
+                    el = card.select_one(sel)
+                except Exception:
+                    job[field] = None
+                    continue
+                if not el:
+                    job[field] = None
+                    continue
+                job[field] = _resolve_extracted_url(el.get("href"), page_url=page_url, site_name=site_name)
+            else:
+                job[field] = _select_field_text(card, str(sel), field)
+        jobs.append(job)
+    return jobs
+
+
+def execute_known_site_selectors(name: str, intel: dict) -> tuple[dict, list[dict]]:
+    """Use stable built-in selectors for known sites to avoid flaky LLM extraction."""
+    selectors = _KNOWN_SITE_SELECTORS.get(name)
+    if not selectors:
+        return {}, []
+    full_html = intel.get("full_html", "")
+    if not full_html:
+        return dict(selectors), []
+    return dict(selectors), _extract_jobs_with_selectors(
+        full_html,
+        selectors,
+        site_name=name,
+        page_url=str(intel.get("url") or ""),
+    )
+
+
 # -- JSON path resolution ---------------------------------------------------
 
 
@@ -936,7 +1649,7 @@ def execute_api_response(intel: dict, plan: dict) -> list[dict]:
     return jobs
 
 
-def execute_css_selectors(intel: dict) -> tuple[dict, list[dict]]:
+def execute_css_selectors(intel: dict, site_name: str | None = None) -> tuple[dict, list[dict]]:
     """Phase 2: Send full cleaned page HTML to LLM for card detection + selector generation.
     Returns (selectors, jobs)."""
     full_html = intel.get("full_html", "")
@@ -977,36 +1690,56 @@ def execute_css_selectors(intel: dict) -> tuple[dict, list[dict]]:
 
     log.info("Selectors: %s", selectors)
 
-    # Apply selectors to the ORIGINAL full_html
-    soup = BeautifulSoup(full_html, "html.parser")
-    card_sel = selectors.get("job_card", "NONE")
     try:
-        cards = soup.select(card_sel)
+        jobs = _extract_jobs_with_selectors(
+            full_html,
+            selectors,
+            site_name=str(site_name or ""),
+            page_url=str(intel.get("url") or ""),
+        )
     except Exception as e:
-        log.error("Invalid card selector '%s': %s", card_sel, e)
+        log.error("Selector extraction failed: %s", e)
         return selectors, []
 
-    log.info("Matched %d cards", len(cards))
-
-    jobs: list[dict] = []
-    for card in cards:
-        job: dict = {}
-        for field in ["title", "salary", "description", "location", "url"]:
-            sel = selectors.get(field)
-            if not sel or sel == "null":
-                job[field] = None
-                continue
-            try:
-                el = card.select_one(sel)
-            except Exception:
-                job[field] = None
-                continue
-            if el:
-                job[field] = el.get("href") if field == "url" else el.get_text(strip=True)
-            else:
-                job[field] = None
-        jobs.append(job)
+    log.info("Matched %d cards", len(jobs))
     return selectors, jobs
+
+
+def _summarize_site_result(name: str, strategy: str, plan: dict, jobs: list[dict]) -> dict:
+    titles = sum(1 for j in jobs if j.get("title"))
+    total = len(jobs)
+    status = "PASS" if total > 0 and titles / max(total, 1) >= 0.8 else "FAIL" if total == 0 else "PARTIAL"
+    urls = sum(1 for j in jobs if j.get("url"))
+    salaries = sum(1 for j in jobs if j.get("salary"))
+    descs = sum(1 for j in jobs if j.get("description"))
+
+    log.info(
+        "RESULT: %s -- %d jobs, %d titles, %d urls, %d salaries, %d descriptions",
+        status,
+        total,
+        titles,
+        urls,
+        salaries,
+        descs,
+    )
+    for j in jobs[:3]:
+        log.info(
+            "  - %s | loc: %s | salary: %s",
+            str(j.get("title") or "?")[:55],
+            str(j.get("location") or "?")[:25],
+            str(j.get("salary") or "-")[:20],
+        )
+
+    return {
+        "name": name,
+        "status": status,
+        "strategy": strategy,
+        "total": total,
+        "titles": titles,
+        "plan": plan,
+        "jobs": jobs,
+        "sample": jobs[:5],
+    }
 
 
 # -- Main per-site extraction ------------------------------------------------
@@ -1048,30 +1781,59 @@ def _run_one_site(name: str, url: str) -> dict:
         if retry_delay > 0:
             time.sleep(retry_delay)
 
-        log.warning("CAPTCHA/rate-limit detected -- retrying once in headful mode")
-        intel = collect_page_intelligence(url, headless=False)
-        collect_time = time.time() - t0
-        full_html = intel.get("full_html", "")
-        cleaned_check = clean_page_html(full_html) if full_html else ""
-        if _has_captcha_signal(full_html):
-            log.warning("CAPTCHA persists after retry")
-            return {"name": name, "status": "CAPTCHA", "error": "captcha/rate-limit detected"}
-        log.info(
-            "Headful retry done in %.1fs | JSON-LD: %d | API: %d",
-            collect_time,
-            len(intel["json_ld"]),
-            len(intel["api_responses"]),
-        )
+        if _headful_retry_allowed():
+            log.warning("CAPTCHA/rate-limit detected -- retrying once in headful mode")
+            try:
+                intel = collect_page_intelligence(url, headless=False)
+                collect_time = time.time() - t0
+                full_html = intel.get("full_html", "")
+                cleaned_check = clean_page_html(full_html) if full_html else ""
+                if _has_captcha_signal(full_html):
+                    log.warning("CAPTCHA persists after retry")
+                    return {"name": name, "status": "CAPTCHA", "error": "captcha/rate-limit detected"}
+                log.info(
+                    "Headful retry done in %.1fs | JSON-LD: %d | API: %d",
+                    collect_time,
+                    len(intel["json_ld"]),
+                    len(intel["api_responses"]),
+                )
+            except Exception as e:
+                log.warning("Headful retry failed, continuing with headless result: %s", e)
+        else:
+            log.warning("CAPTCHA/rate-limit detected, but headful retry is disabled in this environment")
     elif len(cleaned_check) < 5000 and full_html:
-        log.info("Cleaned HTML only %s chars -- retrying headful...", f"{len(cleaned_check):,}")
-        intel = collect_page_intelligence(url, headless=False)
-        collect_time = time.time() - t0
-        log.info(
-            "Headful done in %.1fs | JSON-LD: %d | API: %d",
-            collect_time,
-            len(intel["json_ld"]),
-            len(intel["api_responses"]),
-        )
+        if _headful_retry_allowed():
+            log.info("Cleaned HTML only %s chars -- retrying headful...", f"{len(cleaned_check):,}")
+            try:
+                intel = collect_page_intelligence(url, headless=False)
+                collect_time = time.time() - t0
+                log.info(
+                    "Headful done in %.1fs | JSON-LD: %d | API: %d",
+                    collect_time,
+                    len(intel["json_ld"]),
+                    len(intel["api_responses"]),
+                )
+            except Exception as e:
+                log.warning("Headful retry failed, continuing with headless result: %s", e)
+        else:
+            log.info(
+                "Cleaned HTML only %s chars -- skipping headful retry in this environment", f"{len(cleaned_check):,}"
+            )
+
+    # Step 1.75: Built-in selectors for stable sites.
+    preset_selectors, preset_jobs = execute_known_site_selectors(name, intel)
+    if preset_selectors:
+        log.info("[1.75] Using built-in selectors for %s", name)
+        log.info("Selectors: %s", preset_selectors)
+        log.info("Matched %d cards", len(preset_jobs))
+        if preset_jobs:
+            plan = {
+                "strategy": "site_preset",
+                "reasoning": "built-in selectors",
+                "extraction": preset_selectors,
+            }
+            return _summarize_site_result(name, "site_preset", plan, preset_jobs)
+        log.warning("Built-in selectors matched no jobs -- falling back to LLM")
 
     # Step 1.5: Judge filters API responses
     if intel["api_responses"]:
@@ -1121,7 +1883,7 @@ def _run_one_site(name: str, url: str) -> dict:
             jobs = execute_api_response(intel, plan)
         elif strategy == "css_selectors":
             log.info("-> Phase 2: Generating selectors from card examples...")
-            selectors, jobs = execute_css_selectors(intel)
+            selectors, jobs = execute_css_selectors(intel, site_name=name)
             plan["extraction"] = selectors
         else:
             log.warning("Unknown strategy: %s", strategy)
@@ -1131,41 +1893,7 @@ def _run_one_site(name: str, url: str) -> dict:
         return {"name": name, "status": "EXEC_ERROR", "error": str(e), "plan": plan}
 
     # Step 4: Report
-    titles = sum(1 for j in jobs if j.get("title"))
-    total = len(jobs)
-    status = "PASS" if total > 0 and titles / max(total, 1) >= 0.8 else "FAIL" if total == 0 else "PARTIAL"
-
-    urls = sum(1 for j in jobs if j.get("url"))
-    salaries = sum(1 for j in jobs if j.get("salary"))
-    descs = sum(1 for j in jobs if j.get("description"))
-    log.info(
-        "RESULT: %s -- %d jobs, %d titles, %d urls, %d salaries, %d descriptions",
-        status,
-        total,
-        titles,
-        urls,
-        salaries,
-        descs,
-    )
-
-    for j in jobs[:3]:
-        log.info(
-            "  - %s | loc: %s | salary: %s",
-            str(j.get("title") or "?")[:55],
-            str(j.get("location") or "?")[:25],
-            str(j.get("salary") or "-")[:20],
-        )
-
-    return {
-        "name": name,
-        "status": status,
-        "strategy": strategy,
-        "total": total,
-        "titles": titles,
-        "plan": plan,
-        "jobs": jobs,
-        "sample": jobs[:5],
-    }
+    return _summarize_site_result(name, strategy, plan, jobs)
 
 
 # -- Target building --------------------------------------------------------
@@ -1177,7 +1905,7 @@ def build_scrape_targets(
 ) -> list[dict]:
     """Build the full list of (name, url) targets from sites + search config queries.
 
-    - "search" sites get expanded: 1 URL per query from search config
+    - "search" sites get expanded: 1 URL per query/location pair from search config
     - "static" sites get scraped once as-is
 
     Placeholders in URLs:
@@ -1191,37 +1919,57 @@ def build_scrape_targets(
         search_cfg = config.load_search_config()
 
     queries_cfg = search_cfg.get("queries", [])
-    queries = [q["query"] for q in queries_cfg]
-    locs = search_cfg.get("locations", [])
-    default_location = locs[0]["location"] if locs else ""
+    queries = [_normalize_space(q.get("query")) for q in queries_cfg if _normalize_space(q.get("query"))]
+    configured_locations = _configured_locations(search_cfg)
 
     targets: list[dict] = []
 
     for site in sites:
+        if bool(site.get("disabled")):
+            log.info("Skipping disabled smart site: %s", site.get("name", "Unknown"))
+            continue
         site_url = site.get("url", "")
         site_name = site.get("name", "Unknown")
         site_type = site.get("type", "static")
 
         if site_type == "search" and queries:
-            site_location = default_location
-            if site.get("omit_generic_location") and _is_generic_location(default_location):
-                site_location = ""
-            for query in queries:
-                expanded_url = site_url
-                expanded_url = expanded_url.replace("{query_encoded}", quote_plus(query))
-                expanded_url = expanded_url.replace("{query}", quote_plus(query))
-                expanded_url = expanded_url.replace("{location_encoded}", quote_plus(site_location))
-                targets.append(
-                    {
-                        "name": site_name,
-                        "url": expanded_url,
-                        "query": query,
-                    }
-                )
+            if _site_uses_location_placeholder(site_url):
+                site_locations = _prepare_site_locations(site, configured_locations, search_cfg)
+                # Interleave queries across locations so capped runs still sample a useful mix.
+                for location_round in range(len(site_locations)):
+                    for query_index, query in enumerate(queries):
+                        site_location = site_locations[(query_index + location_round) % len(site_locations)]
+                        expanded_url = site_url
+                        expanded_url = expanded_url.replace("{query_encoded}", quote_plus(query))
+                        expanded_url = expanded_url.replace("{query}", quote_plus(query))
+                        expanded_url = expanded_url.replace("{location_encoded}", quote_plus(site_location))
+                        if _is_site_target_excluded(search_cfg, site_name, query, site_location):
+                            continue
+                        targets.append(
+                            {
+                                "name": site_name,
+                                "url": expanded_url,
+                                "query": query,
+                                "location": site_location,
+                            }
+                        )
+            else:
+                for query in queries:
+                    expanded_url = site_url
+                    expanded_url = expanded_url.replace("{query_encoded}", quote_plus(query))
+                    expanded_url = expanded_url.replace("{query}", quote_plus(query))
+                    if _is_site_target_excluded(search_cfg, site_name, query, ""):
+                        continue
+                    targets.append(
+                        {
+                            "name": site_name,
+                            "url": expanded_url,
+                            "query": query,
+                            "location": "",
+                        }
+                    )
         else:
-            site_location = default_location
-            if site.get("omit_generic_location") and _is_generic_location(default_location):
-                site_location = ""
+            site_location = _prepare_site_locations(site, configured_locations, search_cfg)[0]
             expanded_url = site_url
             expanded_url = expanded_url.replace("{location_encoded}", quote_plus(site_location))
             targets.append(
@@ -1229,10 +1977,166 @@ def build_scrape_targets(
                     "name": site_name,
                     "url": expanded_url,
                     "query": None,
+                    "location": site_location,
                 }
             )
 
     return targets
+
+
+def _balanced_target_window(
+    targets: list[dict], max_targets: int, offset: int = 0, search_cfg: dict | None = None
+) -> list[dict]:
+    """Interleave higher-value site groups first, then take a rotating capped window."""
+    if max_targets <= 0 or len(targets) <= max_targets:
+        return list(targets)
+
+    grouped_by_bucket: dict[int, list[dict]] = defaultdict(list)
+    for target in targets:
+        grouped_by_bucket[_site_window_bucket(target.get("name"))].append(target)
+
+    def _interleave_by_site(items: list[dict]) -> list[dict]:
+        by_site: dict[str, list[dict]] = defaultdict(list)
+        site_order: list[str] = []
+        for t in items:
+            name = str(t.get("name") or "").strip() or "unknown"
+            if name not in by_site:
+                site_order.append(name)
+            by_site[name].append(t)
+
+        site_priority_overrides = {
+            _normalize_space(k).lower(): int(v)
+            for k, v in ((search_cfg or {}).get("smart_window_site_priority") or {}).items()
+            if _normalize_space(k)
+        }
+
+        ordered: list[dict] = []
+        idx = 0
+        while len(ordered) < len(items):
+            added_this_round = False
+            round_site_order = sorted(
+                site_order,
+                key=lambda n: (site_priority_overrides.get(_normalize_space(n).lower(), 999), site_order.index(n)),
+            )
+            for name in round_site_order:
+                site_items = by_site.get(name) or []
+                if idx < len(site_items):
+                    ordered.append(site_items[idx])
+                    added_this_round = True
+            if not added_this_round:
+                break
+            idx += 1
+        return ordered
+
+    balanced: list[dict] = []
+    for bucket in sorted(grouped_by_bucket):
+        balanced.extend(_interleave_by_site(grouped_by_bucket[bucket]))
+
+    if not balanced:
+        return []
+
+    site_caps: dict[str, int] = {}
+    for raw_name, raw_cap in ((search_cfg or {}).get("smart_window_site_caps") or {}).items():
+        name_key = _normalize_space(raw_name).lower()
+        if not name_key:
+            continue
+        try:
+            cap = int(raw_cap)
+        except Exception:
+            continue
+        if cap < 0:
+            continue
+        site_caps[name_key] = cap
+
+    start = offset % len(balanced)
+    rotated = [balanced[(start + i) % len(balanced)] for i in range(len(balanced))]
+    if not site_caps:
+        return rotated[: min(max_targets, len(rotated))]
+
+    window: list[dict] = []
+    selected_by_site: dict[str, int] = defaultdict(int)
+    for target in rotated:
+        site_name = _normalize_space(target.get("name")).lower()
+        cap = site_caps.get(site_name)
+        if cap is not None and selected_by_site[site_name] >= cap:
+            continue
+        window.append(target)
+        selected_by_site[site_name] += 1
+        if len(window) >= max_targets:
+            break
+    return window
+
+
+def _site_window_bucket(name: str | None) -> int:
+    normalized = str(name or "").strip().lower()
+    bucket_map = {
+        "gov.uk find a job": 0,
+        "nhs jobs": 0,
+        "healthjobsuk": 0,
+        "jobs go public": 1,
+        "lg jobs": 1,
+        "moj jobs": 2,
+    }
+    return bucket_map.get(normalized, 1)
+
+
+def _site_priority(name: str | None) -> tuple[int, str]:
+    normalized = str(name or "").strip().lower()
+    priority_map = {
+        "gov.uk find a job": 0,
+        "nhs jobs": 1,
+        "healthjobsuk": 2,
+        "jobs go public": 3,
+        "lg jobs": 4,
+        "moj jobs": 5,
+    }
+    return (priority_map.get(normalized, 50), normalized)
+
+
+def _target_slot_key(target: dict) -> tuple[str, str] | None:
+    query = _normalize_space(target.get("query"))
+    location = _normalize_space(target.get("location"))
+    if not query or not location:
+        return None
+    location_key = _normalized_phrase_text(location.split(",", 1)[0])
+    if not location_key:
+        return None
+    return (query.lower(), location_key)
+
+
+def _dedupe_site_query_location_twins(targets: list[dict]) -> list[dict]:
+    """Prefer the stronger site when multiple sites cover the same query/location slot."""
+    grouped: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    ordered_entries: list[tuple[str, object]] = []
+    seen_slots: set[tuple[str, str]] = set()
+
+    for target in targets:
+        slot_key = _target_slot_key(target)
+        if slot_key is None:
+            ordered_entries.append(("target", target))
+            continue
+        if slot_key not in seen_slots:
+            seen_slots.add(slot_key)
+            ordered_entries.append(("slot", slot_key))
+        grouped[slot_key].append(target)
+
+    prioritized: list[dict] = []
+    deferred_groups: list[list[dict]] = []
+
+    for entry_type, value in ordered_entries:
+        if entry_type == "target":
+            prioritized.append(cast(dict, value))
+            continue
+        slot_key = cast(tuple[str, str], value)
+        items = sorted(grouped.get(slot_key, []), key=lambda t: _site_priority(t.get("name")))
+        if not items:
+            continue
+        prioritized.append(items[0])
+        if len(items) > 1:
+            deferred_groups.append(items[1:])
+
+    deferred = [item for group in deferred_groups for item in group]
+    return prioritized + deferred
 
 
 # -- Run all sites -----------------------------------------------------------
@@ -1243,6 +2147,8 @@ def _run_all(
     accept_locs: list[str],
     reject_locs: list[str],
     workers: int = 1,
+    salary_pref: dict | None = None,
+    exclude_titles: list[str] | None = None,
 ) -> dict:
     """Run smart extract on all targets.
 
@@ -1271,6 +2177,8 @@ def _run_all(
                 accept_locs,
                 reject_locs,
                 search_query=(target.get("query") if target.get("query") else None),
+                salary_pref=salary_pref,
+                exclude_titles=exclude_titles,
             )
             total_new += new
             total_existing += existing
@@ -1289,8 +2197,9 @@ def _run_all(
         # Sequential mode (default)
         for i, target in enumerate(targets):
             label = target["name"]
-            if target.get("query"):
-                label = f"{target['name']} [{target['query']}]"
+            details = [str(v) for v in (target.get("query"), target.get("location")) if str(v or "").strip()]
+            if details:
+                label = f"{target['name']} [{' | '.join(details)}]"
             log.info("[%d/%d] %s", i + 1, len(targets), label)
 
             r = _run_one_site(target["name"], target["url"])
@@ -1337,6 +2246,11 @@ def run_smart_extract(
 
     search_cfg = config.load_search_config()
     accept_locs, reject_locs = _load_location_filter(search_cfg)
+    try:
+        salary_pref = load_salary_preference(config.load_profile())
+    except Exception:
+        salary_pref = None
+    exclude_titles = search_cfg.get("exclude_titles") or []
 
     targets = build_scrape_targets(sites=sites, search_cfg=search_cfg)
 
@@ -1359,7 +2273,6 @@ def run_smart_extract(
     # Convenience: focus on UK sources only.
     if _env_flag("SMARTE_ONLY_UK", "0"):
         uk_names = {
-            "gov.uk find a job",
             "reed",
             "nhs jobs",
             "adzuna uk",
@@ -1380,7 +2293,6 @@ def run_smart_extract(
                     "jobs.theguardian.com",
                     "jobs.nhs.uk",
                     "jobs.ac.uk",
-                    "findajob.dwp.gov.uk",
                 )
             )
 
@@ -1404,14 +2316,22 @@ def run_smart_extract(
             if (t.get("query") is None) or (str(t.get("query") or "").strip().lower() not in block_queries)
         ]
 
+    targets = _dedupe_site_query_location_twins(targets)
+
     # Optional: cap number of targets (useful while tuning rate limits)
     try:
         max_targets = int(str(os.environ.get("SMARTE_MAX_TARGETS", "0")).strip() or "0")
     except Exception:
         max_targets = 0
+    try:
+        target_offset = int(str(os.environ.get("SMARTE_TARGET_OFFSET", "0")).strip() or "0")
+    except Exception:
+        target_offset = 0
     if max_targets > 0 and len(targets) > max_targets:
         log.info("Capping smart extract targets: %d -> %d (SMARTE_MAX_TARGETS)", len(targets), max_targets)
-        targets = targets[:max_targets]
+        if target_offset:
+            log.info("Rotating capped targets by %d (SMARTE_TARGET_OFFSET)", target_offset)
+        targets = _balanced_target_window(targets, max_targets=max_targets, offset=target_offset, search_cfg=search_cfg)
 
     if not targets:
         log.warning("No scrape targets configured. Create config/sites.yaml and searches.yaml.")
@@ -1427,4 +2347,11 @@ def run_smart_extract(
         workers,
     )
 
-    return _run_all(targets, accept_locs, reject_locs, workers=workers)
+    return _run_all(
+        targets,
+        accept_locs,
+        reject_locs,
+        workers=workers,
+        salary_pref=salary_pref,
+        exclude_titles=exclude_titles,
+    )

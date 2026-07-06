@@ -115,6 +115,188 @@ def test_assemble_resume_omits_projects_for_support_titles() -> None:
     assert "PROJECTS" not in out
 
 
+def test_assemble_resume_uses_configured_technical_projects_for_support_titles() -> None:
+    profile = _base_profile()
+    profile["resume_sections"] = {
+        "application_support_projects": [
+            {
+                "header": "Poultry ERP Management System",
+                "subtitle": "Technologies: Django REST Framework, React, SQL, REST APIs",
+                "bullets": [
+                    "Developed and supported an integrated ERP platform for poultry farm operations covering inventory, finance, sales, purchases, analytics, and operational reporting",
+                    "Investigated and resolved business logic, API, and data consistency issues across interconnected modules",
+                    "Worked with SQL-backed transactional data, automation workflows, and production-style operational processes",
+                ],
+            }
+        ]
+    }
+    data = {
+        "title": "Application Support Engineer",
+        "summary": "Application support engineer focused on resolving incidents and supporting production systems.",
+        "core_skills": ["SQL", "REST APIs", "Incident Management", "Monitoring", "Windows", "Linux"],
+        "skills": {"Core": "SQL, REST APIs, Incident Management"},
+        "experience": [
+            {
+                "header": "Application Support Engineer at Example Org",
+                "subtitle": "2024-2025",
+                "bullets": ["Investigated and resolved production issues across business-critical services [F1]"],
+            }
+        ],
+        "projects": [],
+        "education": "",
+    }
+
+    out = assemble_resume_text(data, profile)
+
+    assert "TECHNICAL PROJECTS" in out
+    assert "Poultry ERP Management System" in out
+    assert "Technologies: Django REST Framework, React, SQL, REST APIs" in out
+    assert "Developed and supported an integrated ERP platform" in out
+    assert "\nPROJECTS\n" not in out
+
+
+def test_assemble_resume_prefers_application_support_projects_from_job_context() -> None:
+    profile = _base_profile()
+    profile["resume_facts"]["preserved_projects"] = [
+        "Optimisation of Supply Chain Using Analytics and Visualisation in a BI Environment"
+    ]
+    profile["resume_sections"] = {
+        "application_support_projects": [
+            {
+                "header": "Poultry ERP Management System",
+                "subtitle": "Technologies: Django REST Framework, React, SQL, REST APIs",
+                "bullets": [
+                    "Developed and supported an integrated ERP platform for poultry farm operations covering inventory, finance, sales, purchases, analytics, and operational reporting",
+                    "Investigated and resolved business logic, API, and data consistency issues across interconnected modules",
+                ],
+            }
+        ]
+    }
+    data = {
+        "title": "Support Analyst",
+        "summary": "Support analyst focused on production incidents and business application stability.",
+        "core_skills": ["SQL", "REST APIs", "Incident Management", "Monitoring", "Windows", "Linux"],
+        "skills": {"Core": "SQL, REST APIs, Incident Management"},
+        "experience": [
+            {
+                "header": "Application Support Engineer at Example Org",
+                "subtitle": "2024-2025",
+                "bullets": ["Investigated and resolved production issues across business-critical services [F1]"],
+            }
+        ],
+        "projects": [],
+        "education": "",
+    }
+    job = {"title": "Application Support Engineer", "full_description": "Production support, application troubleshooting, SQL investigation."}
+
+    out = assemble_resume_text(data, profile, job=job)
+
+    assert "TECHNICAL PROJECTS" in out
+    assert "Poultry ERP Management System" in out
+    assert "Optimisation of Supply Chain" not in out
+
+
+def test_assemble_resume_uses_support_certifications_for_application_support_job_context() -> None:
+    profile = _base_profile()
+    profile["resume_sections"] = {
+        "support_certifications": [
+            "Microsoft 365 Certified: Fundamentals",
+            "ITIL 4 Foundation",
+        ]
+    }
+    data = {
+        "title": "Support Analyst",
+        "summary": "Application support analyst focused on production incidents and business application stability.",
+        "core_skills": ["SQL", "REST APIs", "Incident Management", "Monitoring", "Windows", "Linux"],
+        "skills": {"Core": "SQL, REST APIs, Incident Management"},
+        "experience": [
+            {
+                "header": "Application Support Engineer at Example Org",
+                "subtitle": "2024-2025",
+                "bullets": ["Investigated and resolved production issues across business-critical services [F1]"],
+            }
+        ],
+        "projects": [],
+        "education": "",
+    }
+    job = {"title": "", "full_description": "Application support, production support, SQL investigation, incident troubleshooting."}
+
+    out = assemble_resume_text(data, profile, job=job)
+
+    assert "CERTIFICATIONS" in out
+    assert "Microsoft 365 Certified: Fundamentals" in out
+    assert "ITIL 4 Foundation" in out
+
+
+def test_assemble_resume_prefers_data_projects_over_preserved_fallback() -> None:
+    profile = _base_profile()
+    profile["resume_facts"]["preserved_projects"] = [
+        "Optimisation of Supply Chain Using Analytics and Visualisation in a BI Environment"
+    ]
+    profile["resume_sections"] = {
+        "data_projects": [
+            {
+                "header": "Sales Performance Dashboard",
+                "subtitle": "Technologies: Power BI, SQL, Python",
+                "bullets": [
+                    "Built a dashboard for commercial reporting and KPI analysis",
+                    "Used SQL and Python to prepare and validate reporting datasets",
+                ],
+            }
+        ]
+    }
+    data = {
+        "title": "Reporting Analyst",
+        "summary": "Reporting analyst focused on dashboarding and analytics.",
+        "core_skills": ["SQL", "Python", "Power BI", "Excel", "ETL", "Reporting"],
+        "skills": {"Core": "SQL, Python, Power BI"},
+        "experience": [
+            {
+                "header": "Reporting Analyst at Example Org",
+                "subtitle": "2024-2025",
+                "bullets": ["Built KPI dashboards and reporting packs [F1]"],
+            }
+        ],
+        "projects": [],
+        "education": "",
+    }
+    job = {"title": "Data Analyst", "full_description": "Reporting, analytics, dashboards, Power BI, SQL."}
+
+    out = assemble_resume_text(data, profile, job=job)
+
+    assert "\nPROJECTS\n" in out
+    assert "Sales Performance Dashboard" in out
+    assert "Optimisation of Supply Chain" not in out
+
+
+def test_assemble_resume_uses_preserved_projects_as_general_fallback() -> None:
+    profile = _base_profile()
+    profile["resume_facts"]["preserved_projects"] = [
+        "Optimisation of Supply Chain Using Analytics and Visualisation in a BI Environment"
+    ]
+    data = {
+        "title": "Support Analyst",
+        "summary": "Support analyst focused on technical incidents and user support.",
+        "core_skills": ["Microsoft 365", "Windows", "SQL", "Service Desk", "Troubleshooting", "Documentation"],
+        "skills": {"Core": "Microsoft 365, Windows, SQL"},
+        "experience": [
+            {
+                "header": "Support Analyst at Example Org",
+                "subtitle": "2024-2025",
+                "bullets": ["Resolved technical issues across user and system workflows [F1]"],
+            }
+        ],
+        "projects": [],
+        "education": "",
+    }
+    job = {"title": "Support Analyst", "full_description": "Support incidents, user troubleshooting, service desk."}
+
+    out = assemble_resume_text(data, profile, job=job)
+
+    assert "TECHNICAL PROJECTS" in out
+    assert "Optimisation of Supply Chain Using Analytics and Visualisation in a BI Environment" in out
+
+
 def test_assemble_resume_normalizes_it_role_casing_in_headers() -> None:
     profile = _base_profile()
     data = {

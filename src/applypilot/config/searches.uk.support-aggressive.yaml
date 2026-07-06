@@ -112,6 +112,7 @@ boards:
   
 
 smart_sites:
+  - "GOV.UK Find a job"
   - "NHS Jobs"
   - "Jobs Go Public"
   - "LG Jobs"

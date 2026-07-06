@@ -85,10 +85,11 @@ def _job_blob(job: dict) -> str:
     return "\n".join(p for p in parts if p).lower()
 
 
-def _best_family(blob: str, families: list[dict] | None) -> tuple[int, dict] | None:
+def _best_family(blob: str, families: list[dict] | None, *, title_blob: str = "") -> tuple[int, dict] | None:
     if not isinstance(families, list):
         return None
     best: tuple[int, dict] | None = None
+    title_lower = str(title_blob or "").lower()
     for fam in families:
         if not isinstance(fam, dict):
             continue
@@ -100,7 +101,9 @@ def _best_family(blob: str, families: list[dict] | None) -> tuple[int, dict] | N
             ks = str(k or "").strip().lower()
             if not ks:
                 continue
-            if ks in blob:
+            if ks in title_lower:
+                hits += 3
+            elif ks in blob:
                 hits += 1
         if hits <= 0:
             continue
@@ -184,8 +187,8 @@ def route_resume_for_job(job: dict) -> RoutedResume:
         return RoutedResume(key="default", path=str(RESUME_PATH), text=base, score=0)
 
     blob = _job_blob(job)
-    role_best = _best_family(blob, families)
-    context_best = _best_family(blob, context_families)
+    role_best = _best_family(blob, families, title_blob=str(job.get("title") or ""))
+    context_best = _best_family(blob, context_families, title_blob=str(job.get("title") or ""))
 
     ctx_enabled = True
     ctx_override = True

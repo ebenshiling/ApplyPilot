@@ -14,6 +14,7 @@ import json
 import os
 import re
 import webbrowser
+from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 
@@ -23,6 +24,46 @@ from applypilot.config import APP_DIR, DB_PATH
 from applypilot.database import ensure_columns, get_connection
 
 console = Console()
+
+DASHBOARD_JOB_GROUP_BATCH = 50
+DASHBOARD_LARGE_DATASET_THRESHOLD = 1200
+DASHBOARD_PIPELINE_LOG_POLL_MS = 900
+DASHBOARD_PIPELINE_STATUS_FAST_POLL_MS = 1200
+DASHBOARD_PIPELINE_STATUS_IDLE_POLL_MS = 8000
+
+
+def _parse_iso_utc(raw: object) -> datetime | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _age_days(raw: object) -> int | None:
+    dt = _parse_iso_utc(raw)
+    if not dt:
+        return None
+    try:
+        return max(0, int((datetime.now(timezone.utc) - dt).total_seconds() // 86400))
+    except Exception:
+        return None
+
+
+def _age_label(raw: object) -> str:
+    days = _age_days(raw)
+    if days is None:
+        return ""
+    if days <= 0:
+        return "today"
+    if days == 1:
+        return "1d old"
+    return f"{days}d old"
 
 
 def generate_dashboard(
@@ -72,6 +113,8 @@ def generate_dashboard(
         for e in entries if isinstance(entries, list) else []:
             if not isinstance(e, dict):
                 continue
+            if bool(e.get("disabled")):
+                continue
             name = str(e.get("name") or "").strip()
             if not name:
                 continue
@@ -97,11 +140,26 @@ def generate_dashboard(
             "LG Jobs",
             "HealthJobsUK",
             "MoJ Jobs",
+            "Civil Service Jobs",
+        ]
+        if any(n.lower() == s.lower() for s in smart_site_names)
+    ]
+    uk_public_sponsor_defaults = [
+        n
+        for n in [
+            "NHS Jobs",
+            "HealthJobsUK",
+            "GOV.UK Find a job",
+            "Civil Service Jobs",
+            "MoJ Jobs",
+            "Jobs Go Public",
+            "LG Jobs",
         ]
         if any(n.lower() == s.lower() for s in smart_site_names)
     ]
     smart_catalog_js = json.dumps(smart_site_names, ensure_ascii=True)
     uk_smart_defaults_js = json.dumps(uk_smart_defaults, ensure_ascii=True)
+    uk_public_sponsor_defaults_js = json.dumps(uk_public_sponsor_defaults, ensure_ascii=True)
 
     # Stats
     total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
@@ -171,9 +229,10 @@ def generate_dashboard(
     jobs = conn.execute("""
          SELECT rowid AS id,
                 url, title, company, search_query, salary, description, location, site, strategy,
-                 full_description, application_url, detail_error,
-                sponsorship_explicit, sponsorship_evidence,
-                sponsor_licensed, sponsor_match_name, sponsor_match_confidence,
+                 discovered_at,
+                  full_description, application_url, detail_error,
+                 sponsorship_explicit, sponsorship_evidence,
+                 sponsor_licensed, sponsor_match_name, sponsor_match_confidence,
                  fit_score, score_reasoning,
                  tailored_resume_path, supporting_statement_path, cover_letter_path,
                  tailor_status, tailor_failure_detail, tailor_report_path, tailor_requirement_gaps, tailor_responsibility_map,
@@ -249,12 +308,25 @@ def generate_dashboard(
 
     # Job cards grouped by score
     job_sections = ""
+    jobs_compact: list[dict[str, object]] = []
+    jobs_compact_json = "[]"
     current_score = None
+    score_card_index = 0
+    initial_open_groups = 0
+    large_jobs_dataset = total >= DASHBOARD_LARGE_DATASET_THRESHOLD
     for j in jobs:
         score = j["fit_score"] or 0
-        if score != current_score:
+        if not large_jobs_dataset and score != current_score:
             if current_score is not None:
-                job_sections += "</div></details>"
+                job_sections += (
+                    '</div><div class="job-grid-more hidden" data-role="job-grid-more">'
+                    '<button type="button" class="filter-btn job-grid-more-btn" '
+                    'data-role="job-grid-more-btn" onclick="showMoreJobs('
+                    + str(current_score)
+                    + ')">Show more</button>'
+                    '<span class="job-grid-more-note" data-role="job-grid-more-note"></span>'
+                    "</div></details>"
+                )
             score_color = "#10b981" if score >= 7 else "#f59e0b"
             score_label = {
                 10: "Perfect Match",
@@ -266,8 +338,10 @@ def generate_dashboard(
             }.get(score, f"Score {score}")
             count_at_score = score_dist.get(score, 0)
 
-            # Default collapsed for moderate sections (5-6) to reduce clutter.
-            open_attr = " open" if score >= 7 else ""
+            # Large datasets start lighter: only the first strong-fit score group
+            # is expanded on first paint; smaller datasets keep the previous 7+ default.
+            should_open = score >= 7 and (not large_jobs_dataset or initial_open_groups < 1)
+            open_attr = " open" if should_open else ""
             job_sections += f"""
             <details class="score-group" data-score-group="{score}"{open_attr}>
               <summary class="score-header" style="border-color:{score_color}">
@@ -276,18 +350,31 @@ def generate_dashboard(
               </summary>
               <div class="job-grid">"""
             current_score = score
+            score_card_index = 0
+            if should_open:
+                initial_open_groups += 1
 
         jid = str(j["id"])
-        title = escape(j["title"] or "Untitled")
-        company = escape(j["company"] or "")
+        title_raw = str(j["title"] or "Untitled")
+        title = escape(title_raw)
+        company_raw = str(j["company"] or "")
+        company = escape(company_raw)
         role_query_raw = str(j["search_query"] or "").strip()
         role_query_label = role_query_raw if role_query_raw else "Unassigned"
-        url = escape(j["url"] or "")
-        salary = escape(j["salary"] or "")
-        location = escape(j["location"] or "")
-        site = escape(j["site"] or "")
-        site_color = colors.get(j["site"] or "", "#6b7280")
-        apply_url = escape(j["application_url"] or j["url"] or "")
+        url_raw = str(j["url"] or "")
+        url = escape(url_raw)
+        salary_raw = str(j["salary"] or "")
+        salary = escape(salary_raw)
+        location_raw = str(j["location"] or "")
+        location = escape(location_raw)
+        site_raw = str(j["site"] or "")
+        site = escape(site_raw)
+        site_color = colors.get(site_raw or "", "#6b7280")
+        apply_url_raw = str(j["application_url"] or j["url"] or "")
+        apply_url = escape(apply_url_raw)
+        discovered_at_raw = str(j["discovered_at"] or "").strip()
+        job_age_days = _age_days(discovered_at_raw)
+        job_age_label = _age_label(discovered_at_raw)
 
         sponsor_policy = str(j["sponsorship_explicit"] or "Unknown").strip() or "Unknown"
         sponsor_licensed = str(j["sponsor_licensed"] or "Unknown").strip() or "Unknown"
@@ -315,18 +402,37 @@ def generate_dashboard(
             "manual": "Manual",
         }.get(status_raw, status_raw[:20] if status_raw else "Ready")
 
-        # Parse keywords and reasoning from score_reasoning
         reasoning_raw = j["score_reasoning"] or ""
         reasoning_lines = reasoning_raw.split("\n")
         keywords = reasoning_lines[0][:120] if reasoning_lines else ""
         reasoning = reasoning_lines[1][:200] if len(reasoning_lines) > 1 else ""
-
         tailor_status = str(j["tailor_status"] or "").strip().lower()
+        cover_status = str(j["cover_letter_status"] or "").strip().lower()
+        full_desc_raw = str(j["full_description"] or "")
+        preview_source = str(j["description"] or "") or full_desc_raw
+        desc_preview_text = re.sub(r"\s+", " ", preview_source).strip()[:300]
+        search_blob = " ".join(
+            [
+                title_raw,
+                company_raw,
+                site_raw,
+                status_label,
+                salary_raw,
+                location_raw,
+                role_query_label,
+            ]
+        )
+        search_blob = re.sub(r"\s+", " ", search_blob).strip().lower()[:420]
+
+        if large_jobs_dataset:
+            score_card_index += 1
+            continue
+
+        # Parse keywords and reasoning from score_reasoning
         tailor_failure_detail = str(j["tailor_failure_detail"] or "").strip()
         tailor_report_path = str(j["tailor_report_path"] or "").strip()
         raw_gap_json = str(j["tailor_requirement_gaps"] or "").strip()
         raw_resp_map_json = str(j["tailor_responsibility_map"] or "").strip()
-        cover_status = str(j["cover_letter_status"] or "").strip().lower()
         cover_failure_detail = str(j["cover_letter_failure_detail"] or "").strip()
         cover_report_path = str(j["cover_letter_report_path"] or "").strip()
         raw_cover_diag_json = str(j["cover_letter_diagnostics"] or "").strip()
@@ -415,7 +521,6 @@ def generate_dashboard(
             except Exception:
                 cover_diag_details = ""
 
-        full_desc_raw = str(j["full_description"] or "")
         desc_preview = escape(full_desc_raw[:300])
         desc_len = len(full_desc_raw)
 
@@ -461,23 +566,13 @@ def generate_dashboard(
             meta_parts.append(f'<span class="meta-tag location">{location[:40]}</span>')
         if role_query_raw:
             meta_parts.append(f'<span class="meta-tag">{escape(role_query_raw[:36])}</span>')
+        if job_age_label:
+            age_title = escape(discovered_at_raw) if discovered_at_raw else ""
+            meta_parts.append(f'<span class="meta-tag" title="Discovered: {age_title}">{escape(job_age_label)}</span>')
         meta_html = " ".join(meta_parts)
 
         # Precompute a compact searchable blob to avoid expensive `textContent` scans
         # over large hidden sections (full description, diagnostics, etc.).
-        search_blob = " ".join(
-            [
-                str(title or ""),
-                str(company or ""),
-                str(site or ""),
-                str(status_label or ""),
-                str(salary or ""),
-                str(location or ""),
-                str(role_query_label or ""),
-            ]
-        )
-        search_blob = re.sub(r"\s+", " ", search_blob).strip().lower()[:420]
-
         footer_links: list[str] = []
         if url:
             footer_links.append(f'<a href="{url}" class="apply-link" target="_blank">Listing</a>')
@@ -487,17 +582,17 @@ def generate_dashboard(
         # Live actions (work in `applypilot dashboard --serve` mode)
         if status_raw == "selected":
             footer_links.append(
-                f'<button class="apply-link primary" data-live="1" onclick="selectJob({jid}, false)">Unpick</button>'
+                f'<button type="button" class="apply-link primary" data-live="1" onclick="selectJob({jid}, false)">Unpick</button>'
             )
         else:
             footer_links.append(
-                f'<button class="apply-link primary" data-live="1" onclick="selectJob({jid}, true, true)">Pick</button>'
+                f'<button type="button" class="apply-link primary" data-live="1" onclick="selectJob({jid}, true, false)">Pick</button>'
             )
-        footer_links.append(f'<button class="apply-link" data-live="1" onclick="markApplied({jid})">Applied</button>')
-        footer_links.append(f'<button class="apply-link" data-live="1" onclick="markFailed({jid})">Failed</button>')
-        footer_links.append(f'<button class="apply-link danger" data-live="1" onclick="blockJob({jid})">Block</button>')
+        footer_links.append(f'<button type="button" class="apply-link" data-live="1" onclick="markApplied({jid})">Applied</button>')
+        footer_links.append(f'<button type="button" class="apply-link" data-live="1" onclick="markFailed({jid})">Failed</button>')
+        footer_links.append(f'<button type="button" class="apply-link danger" data-live="1" onclick="blockJob({jid})">Block</button>')
         footer_links.append(
-            f'<button class="apply-link danger" data-live="1" onclick="deleteJob({jid})">Delete</button>'
+            f'<button type="button" class="apply-link danger" data-live="1" onclick="deleteJob({jid})">Delete</button>'
         )
         # Copy-to-clipboard helpers for manual marking
         footer_links.append(
@@ -508,8 +603,9 @@ def generate_dashboard(
         )
         apply_html = "".join(footer_links)
 
+        initial_hidden_class = " paginated-hidden" if score_card_index >= DASHBOARD_JOB_GROUP_BATCH else ""
         job_sections += f"""
-        <div class="job-card" data-id="{jid}" data-score="{score}" data-group="{score}" data-text="{escape(search_blob)}" data-site="{escape(j["site"] or "")}" data-status="{escape(status_raw)}" data-location="{location.lower()}" data-role="{escape(role_query_label.lower())}" data-company="{company}" data-sponsor-policy="{escape(sponsor_policy.lower())}" data-sponsor-licensed="{escape(sponsor_licensed.lower())}">
+        <div class="job-card{initial_hidden_class}" data-id="{jid}" data-score="{score}" data-group="{score}" data-card-index="{score_card_index}" data-text="{escape(search_blob)}" data-site="{escape(j["site"] or "")}" data-status="{escape(status_raw)}" data-location="{location.lower()}" data-role="{escape(role_query_label.lower())}" data-company="{company}" data-sponsor-policy="{escape(sponsor_policy.lower())}" data-sponsor-licensed="{escape(sponsor_licensed.lower())}" data-age-days="{'' if job_age_days is None else job_age_days}">
           <div class="card-header">
             <span class="score-pill" style="background:{"#10b981" if score >= 7 else "#f59e0b"}">{score}</span>
             <span class="meta-tag" title="Stable job ID for manual marking">#{jid}</span>
@@ -529,9 +625,23 @@ def generate_dashboard(
           {f"<details class='full-desc-details'><summary class='expand-btn'>Cover report path</summary><div class='full-desc'>{escape(cover_report_path)}</div></details>" if cover_report_path and not j["cover_letter_path"] else ""}
           <div class="card-footer">{apply_html}</div>
         </div>"""
+        score_card_index += 1
 
-    if current_score is not None:
-        job_sections += "</div></details>"
+    if large_jobs_dataset:
+        job_sections = (
+            '<div class="job-desc" id="jobs-virtual-hint">Large dataset mode: rendering jobs on demand.</div>'
+            '<div id="jobs-virtual-root"></div>'
+        )
+    elif current_score is not None:
+        job_sections += (
+            '</div><div class="job-grid-more hidden" data-role="job-grid-more">'
+            '<button type="button" class="filter-btn job-grid-more-btn" '
+            'data-role="job-grid-more-btn" onclick="showMoreJobs(' + str(current_score) + ')">Show more</button>'
+            '<span class="job-grid-more-note" data-role="job-grid-more-note"></span>'
+            "</div></details>"
+        )
+
+    large_jobs_dataset_js = "true" if large_jobs_dataset else "false"
 
     html = f"""<!DOCTYPE html>
  <html lang="en">
@@ -723,11 +833,10 @@ def generate_dashboard(
     inset: 0;
     z-index: -1;
     pointer-events: none;
-    opacity: 0.22;
+    opacity: 0.18;
     background-image:
       repeating-linear-gradient(0deg, var(--grid-1) 0px, var(--grid-1) 1px, transparent 1px, transparent 14px),
       repeating-linear-gradient(90deg, var(--grid-2) 0px, var(--grid-2) 1px, transparent 1px, transparent 18px);
-    mix-blend-mode: multiply;
   }}
 
   a {{ color: inherit; }}
@@ -745,8 +854,7 @@ def generate_dashboard(
     background: var(--card);
     border: 1px solid var(--line);
     border-radius: 16px;
-    box-shadow: 0 10px 30px rgba(2,6,23,0.08);
-    backdrop-filter: blur(10px);
+    box-shadow: 0 4px 16px rgba(2,6,23,0.08);
   }}
   h1 {{
     font-family: 'Fraunces', serif;
@@ -777,8 +885,7 @@ def generate_dashboard(
     border: 1px solid var(--line);
     border-radius: 14px;
     padding: 0.95rem 1rem;
-    box-shadow: 0 10px 26px rgba(2,6,23,0.06);
-    backdrop-filter: blur(10px);
+    box-shadow: 0 2px 8px rgba(2,6,23,0.06);
   }}
   .stat-num {{ font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 1.55rem; font-weight: 600; letter-spacing: -0.02em; }}
   .stat-label {{ color: var(--muted); font-size: 0.78rem; margin-top: 0.15rem; }}
@@ -801,8 +908,7 @@ def generate_dashboard(
     gap: 0.6rem 0.75rem;
     flex-wrap: wrap;
     align-items: center;
-    box-shadow: 0 10px 26px rgba(2,6,23,0.06);
-    backdrop-filter: blur(10px);
+    box-shadow: 0 2px 8px rgba(2,6,23,0.06);
   }}
   .filter-label {{ color: var(--text-soft); font-size: 0.78rem; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; }}
   .filter-btn {{
@@ -813,9 +919,9 @@ def generate_dashboard(
     border-radius: 999px;
     cursor: pointer;
     font-size: 0.8rem;
-    transition: transform 0.12s, background 0.12s, border-color 0.12s;
+    transition: transform 0.12s;
   }}
-  .filter-btn:hover {{ transform: translateY(-1px); border-color: rgba(2,6,23,0.20); background: var(--surface-strong); }}
+  .filter-btn:hover {{ transform: translateY(-1px); }}
   .filter-btn.active {{ background: rgba(29,78,216,0.14); border-color: rgba(29,78,216,0.25); color: var(--text-strong); }}
   .filter-btn:disabled {{ opacity: 0.45; cursor: not-allowed; transform: none; }}
   .search-input, .select-input {{
@@ -867,7 +973,7 @@ def generate_dashboard(
 
   /* Score distribution */
   .score-section {{ display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0 1.25rem; }}
-  .score-dist, .sites-section {{ background: var(--panel-bg); border: 1px solid var(--line); border-radius: 16px; padding: 1rem; box-shadow: var(--shadow); backdrop-filter: blur(10px); }}
+  .score-dist, .sites-section {{ background: var(--panel-bg); border: 1px solid var(--line); border-radius: 16px; padding: 1rem; box-shadow: 0 2px 8px rgba(2,6,23,0.08); }}
   .score-dist h3, .sites-section h3 {{ font-family: 'Fraunces', serif; font-size: 1.08rem; margin-bottom: 0.75rem; color: var(--panel-title); }}
 
   .panel {{ border: none; }}
@@ -931,7 +1037,7 @@ def generate_dashboard(
     gap: 0.75rem;
     cursor: pointer;
     background: var(--panel-bg-2);
-    box-shadow: var(--shadow);
+    box-shadow: 0 2px 8px rgba(2,6,23,0.08);
   }}
   .score-header::-webkit-details-marker {{ display: none; }}
   .score-header::marker {{ content: ""; }}
@@ -952,6 +1058,20 @@ def generate_dashboard(
 
   /* Job grid */
   .job-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 0.9rem; }}
+  .job-grid-more {{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    margin: 0.95rem 0 0;
+    padding: 0.2rem 0.25rem;
+  }}
+  .job-grid-more-note {{
+    font-size: 0.8rem;
+    color: var(--muted);
+    font-weight: 600;
+  }}
+  .job-card.paginated-hidden {{ display: none !important; }}
 
   .job-card {{
     background: var(--job-card-bg);
@@ -959,14 +1079,13 @@ def generate_dashboard(
     padding: 0.95rem 0.95rem 0.85rem;
     border: 1px solid var(--job-card-border);
     border-left: 6px solid rgba(2,6,23,0.15);
-    transition: transform 0.14s, box-shadow 0.14s, border-color 0.14s;
-    box-shadow: var(--shadow);
-    backdrop-filter: blur(10px);
+    transition: transform 0.14s;
+    box-shadow: 0 2px 8px rgba(2,6,23,0.10);
     content-visibility: auto;
     contain: layout paint style;
     contain-intrinsic-size: 520px;
   }}
-  .job-card:hover {{ transform: translateY(-2px); box-shadow: var(--shadow); border-color: rgba(2,6,23,0.16); }}
+  .job-card:hover {{ transform: translateY(-2px); }}
   .job-card[data-score="9"], .job-card[data-score="10"] {{ border-left-color: rgba(15,118,110,0.92); }}
   .job-card[data-score="8"] {{ border-left-color: rgba(15,118,110,0.70); }}
   .job-card[data-score="7"] {{ border-left-color: rgba(29,78,216,0.82); }}
@@ -1085,6 +1204,39 @@ def generate_dashboard(
   }}
     .toast.show {{ opacity: 1; transform: translateY(0); }}
 
+  .cleanup-panel {{ margin-top: 0.7rem; }}
+  .cleanup-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.5rem;
+    align-items: start;
+  }}
+  .cleanup-note {{ margin-top: 0.5rem; }}
+
+  .modal-backdrop {{
+    position: fixed;
+    inset: 0;
+    background: rgba(2, 6, 23, 0.72);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    z-index: 60;
+  }}
+  .modal-backdrop.show {{ display: flex; }}
+  .modal-card {{
+    width: min(100%, 560px);
+    background: rgba(15, 23, 42, 0.98);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 18px;
+    box-shadow: 0 24px 60px rgba(2, 6, 23, 0.42);
+    padding: 1rem;
+  }}
+  .modal-title {{ font-size: 1.02rem; font-weight: 800; color: rgba(248,250,252,0.98); margin-bottom: 0.4rem; }}
+  .modal-text {{ color: rgba(226,232,240,0.88); font-size: 0.9rem; line-height: 1.45; }}
+  .modal-input-wrap {{ margin-top: 0.75rem; }}
+  .modal-actions {{ display:flex; gap:0.5rem; justify-content:flex-end; margin-top:0.9rem; flex-wrap:wrap; }}
+
   .meta {{
     color: var(--panel-text);
     font-size: 0.78rem;
@@ -1130,8 +1282,8 @@ def generate_dashboard(
         border: 1px solid var(--line);
         border-radius: 16px;
         padding: 0.75rem;
-        box-shadow: var(--shadow);
-        backdrop-filter: blur(10px);
+        box-shadow: 0 2px 8px rgba(2,6,23,0.10);
+        will-change: transform;
       }}
       .setup-nav h3 {{
         font-family: 'Fraunces', serif;
@@ -1158,7 +1310,7 @@ def generate_dashboard(
         font-size: 0.84rem;
         font-weight: 700;
         margin: 0 0 0.4rem 0;
-        transition: transform 0.12s, background 0.12s, border-color 0.12s;
+    transition: transform 0.12s;
       }}
       .setup-nav button:hover {{
         transform: translateY(-1px);
@@ -1181,8 +1333,7 @@ def generate_dashboard(
         border: 1px solid var(--line);
         border-radius: 16px;
         padding: 0.95rem;
-        box-shadow: var(--shadow);
-        backdrop-filter: blur(10px);
+        box-shadow: 0 2px 8px rgba(2,6,23,0.08);
       }}
       .setup-section .section-head {{
         display: flex;
@@ -1231,11 +1382,14 @@ def generate_dashboard(
       .setup-body .search-input, .setup-body .select-input {{
         width: 100%;
       }}
-      .setup-body .panel-body {{
-        max-height: none;
-        overflow: visible;
-        padding-right: 0;
-      }}
+  .setup-body .panel-body {{
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }}
+  .diff-added {{ color: #14532d; background: rgba(34,197,94,0.10); display:block; padding:0.05rem 0.25rem; border-radius:8px; }}
+  .diff-removed {{ color: #7f1d1d; background: rgba(239,68,68,0.10); display:block; padding:0.05rem 0.25rem; border-radius:8px; }}
+  .diff-same {{ color: var(--text-strong); display:block; padding:0.05rem 0.25rem; }}
 
       .setup-card {{
         background: var(--setup-card-bg);
@@ -1347,6 +1501,83 @@ def generate_dashboard(
         .studio-grid {{ grid-template-columns: 1fr; }}
       }}
 
+  /* ── Top-level page navigation ── */
+  .page-nav {{
+    display: flex;
+    gap: 0.35rem;
+    align-items: center;
+    padding: 0.45rem 0.55rem;
+    background: var(--panel-bg);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    margin: 0.65rem 0 0.85rem;
+    box-shadow: 0 2px 8px rgba(2,6,23,0.10);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    will-change: transform;
+  }}
+  .page-nav-label {{
+    font-family: 'Fraunces', serif;
+    font-weight: 800;
+    font-size: 0.88rem;
+    color: var(--panel-title);
+    margin-right: 0.25rem;
+    white-space: nowrap;
+  }}
+  .page-nav-btn {{
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 700;
+    font-size: 0.84rem;
+    padding: 0.42rem 0.85rem;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--text-strong);
+    cursor: pointer;
+    transition: transform 0.12s;
+    white-space: nowrap;
+  }}
+  .page-nav-btn:hover {{
+    transform: translateY(-1px);
+  }}
+  .page-nav-btn.active {{
+    background: rgba(29,78,216,0.12);
+    border-color: rgba(29,78,216,0.28);
+    box-shadow: 0 0 0 3px rgba(29,78,216,0.08);
+    color: var(--text-strong);
+  }}
+  .page-nav-sep {{
+    width: 1px;
+    height: 22px;
+    background: var(--line);
+    margin: 0 0.15rem;
+  }}
+  .page-container {{
+    display: none;
+  }}
+  .page-container.page-active {{
+    display: block;
+  }}
+  /* When Setup is shown as its own page, remove the details/summary wrapper styles */
+  .page-container .setup-panel-unwrapped {{
+    background: var(--panel-bg);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 1rem;
+    box-shadow: 0 2px 8px rgba(2,6,23,0.08);
+  }}
+  @media (max-width: 768px) {{
+    .page-nav {{
+      flex-wrap: wrap;
+      gap: 0.3rem;
+    }}
+    .page-nav-btn {{
+      font-size: 0.78rem;
+      padding: 0.35rem 0.65rem;
+    }}
+  }}
+
   .hidden {{ display: none !important; }}
   .job-count {{ color: rgba(2,6,23,0.70); font-size: 0.9rem; margin: 0.35rem 0 0.85rem; font-weight: 700; }}
 
@@ -1413,6 +1644,17 @@ def generate_dashboard(
     <button class="apply-link copy-btn" onclick="copyCmd('applypilot dashboard-serve')">Copy command</button>
   </div>
 </div>
+
+ <nav class="page-nav motion-2" aria-label="Page navigation">
+   <span class="page-nav-label">View:</span>
+   <button type="button" class="page-nav-btn active" data-page="jobs" onclick="navigatePage('jobs')">Jobs</button>
+   <div class="page-nav-sep"></div>
+   <button type="button" class="page-nav-btn" data-page="pipeline" onclick="navigatePage('pipeline')">Pipeline</button>
+   <div class="page-nav-sep"></div>
+   <button type="button" class="page-nav-btn" data-page="setup" onclick="navigatePage('setup')">Setup</button>
+ </nav>
+
+ <div class="page-container page-active" id="page-jobs" data-page="jobs">
 
  <div class="summary motion-2">
    <div class="stat-card stat-total"><div class="stat-num">{active}</div><div class="stat-label">Active Jobs</div></div>
@@ -1495,13 +1737,61 @@ def generate_dashboard(
     <option value="unknown">Unknown</option>
   </select>
 
+  <span class="filter-label">Age:</span>
+  <select class="select-input" onchange="filterAgeDays(this.value)">
+    <option value="0" selected>Any</option>
+    <option value="7">7+ days</option>
+    <option value="14">14+ days</option>
+    <option value="30">30+ days</option>
+    <option value="60">60+ days</option>
+    <option value="90">90+ days</option>
+  </select>
+
   <span class="filter-label" style="margin-left:1rem">Search:</span>
   <input type="text" class="search-input" placeholder="Filter by title, company, tags..." oninput="filterText(this.value)">
-  <button type="button" class="filter-btn" data-live="1" onclick="deleteVisibleJobs()">Delete shown</button>
-  <button type="button" class="filter-btn" data-live="1" onclick="deleteRoleJobs()">Delete role</button>
 </div>
 
- <div class="filters motion-2" id="pipeline-controls" style="margin-top:-0.75rem">
+ <details class="panel cleanup-panel">
+  <summary>Cleanup</summary>
+  <div class="panel-body">
+   <div class="cleanup-grid">
+    <button type="button" class="filter-btn" data-live="1" onclick="deleteVisibleJobs()">Delete shown</button>
+    <button type="button" class="filter-btn" data-live="1" onclick="deleteRoleJobs()">Delete role</button>
+    <button type="button" class="filter-btn" data-live="1" onclick="deleteLowScoreJobs()">Delete score &lt; 7</button>
+    <button type="button" class="filter-btn" data-live="1" onclick="deleteUnscoredJobs()">Delete unscored</button>
+    <button type="button" class="filter-btn" data-live="1" onclick="deleteOldJobsPrompt()">Delete old...</button>
+    <button type="button" class="filter-btn" data-live="1" onclick="deleteOldScoredJobsPrompt()">Delete old scored...</button>
+    <button type="button" class="filter-btn" data-live="1" onclick="deleteOldUnscoredJobsPrompt()">Delete old unscored...</button>
+    <button type="button" class="filter-btn" data-live="1" onclick="deleteOldLowScoreJobsPrompt()">Delete old score &lt; 7...</button>
+   </div>
+   <div class="job-desc cleanup-note">Rule-based cleanup actions preview the match count first, then ask for confirmation. They do not depend on the current visible list unless you choose `Delete shown` or `Delete role`.</div>
+  </div>
+ </details>
+
+ <div class="score-section motion-3">
+  <div class="score-dist">
+    <details class="panel" open>
+      <summary>Score Distribution</summary>
+      <div class="panel-body">{score_bars}</div>
+    </details>
+  </div>
+  <div class="sites-section">
+    <details class="panel" open>
+      <summary>By Source</summary>
+      <div class="panel-body">{site_rows}</div>
+    </details>
+  </div>
+ </div>
+
+ <div id="job-count" class="job-count"></div>
+
+{job_sections}
+
+ </div><!-- /page-jobs -->
+
+ <div class="page-container" id="page-pipeline" data-page="pipeline">
+
+ <div class="filters motion-2" id="pipeline-controls" style="margin-top:0">
   <span class="filter-label">Pipeline:</span>
   <span class="filter-label" style="opacity:0.85">Presets:</span>
   <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['discover','enrich','score','tailor','statement','cover','pdf'])">All</button>
@@ -1531,6 +1821,7 @@ def generate_dashboard(
   <label class="toggle" title="Tailor/Cover/Apply only process picked jobs">
     <input id="pipe-selected-only" type="checkbox"> Selected only
   </label>
+  <button type="button" class="filter-btn" data-live="1" onclick="clearSelectedJobs()">Clear picks</button>
   <label class="toggle" title="Reduce strict tailor validation blockers for faster approvals">
     <input id="pipe-tailor-lenient" type="checkbox"> Lenient tailor mode
   </label>
@@ -1549,27 +1840,40 @@ def generate_dashboard(
   <label class="toggle" title="Skip smart-extract discovery">
     <input id="pipe-skip-smarte" type="checkbox"> No Smart
   </label>
+  <button type="button" class="filter-btn" data-live="1" onclick="pipelineUseNhsGovPreset()">NHS/Gov preset</button>
   <button type="button" class="filter-btn" data-live="1" data-pipe-stop="1" onclick="pipelineStop()">Stop</button>
   <button type="button" class="filter-btn" data-live="1" data-pipe-clear="1" onclick="pipelineClear()">Clear</button>
 </div>
 
- <div class="score-section motion-3">
-  <div class="score-dist">
-    <details class="panel" open>
-      <summary>Score Distribution</summary>
-      <div class="panel-body">{score_bars}</div>
-    </details>
+<details class="score-group" id="pipeline-console" open>
+  <summary class="score-header" style="border-color:rgba(2,6,23,0.18)">
+    <span class="score-badge" style="background:rgba(2,6,23,0.08);color:rgba(2,6,23,0.82)">*</span>
+    Pipeline Console
+  </summary>
+  <div class="job-grid" style="grid-template-columns:1fr">
+    <div class="job-card" style="padding:0.85rem">
+      <div style="display:flex;gap:0.5rem;align-items:center;justify-content:space-between;flex-wrap:wrap">
+        <div class="meta" style="margin:0">
+          <span class="meta-tag">Recent runs</span>
+          <span class="meta-tag" id="pipe-recent-hint">Click a run to load its log</span>
+        </div>
+        <div style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap">
+          <button type="button" class="apply-link copy-btn" data-live="1" onclick="pipelineRefreshRecent()">Refresh</button>
+          <button type="button" class="apply-link copy-btn" onclick="pipelineJumpToBottom()">Bottom</button>
+          <button type="button" class="apply-link copy-btn" data-live="1" onclick="pipelinePollOnce()">Poll</button>
+        </div>
+      </div>
+      <div id="pipe-recent" style="margin-top:0.6rem; display:flex; flex-direction:column; gap:0.35rem"></div>
+    </div>
+    <pre id="pipeline-log" class="full-desc" style="max-height:480px"></pre>
   </div>
-  <div class="sites-section">
-    <details class="panel" open>
-      <summary>By Source</summary>
-      <div class="panel-body">{site_rows}</div>
-    </details>
-  </div>
- </div>
+</details>
 
-  <details class="panel motion-3" id="setup-panel" open>
-    <summary>Setup</summary>
+ </div><!-- /page-pipeline -->
+
+ <div class="page-container" id="page-setup" data-page="setup">
+
+  <div class="setup-panel-unwrapped" id="setup-panel">
     <div class="panel-body setup-body">
       <div class="meta" style="margin:0 0 0.65rem 0">
         <span class="meta-tag">Workspace</span>
@@ -1588,6 +1892,7 @@ def generate_dashboard(
           <div class="nav-help">Set up your profile, resume, searches, and generation tools.</div>
           <button type="button" data-target="setup-sec-diagnostics" onclick="setupJump('setup-sec-diagnostics')">Diagnostics</button>
           <button type="button" data-target="setup-sec-studio" onclick="setupJump('setup-sec-studio')">Statement Studio</button>
+          <button type="button" data-target="setup-sec-job-match" onclick="setupJump('setup-sec-job-match')">Job Match Studio</button>
           <button type="button" data-target="setup-sec-profile" onclick="setupJump('setup-sec-profile')">Quick Profile</button>
           <button type="button" data-target="setup-sec-full-profile" onclick="setupJump('setup-sec-full-profile')">Full Profile</button>
           <button type="button" data-target="setup-sec-resume" onclick="setupJump('setup-sec-resume')">Resume</button>
@@ -1662,6 +1967,12 @@ def generate_dashboard(
               <button type="button" class="apply-link copy-btn" data-live="1" onclick="studioUseSavedResume()">Use saved resume.txt</button>
               <button type="button" class="apply-link copy-btn" data-live="1" onclick="studioClear('studio-resume')">Clear resume</button>
             </div>
+
+            <div class="meta" style="margin-top:0.65rem"><span class="meta-tag">Extra facts / evidence guide</span></div>
+            <textarea id="studio-facts" class="full-desc" style="min-height:140px" placeholder="Optional: paste truthful role-specific evidence not already in the CV, e.g. testing projects, SQL examples, NHS values evidence, system notes. The generator may use this, but must not invent beyond it."></textarea>
+            <div class="setup-actions">
+              <button type="button" class="apply-link copy-btn" data-live="1" onclick="studioClear('studio-facts')">Clear facts</button>
+            </div>
           </div>
 
           <div class="studio-pane">
@@ -1678,6 +1989,138 @@ def generate_dashboard(
             </div>
 
             <textarea id="studio-output" class="full-desc studio-output" placeholder="Generated statement appears here..."></textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="setup-section" id="setup-sec-job-match">
+        <div class="section-head">
+          <div class="section-title">Job Match Studio</div>
+          <div class="section-desc">Paste a job description and CV, score the fit, then generate a tailored CV only when the score is high enough.</div>
+        </div>
+
+        <div class="studio-grid">
+          <div class="studio-pane">
+            <div class="meta"><span class="meta-tag">Job title</span></div>
+            <input id="match-title" class="search-input" placeholder="e.g. Data Analyst / IT Support Analyst">
+
+            <div class="meta" style="margin-top:0.45rem"><span class="meta-tag">Company / organisation</span></div>
+            <input id="match-org" class="search-input" placeholder="e.g. NHS England">
+
+            <div class="meta" style="margin-top:0.45rem"><span class="meta-tag">Location</span></div>
+            <input id="match-location" class="search-input" placeholder="e.g. Remote / London / Derby">
+
+            <div class="meta" style="margin-top:0.45rem;display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap">
+              <span class="meta-tag">Min score</span>
+              <input id="match-min-score" class="search-input" style="width:90px" value="7" inputmode="numeric" pattern="[0-9]*">
+              <select id="match-variant-key" class="select-input" style="width:220px">
+                <option value="">Choose saved variant...</option>
+              </select>
+              <span class="meta-tag" id="match-score-pill">score: -</span>
+            </div>
+
+            <div class="setup-actions" style="margin-top:0.45rem">
+              <label class="toggle" title="Copy the tailored CV to clipboard automatically after successful generation">
+                <input id="match-auto-copy" type="checkbox"> Auto-copy tailored CV
+              </label>
+            </div>
+
+            <textarea id="match-resume" class="full-desc" style="min-height:220px" placeholder="Paste the CV/resume text you want to match..."></textarea>
+            <div class="setup-actions">
+              <button type="button" class="apply-link copy-btn" data-live="1" onclick="matchUseSavedResume()">Use saved resume.txt</button>
+              <button type="button" class="apply-link copy-btn" data-live="1" onclick="matchUseVariant()">Use selected variant</button>
+              <button type="button" class="apply-link copy-btn" data-live="1" onclick="matchSaveAsVariant(this)">Save CV as selected variant</button>
+              <button type="button" class="apply-link copy-btn" data-live="1" onclick="matchDuplicateVariant(this)">Duplicate selected variant</button>
+              <button type="button" class="apply-link copy-btn" data-live="1" onclick="matchRenameVariant(this)">Rename selected variant</button>
+              <button type="button" class="apply-link copy-btn" onclick="matchPinVariant()">Pin selected variant</button>
+              <button type="button" class="apply-link copy-btn" data-live="1" onclick="studioClear('match-resume')">Clear CV</button>
+            </div>
+          </div>
+
+          <div class="studio-pane">
+            <div class="meta"><span class="meta-tag">Job description</span></div>
+            <textarea id="match-job" class="full-desc" style="min-height:260px" placeholder="Paste the full job description and person specification here..."></textarea>
+            <div class="setup-actions">
+              <button type="button" class="apply-link copy-btn" data-live="1" onclick="studioClear('match-job')">Clear job</button>
+            </div>
+
+            <div class="setup-actions" style="margin-top:0.2rem">
+              <button type="button" class="apply-link copy-btn" data-live="1" onclick="matchGenerate(this)">Score + tailor CV</button>
+              <button type="button" class="apply-link copy-btn" onclick="matchCopyOutput()">Copy tailored CV</button>
+              <button type="button" class="apply-link copy-btn" id="match-download-txt" onclick="matchDownloadCurrent('txt')" disabled>Download TXT</button>
+              <button type="button" class="apply-link copy-btn" id="match-download-pdf" onclick="matchDownloadCurrent('pdf')" disabled>Download PDF</button>
+              <span class="job-desc" id="match-status" style="margin-left:0.25rem">Idle.</span>
+            </div>
+
+            <div class="job-desc" id="match-result-meta" style="margin:0.55rem 0 0.5rem 0">No result yet.</div>
+            <textarea id="match-output" class="full-desc studio-output" placeholder="Tailored CV appears here when score threshold is met..."></textarea>
+
+            <div class="setup-card" style="margin-top:0.85rem">
+              <div style="display:flex;gap:0.5rem;align-items:center;justify-content:space-between;flex-wrap:wrap">
+                <div class="meta" style="margin:0">
+                  <span class="meta-tag">Recent job matches</span>
+                  <span class="meta-tag" id="match-history-hint">Latest manual score + tailor runs</span>
+                </div>
+                <div class="setup-actions" style="margin:0">
+                  <input id="match-history-search" class="search-input" style="width:240px" placeholder="Filter history by role, org, score..." oninput="matchApplyHistoryFilter()">
+                  <select id="match-history-sort" class="select-input" style="width:180px" onchange="matchApplyHistoryFilter()">
+                    <option value="newest">Newest</option>
+                    <option value="oldest">Oldest</option>
+                    <option value="score_desc">Score high-low</option>
+                    <option value="score_asc">Score low-high</option>
+                    <option value="title_asc">Title A-Z</option>
+                    <option value="org_asc">Org A-Z</option>
+                  </select>
+                  <input id="match-history-import-file" type="file" accept="application/json,.json" style="display:none" onchange="matchImportHistoryFile(this)">
+                  <button type="button" class="apply-link copy-btn" data-live="1" onclick="matchExportHistory()">Export</button>
+                  <button type="button" class="apply-link copy-btn" data-live="1" onclick="matchPickImportHistory()">Import</button>
+                  <button type="button" class="apply-link copy-btn" data-live="1" onclick="matchRefreshHistory()">Refresh</button>
+                  <button type="button" class="apply-link copy-btn" data-live="1" onclick="matchClearHistory()">Clear history</button>
+                </div>
+              </div>
+              <div class="setup-actions" style="margin-top:0.4rem">
+                <select id="match-history-view" class="select-input" style="width:190px" onchange="matchApplySavedView()">
+                  <option value="">Saved views...</option>
+                </select>
+                <button type="button" class="apply-link copy-btn" onclick="matchSaveCurrentView()">Save view</button>
+                <button type="button" class="apply-link copy-btn" onclick="matchDeleteCurrentView()">Delete view</button>
+              </div>
+              <div class="setup-actions" style="margin-top:0.45rem">
+                <button type="button" class="apply-link copy-btn" id="match-chip-all" onclick="matchSetQuickFilter('all', this)">All</button>
+                <button type="button" class="apply-link copy-btn" id="match-chip-favorite" onclick="matchSetQuickFilter('favorite', this)">Favorites</button>
+                <button type="button" class="apply-link copy-btn" id="match-chip-tailored" onclick="matchSetQuickFilter('tailored', this)">Tailored</button>
+                <button type="button" class="apply-link copy-btn" id="match-chip-approved" onclick="matchSetQuickFilter('approved', this)">Approved</button>
+                <button type="button" class="apply-link copy-btn" id="match-chip-skipped" onclick="matchSetQuickFilter('skipped', this)">Skipped</button>
+                <button type="button" class="apply-link copy-btn" id="match-chip-high" onclick="matchSetQuickFilter('high', this)">Score 7+</button>
+                <button type="button" class="apply-link copy-btn" id="match-chip-low" onclick="matchSetQuickFilter('low', this)">Score &lt;7</button>
+              </div>
+              <div class="setup-actions" style="margin-top:0.35rem">
+                <button type="button" class="apply-link copy-btn" onclick="matchToggleSelectPage()">Select page</button>
+                <button type="button" class="apply-link copy-btn" onclick="matchClearBulkSelection()">Clear selection</button>
+                <button type="button" class="apply-link copy-btn" onclick="matchBulkFavorite(true)">Bulk favorite</button>
+                <button type="button" class="apply-link copy-btn" onclick="matchBulkFavorite(false)">Bulk unfavorite</button>
+                <button type="button" class="apply-link copy-btn danger" onclick="matchBulkDelete()">Bulk delete</button>
+                <span class="meta-tag" id="match-bulk-meta">selected: 0</span>
+              </div>
+              <div class="meta" id="match-page-meta" style="margin-top:0.45rem">Page 1</div>
+              <div class="setup-actions" style="margin-top:0.35rem">
+                <button type="button" class="apply-link copy-btn" onclick="matchPrevPage()">Prev</button>
+                <button type="button" class="apply-link copy-btn" onclick="matchNextPage()">Next</button>
+              </div>
+              <div id="match-history" style="margin-top:0.6rem;display:flex;flex-direction:column;gap:0.35rem"></div>
+              <details class="panel" style="margin-top:0.7rem">
+                <summary>Base vs Tailored Diff</summary>
+                <div class="panel-body">
+                  <div class="job-desc" id="match-diff-summary">Load a history item to inspect CV changes.</div>
+                  <div class="setup-actions" style="margin:0.35rem 0">
+                    <button type="button" class="apply-link copy-btn" onclick="matchCompareSelected()">Compare selected pair</button>
+                    <button type="button" class="apply-link copy-btn" onclick="matchClearComparePair()">Clear compare pair</button>
+                    <span class="meta-tag" id="match-compare-meta">compare: none</span>
+                  </div>
+                  <pre id="match-diff" class="full-desc" style="max-height:320px"></pre>
+                </div>
+              </details>
+            </div>
           </div>
         </div>
       </section>
@@ -1933,6 +2376,13 @@ def generate_dashboard(
             <span class="meta-tag">tailoring</span>
           </div>
           <div class="fields-2">
+            <label class="job-desc" style="margin:0">Tailoring mode
+              <select id="setup-tailoring-mode" class="select-input" style="width:100%;margin-top:0.3rem">
+                <option value="factual">Factual (recommended)</option>
+                <option value="balanced">Balanced</option>
+                <option value="aggressive">Aggressive</option>
+              </select>
+            </label>
             <label class="job-desc" style="margin:0">Role pack
               <select id="setup-role-pack" class="select-input" style="width:100%;margin-top:0.3rem">
                 <option value="auto">Auto (recommended)</option>
@@ -1954,7 +2404,7 @@ def generate_dashboard(
                 <div class="section-title" style="font-size:1.02rem">Resume Template Builder (No JSON Needed)</div>
                 <div class="section-desc">No JSON needed. Update skills/education/certs and preserved facts.</div>
               </div>
-              <div class="job-desc" style="margin:0 0 0.55rem 0">Add/update skills, education, certifications, and preserved resume facts here. Use comma or newline separators. Legacy keys are auto-mapped (for example: bi_tools, spreadsheets, data_practices, capabilities).</div>
+              <div class="job-desc" style="margin:0 0 0.55rem 0">Add/update skills, education, certifications, and preserved resume facts here. Use comma or newline separators. Legacy keys are auto-mapped (for example: bi_tools, spreadsheets, data_practices, capabilities). Use the role-specific technical project editors below for Data/BI, Support, and Application Support roles. Preserved projects remain the general fallback bucket.</div>
               <div class="fields-2" style="gap:0.45rem">
                 <label class="job-desc" style="margin:0">Skills: Languages / Programming
                   <textarea id="setup-tpl-languages" class="full-desc" style="min-height:74px;max-height:120px;margin-top:0.3rem" placeholder="SQL, Python, TypeScript"></textarea>
@@ -1983,6 +2433,15 @@ def generate_dashboard(
                 </label>
                 <label class="job-desc" style="margin:0;grid-column:1 / -1">Technical environment
                   <textarea id="setup-tpl-techenv" class="full-desc" style="min-height:82px;max-height:130px;margin-top:0.3rem" placeholder="Tools: Power BI, Excel, SQL Server"></textarea>
+                </label>
+                <label class="job-desc" style="margin:0;grid-column:1 / -1">Data / BI technical projects
+                  <textarea id="setup-tpl-data-projects" class="full-desc" style="min-height:132px;max-height:210px;margin-top:0.3rem" placeholder="Supply Chain Dashboard&#10;Technologies: Power BI, SQL, Python&#10;- Built a reporting and analytics dashboard&#10;- Used SQL and Python to prepare datasets&#10;&#10;Leave a blank line between projects"></textarea>
+                </label>
+                <label class="job-desc" style="margin:0;grid-column:1 / -1">Support technical projects
+                  <textarea id="setup-tpl-support-projects" class="full-desc" style="min-height:118px;max-height:180px;margin-top:0.3rem" placeholder="Project title&#10;Technologies: Windows, Microsoft 365, ServiceNow&#10;- Supported incident resolution and user administration&#10;- Investigated access, device, and endpoint issues&#10;&#10;Leave a blank line between projects"></textarea>
+                </label>
+                <label class="job-desc" style="margin:0;grid-column:1 / -1">Application support technical projects
+                  <textarea id="setup-tpl-app-support-projects" class="full-desc" style="min-height:132px;max-height:210px;margin-top:0.3rem" placeholder="Poultry ERP Management System&#10;Technologies: Django REST Framework, React, SQL, REST APIs&#10;- Developed and supported an integrated ERP platform&#10;- Investigated and resolved business logic and API issues&#10;&#10;Leave a blank line between projects"></textarea>
                 </label>
 
                 <label class="job-desc" style="margin:0">Preserved projects
@@ -2016,7 +2475,7 @@ def generate_dashboard(
             </label>
 
             <label class="job-desc" style="margin:0;grid-column:1 / -1">resume_sections (JSON object)
-              <textarea id="setup-resume-sections" class="full-desc" style="min-height:110px;max-height:180px;margin-top:0.35rem" placeholder="JSON object (education, certifications, technical_environment)"></textarea>
+              <textarea id="setup-resume-sections" class="full-desc" style="min-height:110px;max-height:180px;margin-top:0.35rem" placeholder="JSON object (education, certifications, technical_environment, data_projects, support_projects, application_support_projects)"></textarea>
             </label>
 
             <label class="job-desc" style="margin:0;grid-column:1 / -1">resume_validation (JSON object)
@@ -2053,101 +2512,225 @@ def generate_dashboard(
               <input id="setup-adv-yaml" type="checkbox" onchange="setupToggleAdvancedYaml(this.checked)"> Advanced YAML
             </label>
             <button type="button" class="apply-link copy-btn" onclick="setupInsertSearchExample()">Insert example</button>
-            <button type="button" class="apply-link copy-btn" data-live="1" onclick="setupSaveSearches(this)">Save searches.yaml</button>
+            <button type="button" class="apply-link copy-btn" data-live="1" onclick="setupSaveSearches(this)">Save builder to searches.yaml</button>
           </div>
 
           <div id="setup-search-builder" style="margin-top:0.65rem">
             <div class="fields-2">
-              <input id="search-country" class="search-input" placeholder="Country (e.g. USA, Canada, UK)">
-              <input id="search-location" class="search-input" placeholder="Primary location text (e.g. Remote, New York, NY)">
+              <label class="job-desc" style="margin:0">Country
+                <input id="search-country" class="search-input" style="margin-top:0.3rem" placeholder="e.g. UK, USA, Canada">
+              </label>
+              <label class="job-desc" style="margin:0">Primary location
+                <input id="search-location" class="search-input" style="margin-top:0.3rem" placeholder="e.g. Remote, London, UK">
+              </label>
               <label class="toggle" style="grid-column:1 / -1">
                 <input id="search-remote" type="checkbox" checked onchange="setupSearchRemoteChanged(this.checked)"> Remote allowed
               </label>
-              <input id="search-cities" class="search-input" style="grid-column:1 / -1" placeholder="Cities/regions (comma-separated, optional)">
-              <input id="search-roles" class="search-input" style="grid-column:1 / -1" placeholder="Roles (comma-separated, e.g. Backend Engineer, Full Stack Developer)">
-              <input id="search-hours-old" class="search-input" placeholder="Hours old (e.g. 72)" inputmode="numeric">
-              <input id="search-results" class="search-input" placeholder="Results per site (e.g. 50)" inputmode="numeric">
-              <input id="search-boards" class="search-input" style="grid-column:1 / -1" placeholder="JobSpy boards (csv: indeed,linkedin,glassdoor,zip_recruiter,google)">
-              <input id="search-smart-sites" list="smart-site-options" class="search-input" style="grid-column:1 / -1" placeholder="Smart sites (csv by name, optional; empty = all)">
+              <label class="job-desc" style="margin:0;grid-column:1 / -1">Cities / regions
+                <input id="search-cities" class="search-input" style="margin-top:0.3rem" placeholder="Comma-separated, e.g. London, UK, Manchester, UK, Birmingham, UK">
+              </label>
+              <label class="job-desc" style="margin:0;grid-column:1 / -1">Target roles / search queries
+                <input id="search-roles" class="search-input" style="margin-top:0.3rem" placeholder="Comma-separated, e.g. IT Support Analyst, Application Support Engineer, Service Desk Analyst">
+              </label>
+              <label class="job-desc" style="margin:0">How far back to search
+                <input id="search-hours-old" class="search-input" style="margin-top:0.3rem" placeholder="Hours old, e.g. 24, 48, 72" inputmode="numeric">
+              </label>
+              <label class="job-desc" style="margin:0">Volume per site
+                <input id="search-results" class="search-input" style="margin-top:0.3rem" placeholder="Results per site, e.g. 8, 10, 25, 50" inputmode="numeric">
+              </label>
+              <label class="job-desc" style="margin:0;grid-column:1 / -1">JobSpy boards
+                <input id="search-boards" class="search-input" style="margin-top:0.3rem" placeholder="CSV, e.g. indeed or indeed,linkedin">
+              </label>
+              <label class="job-desc" style="margin:0;grid-column:1 / -1">Smart-site boards
+                <input id="search-smart-sites" list="smart-site-options" class="search-input" style="margin-top:0.3rem" placeholder="CSV by display name; empty means all smart sites">
+              </label>
               <datalist id="smart-site-options">
                 {"".join(f'<option value="{escape(n)}"></option>' for n in smart_site_names)}
               </datalist>
               <div class="setup-actions" style="grid-column:1 / -1;margin-top:0">
                 <button type="button" class="apply-link copy-btn" onclick="setupUseUkSmartSites()">Use UK smart sites</button>
+                <button type="button" class="apply-link copy-btn" onclick="setupUseNhsPublicSponsorPreset()">Use NHS/Gov sponsor focus</button>
                 <button type="button" class="apply-link copy-btn" onclick="setupClearSmartSites()">Clear smart filter</button>
                 <span class="meta-tag">Pick 1 or many sites; empty uses all smart sites</span>
               </div>
-              <textarea id="search-exclude" class="full-desc" style="min-height:88px;max-height:140px;grid-column:1 / -1" placeholder="Exclude title keywords (one per line, optional)"></textarea>
+              <label class="job-desc" style="margin:0;grid-column:1 / -1">Exclude title keywords
+                <textarea id="search-exclude" class="full-desc" style="min-height:88px;max-height:140px;margin-top:0.3rem" placeholder="One per line, optional. Example: senior, lead, manager, principal"></textarea>
+              </label>
             </div>
             <div class="setup-actions">
-              <button type="button" class="apply-link copy-btn" onclick="setupGenerateSearchesYaml()">Generate YAML</button>
+              <button type="button" class="apply-link copy-btn" onclick="setupGenerateSearchesYaml()">Preview generated YAML</button>
               <span class="meta-tag" id="search-guardrails">guardrails: on</span>
             </div>
           </div>
 
           <textarea id="setup-searches" class="full-desc" style="display:none;min-height:160px;max-height:260px;margin-top:0.65rem" placeholder="searches.yaml (advanced mode)"></textarea>
-          <div class="job-desc" style="margin-top:0.5rem">Guardrails: JobSpy boards are validated; smart site names support 1..N selection; hours_old capped to 720; results_per_site capped to 300; empty roles default to Software Engineer.</div>
+          <div class="job-desc" style="margin-top:0.5rem">Guardrails: JobSpy boards are validated; smart site names support 1..N selection; hours_old capped to 720; results_per_site capped to 300; empty roles default to Software Engineer. For sponsorship search, prefer NHS Jobs, HealthJobsUK, GOV.UK Find a job, Civil Service Jobs, MoJ Jobs and licensed-sponsor checks after enrichment.</div>
       </section>
 
         </div>
       </div>
     </div>
-  </details>
+  </div><!-- /setup-panel-unwrapped -->
 
- <div id="job-count" class="job-count"></div>
+ </div><!-- /page-setup -->
 
  <div id="toast" class="toast" role="status" aria-live="polite"></div>
-
-<details class="score-group" id="pipeline-console" open>
-  <summary class="score-header" style="border-color:rgba(2,6,23,0.18)">
-    <span class="score-badge" style="background:rgba(2,6,23,0.08);color:rgba(2,6,23,0.82)">*</span>
-    Pipeline Console
-  </summary>
-  <div class="job-grid" style="grid-template-columns:1fr">
-    <div class="job-card" style="padding:0.85rem">
-      <div style="display:flex;gap:0.5rem;align-items:center;justify-content:space-between;flex-wrap:wrap">
-        <div class="meta" style="margin:0">
-          <span class="meta-tag">Recent runs</span>
-          <span class="meta-tag" id="pipe-recent-hint">Click a run to load its log</span>
-        </div>
-        <div style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap">
-          <button type="button" class="apply-link copy-btn" data-live="1" onclick="pipelineRefreshRecent()">Refresh</button>
-          <button type="button" class="apply-link copy-btn" onclick="pipelineJumpToBottom()">Bottom</button>
-          <button type="button" class="apply-link copy-btn" data-live="1" onclick="pipelinePollOnce()">Poll</button>
-        </div>
-      </div>
-      <div id="pipe-recent" style="margin-top:0.6rem; display:flex; flex-direction:column; gap:0.35rem"></div>
-    </div>
-    <pre id="pipeline-log" class="full-desc" style="max-height:260px"></pre>
+ <div id="cleanup-modal" class="modal-backdrop" aria-hidden="true">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="cleanup-modal-title">
+   <div id="cleanup-modal-title" class="modal-title">Confirm cleanup</div>
+   <div id="cleanup-modal-text" class="modal-text">Review the cleanup action.</div>
+   <div id="cleanup-modal-input-wrap" class="modal-input-wrap" style="display:none">
+    <label class="job-desc" style="margin:0">Days threshold
+      <input id="cleanup-modal-days" class="search-input" style="margin-top:0.35rem" inputmode="numeric" pattern="[0-9]*" placeholder="30">
+    </label>
+   </div>
+   <div class="modal-actions">
+    <button type="button" class="apply-link copy-btn" onclick="cleanupModalCancel()">Cancel</button>
+    <button type="button" class="apply-link danger" id="cleanup-modal-confirm" onclick="cleanupModalConfirm()">Confirm</button>
+   </div>
   </div>
-</details>
-
-{job_sections}
+ </div>
 
  <script>
+// ── Page navigation with hash routing ──
+let _currentPage = 'jobs';
+const _validPages = ['jobs', 'pipeline', 'setup'];
+
+function navigatePage(page) {{
+  if (!_validPages.includes(page)) page = 'jobs';
+  _currentPage = page;
+
+  // Update nav buttons
+  document.querySelectorAll('.page-nav-btn[data-page]').forEach(btn => {{
+    btn.classList.toggle('active', btn.getAttribute('data-page') === page);
+  }});
+
+  // Show/hide page containers
+  document.querySelectorAll('.page-container[data-page]').forEach(container => {{
+    const isActive = container.getAttribute('data-page') === page;
+    container.classList.toggle('page-active', isActive);
+  }});
+
+  // Update hash without triggering scroll
+  if (window.location.hash !== '#' + page) {{
+    history.replaceState(null, '', '#' + page);
+  }}
+
+  // Scroll to top of content when switching pages
+  window.scrollTo({{ top: 0, behavior: 'smooth' }});
+
+  if (page === 'pipeline') {{
+    try {{ ensurePipelinePageReady(); }} catch (e) {{}}
+  }}
+
+  // If switching to setup, trigger the nav observer init
+  if (page === 'setup') {{
+    try {{ ensureSetupPageReady(); }} catch (e) {{}}
+    try {{ setupInitNavObserver(); }} catch (e) {{}}
+  }}
+}}
+
+// Initialize page from hash on load
+function _initPageFromHash() {{
+  const hash = (window.location.hash || '').replace('#', '').toLowerCase();
+  const page = _validPages.includes(hash) ? hash : 'jobs';
+  navigatePage(page);
+}}
+
+// Listen for back/forward navigation
+window.addEventListener('hashchange', function() {{
+  const hash = (window.location.hash || '').replace('#', '').toLowerCase();
+  if (_validPages.includes(hash) && hash !== _currentPage) {{
+    navigatePage(hash);
+  }}
+}});
+
+// Initialize on load
+window.addEventListener('DOMContentLoaded', _initPageFromHash);
+// Fallback if DOMContentLoaded already fired
+if (document.readyState !== 'loading') _initPageFromHash();
+
 let minScore = 7;
 let searchText = '';
 let siteText = '';
 let statusText = 'active';
 let roleText = '';
 let sponsorFilter = '';
+let ageDaysFilter = 0;
 let hideModerate = true;
+const _largeJobsDataset = {large_jobs_dataset_js};
+const _jobsCompact = {jobs_compact_json};
+const _jobsApiPageSize = {DASHBOARD_JOB_GROUP_BATCH};
 const SMART_SITE_CATALOG = {smart_catalog_js};
 const SMART_UK_DEFAULTS = {uk_smart_defaults_js};
+const SMART_UK_PUBLIC_SPONSOR_DEFAULTS = {uk_public_sponsor_defaults_js};
+let _matchCurrentRun = null;
 
 // Performance: cache DOM lists once; avoid repeated expensive queries.
-const _jobCards = Array.from(document.querySelectorAll('.job-card[data-id]'));
-const _scoreGroups = Array.from(document.querySelectorAll('.score-group[data-score-group]'));
+const _jobCards = _largeJobsDataset ? [] : Array.from(document.querySelectorAll('.job-card[data-id]'));
+const _scoreGroups = _largeJobsDataset ? [] : Array.from(document.querySelectorAll('.score-group[data-score-group]'));
+const _scoreGroupMeta = _scoreGroups.map(group => ({{
+  key: (group.dataset.scoreGroup || '').toString(),
+  el: group,
+  cards: Array.from(group.querySelectorAll('.job-card[data-id]')),
+  moreWrap: group.querySelector('[data-role="job-grid-more"]'),
+  moreBtn: group.querySelector('[data-role="job-grid-more-btn"]'),
+  moreNote: group.querySelector('[data-role="job-grid-more-note"]')
+}}));
 const _jobCountEl = document.getElementById('job-count');
+const _JOB_GROUP_BATCH = {DASHBOARD_JOB_GROUP_BATCH};
+const _JOB_FILTER_CHUNK = 250;
+const _jobVisibleLimitByGroup = {{}};
 let _filterTimer = null;
+let _applyFiltersSeq = 0;
 
 let _pipeSince = 0;
+let _pipeRenderedSeq = 0;
 let _pipeTimer = null;
 let _pipeStatusTimer = null;
 let _pipeRunning = false;
+let _pipePollingFast = false;
 let _pipeApiOk = true;
 let _pipePollWarned = false;
 let _setupLoadedProfile = {{}};
+let _servedInitDone = false;
+let _pipelineInitDone = false;
+let _setupInitDone = false;
+
+function ensurePipelinePageReady() {{
+  if (_pipelineInitDone || window.location.protocol === 'file:') return;
+  _pipelineInitDone = true;
+  pipelineCheckApiOnce();
+  pipelineInitFromHistory();
+  pipelineStartPolling(false);
+  pipelinePollOnce();
+  pipelineRefreshStatusOnce();
+}}
+
+function ensureSetupPageReady() {{
+  if (_setupInitDone || window.location.protocol === 'file:') return;
+  _setupInitDone = true;
+  setupRefresh(null);
+
+  try {{
+    const pdf = document.getElementById('setup-resume-pdf');
+    if (pdf) pdf.addEventListener('change', () => setupUpdatePdfName());
+    setupUpdatePdfName();
+  }} catch (e) {{}}
+
+  try {{
+    const adv = document.getElementById('setup-adv-yaml');
+    if (adv) setupToggleAdvancedYaml(!!adv.checked);
+    setupInitSearchBuilderDefaults();
+    setupLoadWorkspace(true, null);
+    setupInitNavObserver();
+    _setupNavSetActive('setup-sec-diagnostics');
+  }} catch (e) {{}}
+
+  try {{ diagPing(true); }} catch (e) {{}}
+  try {{ _matchSyncAutoCopyToggle(); }} catch (e) {{}}
+  try {{ matchRefreshHistory(); }} catch (e) {{}}
+}}
 
 // Setup action UX helpers
 function _btnBusy(btn, on, label) {{
@@ -2180,7 +2763,7 @@ function _setupNavSetActive(id) {{
   try {{
     const btns = document.querySelectorAll('.setup-nav button[data-target]');
     btns.forEach(b => b.classList.remove('active'));
-    const b = document.querySelector(`.setup-nav button[data-target="${id}"]`);
+    const b = document.querySelector(`.setup-nav button[data-target="${{id}}"]`);
     if (b) b.classList.add('active');
   }} catch (e) {{}}
 }}
@@ -2205,6 +2788,142 @@ function setupInitNavObserver() {{
 let _variantKey = 'it_support_analyst';
 let _variantCache = {{}};
 let _variantLoaded = {{}};
+let _matchPage = 1;
+const _MATCH_PAGE_SIZE = 5;
+let _matchHistoryRuns = [];
+let _matchQuickFilter = 'all';
+let _matchCompareIds = [];
+let _matchSelectedIds = [];
+
+function _variantPins() {{
+  try {{
+    const raw = window.localStorage.getItem('applypilot.variant.pins') || '[]';
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.map(x => String(x || '').trim().toLowerCase()).filter(Boolean) : [];
+  }} catch (e) {{}}
+  return [];
+}}
+
+function _saveVariantPins(pins) {{
+  try {{
+    window.localStorage.setItem('applypilot.variant.pins', JSON.stringify((pins || []).slice(0, 20)));
+  }} catch (e) {{}}
+}}
+
+function _historyViews() {{
+  try {{
+    const raw = window.localStorage.getItem('applypilot.match.views') || '{{}}';
+    const obj = JSON.parse(raw);
+    return (obj && typeof obj === 'object' && !Array.isArray(obj)) ? obj : {{}};
+  }} catch (e) {{}}
+  return {{}};
+}}
+
+function _saveHistoryViews(obj) {{
+  try {{ window.localStorage.setItem('applypilot.match.views', JSON.stringify(obj || {{}})); }} catch (e) {{}}
+}}
+
+function _syncHistoryViewsSelect() {{
+  const el = document.getElementById('match-history-view');
+  if (!el) return;
+  const cur = String((el.value || '')).trim();
+  const views = _historyViews();
+  el.innerHTML = '<option value="">Saved views...</option>';
+  Object.keys(views).sort().forEach(name => {{
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    el.appendChild(opt);
+  }});
+  if (cur && views[cur]) el.value = cur;
+}}
+
+function _jobMatchSelectedVariantKey() {{
+  const el = document.getElementById('match-variant-key');
+  const picked = ((el || {{}}).value || '').toString().trim().toLowerCase();
+  return picked || _variantKey;
+}}
+
+function _jobMatchSyncVariantPicker(variants) {{
+  const el = document.getElementById('match-variant-key');
+  if (!el) return;
+  const current = ((el.value || '').toString().trim().toLowerCase()) || _variantKey;
+  const arr = Array.isArray(variants) ? variants : [];
+  el.innerHTML = '<option value="">Choose saved variant...</option>';
+  const pins = _variantPins();
+
+  const seen = {{}};
+  const addOpt = (key, label) => {{
+    const k = String(key || '').trim().toLowerCase();
+    if (!k || seen[k]) return;
+    seen[k] = true;
+    const opt = document.createElement('option');
+    opt.value = k;
+    opt.textContent = (pins.includes(k) ? '[PIN] ' : '') + (label || k);
+    el.appendChild(opt);
+  }};
+
+  const tabs = document.querySelectorAll('.tab-btn[data-variant-key]');
+  tabs.forEach(b => addOpt(b.getAttribute('data-variant-key') || '', (b.textContent || '').trim()));
+  arr.forEach(v => addOpt((v && v.key) || '', (v && v.key) || 'variant'));
+  el.value = seen[current] ? current : '';
+}}
+
+function matchPinVariant() {{
+  const key = _jobMatchSelectedVariantKey();
+  if (!key) {{ toast('Pick a variant first', 'warn', 2600); return; }}
+  const pins = _variantPins();
+  const idx = pins.indexOf(key);
+  if (idx >= 0) pins.splice(idx, 1);
+  else pins.unshift(key);
+  _saveVariantPins(pins);
+  _jobMatchSyncVariantPicker(Array.from(document.querySelectorAll('.tab-btn[data-variant-key]')).map(b => ({{ key: String(b.getAttribute('data-variant-key') || '').trim().toLowerCase() }})));
+  _setVal('match-variant-key', key);
+  toast((idx >= 0 ? 'Unpinned ' : 'Pinned ') + key, 'success', 2200);
+}}
+
+function _currentHistoryState() {{
+  return {{
+    search: _matchHistoryFilterValue(),
+    sort: _matchHistorySortValue(),
+    quick: _matchQuickFilter || 'all'
+  }};
+}}
+
+function matchSaveCurrentView() {{
+  const name = prompt('Save current history view as:', '') || '';
+  const key = String(name || '').trim();
+  if (!key) return;
+  const views = _historyViews();
+  views[key] = _currentHistoryState();
+  _saveHistoryViews(views);
+  _syncHistoryViewsSelect();
+  _setVal('match-history-view', key);
+  toast('Saved view: ' + key, 'success', 2200);
+}}
+
+function matchApplySavedView() {{
+  const name = (((document.getElementById('match-history-view') || {{}}).value || '') + '').trim();
+  if (!name) return;
+  const view = _historyViews()[name] || {{}};
+  _setVal('match-history-search', view.search || '');
+  _setVal('match-history-sort', view.sort || 'newest');
+  _matchQuickFilter = String(view.quick || 'all');
+  _matchSyncQuickFilterButtons();
+  matchApplyHistoryFilter();
+}}
+
+function matchDeleteCurrentView() {{
+  const el = document.getElementById('match-history-view');
+  const name = (((el || {{}}).value || '') + '').trim();
+  if (!name) {{ toast('Pick a saved view first', 'warn', 2400); return; }}
+  const views = _historyViews();
+  delete views[name];
+  _saveHistoryViews(views);
+  _syncHistoryViewsSelect();
+  if (el) el.value = '';
+  toast('Deleted view: ' + name, 'success', 2200);
+}}
 
 function variantsSelect(key, btn) {{
   _variantKey = String(key || '').trim().toLowerCase() || 'it_support_analyst';
@@ -2371,6 +3090,11 @@ function filterSponsorship(val) {{
   applyFilters();
 }}
 
+function filterAgeDays(days) {{
+  ageDaysFilter = Math.max(0, parseInt(days || '0', 10) || 0);
+  applyFilters();
+}}
+
 function filterText(text) {{
   searchText = text.toLowerCase();
   // Debounce typing; filtering can touch thousands of cards.
@@ -2378,55 +3102,274 @@ function filterText(text) {{
   _filterTimer = setTimeout(() => {{ try {{ applyFilters(); }} catch (e) {{}} }}, 140);
  }}
 
-function applyFilters() {{
-  let shown = 0;
-  const total = _jobCards.length;
-  const groupVisible = {{}};
+function _jobMatchesFilters(job) {{
+  if (!job) return false;
+  const score = parseInt(job.score || 0, 10) || 0;
+  const text = String(job.search_text || '').toLowerCase();
+  const scoreMatch = score >= (minScore || 5);
+  const moderateMatch = !hideModerate || score >= 7;
+  const textMatch = !searchText || text.includes(searchText);
+  const siteMatch = !siteText || String(job.site || '').toLowerCase() === siteText;
+  const status = String(job.status || '').toLowerCase();
+  const statusMatch = !statusText
+    || (statusText === 'active' && !['applied','failed','skipped','blocked','manual'].includes(status))
+    || status === statusText;
+  const roleMatch = !roleText || String(job.role || '').toLowerCase() === roleText;
+  const ageDays = parseInt(job.age_days || job.ageDays || 0, 10);
+  const ageMatch = !ageDaysFilter || ((!isNaN(ageDays)) && ageDays >= ageDaysFilter);
 
-  for (let i = 0; i < _jobCards.length; i++) {{
-    const card = _jobCards[i];
-    const score = parseInt(card.dataset.score) || 0;
-    const text = card.dataset.text || '';
-    const scoreMatch = score >= (minScore || 5);
-    const moderateMatch = !hideModerate || score >= 7;
-    const textMatch = !searchText || text.includes(searchText);
-    const siteMatch = !siteText || (card.dataset.site || '').toLowerCase() === siteText;
-    const status = (card.dataset.status || '').toLowerCase();
-    const statusMatch = !statusText
-      || (statusText === 'active' && !['applied','failed','skipped','blocked','manual'].includes(status))
-      || status === statusText;
-    const roleMatch = !roleText || (card.dataset.role || '').toLowerCase() === roleText;
+  const pol = String(job.sponsor_policy || '').toLowerCase();
+  const lic = String(job.sponsor_licensed || '').toLowerCase();
+  let sponsorMatch = true;
+  if (sponsorFilter === 'licensed_yes') sponsorMatch = (lic === 'yes');
+  else if (sponsorFilter === 'policy_yes') sponsorMatch = (pol === 'yes');
+  else if (sponsorFilter === 'policy_conditional') sponsorMatch = (pol === 'conditional');
+  else if (sponsorFilter === 'policy_no') sponsorMatch = (pol === 'no');
+  else if (sponsorFilter === 'not_no') sponsorMatch = (pol !== 'no');
+  else if (sponsorFilter === 'unknown') sponsorMatch = (!pol || pol === 'unknown') && (!lic || lic === 'unknown');
+  return scoreMatch && moderateMatch && textMatch && siteMatch && statusMatch && roleMatch && sponsorMatch && ageMatch;
+}}
 
-    const pol = (card.dataset.sponsorPolicy || '').toLowerCase();
-    const lic = (card.dataset.sponsorLicensed || '').toLowerCase();
-    let sponsorMatch = true;
-    if (sponsorFilter === 'licensed_yes') sponsorMatch = (lic === 'yes');
-    else if (sponsorFilter === 'policy_yes') sponsorMatch = (pol === 'yes');
-    else if (sponsorFilter === 'policy_conditional') sponsorMatch = (pol === 'conditional');
-    else if (sponsorFilter === 'policy_no') sponsorMatch = (pol === 'no');
-    else if (sponsorFilter === 'not_no') sponsorMatch = (pol !== 'no');
-    else if (sponsorFilter === 'unknown') sponsorMatch = (!pol || pol === 'unknown') && (!lic || lic === 'unknown');
+function _jobsApiQuery(limitByScore) {{
+  const q = new URLSearchParams();
+  q.set('min_score', String(minScore || 5));
+  q.set('hide_moderate', hideModerate ? '1' : '0');
+  q.set('status', statusText || '');
+  q.set('role', roleText || '');
+  q.set('site', siteText || '');
+  q.set('search', searchText || '');
+  q.set('sponsorship', sponsorFilter || '');
+  q.set('age_days', String(ageDaysFilter || 0));
+  const limits = limitByScore || _jobVisibleLimitByGroup || {{}};
+  Object.keys(limits).forEach(key => {{
+    const v = parseInt(limits[key] || 0, 10) || 0;
+    if (v > 0) q.append('score_limit', String(key) + ':' + String(v));
+  }});
+  return q.toString();
+}}
 
-    const ok = scoreMatch && moderateMatch && textMatch && siteMatch && statusMatch && roleMatch && sponsorMatch;
-    if (ok) {{
-      card.classList.remove('hidden');
-      shown++;
-      const g = card.dataset.group || card.dataset.score || '';
-      if (g) groupVisible[g] = (groupVisible[g] || 0) + 1;
-    }} else {{
-      card.classList.add('hidden');
-    }}
+async function _fetchJobsPage() {{
+  const res = await fetch('/api/jobs/list?' + _jobsApiQuery());
+  if (!res.ok) {{
+    const t = await res.text();
+    throw new Error(t || ('HTTP ' + res.status));
   }}
+  return await res.json();
+}}
 
+function _escHtml(s) {{
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}}
+
+function _renderVirtualJobCard(job) {{
+  const id = parseInt(job.id || 0, 10) || 0;
+  const score = parseInt(job.score || 0, 10) || 0;
+  const status = String(job.status || '').toLowerCase();
+  const title = _escHtml(job.title || 'Untitled');
+  const company = _escHtml(job.company || '');
+  const site = _escHtml(job.site || '');
+  const siteColor = _escHtml(job.site_color || '#6b7280');
+  const location = _escHtml(job.location || '');
+  const salary = _escHtml(job.salary || '');
+  const roleLabel = _escHtml(job.role_label || 'Unassigned');
+  const statusLabel = _escHtml(job.status_label || 'Ready');
+  const sponsorName = _escHtml(job.sponsor_match_name || 'Licensed sponsor');
+  const desc = _escHtml(job.desc_preview || '');
+  const ageDays = parseInt(job.age_days || 0, 10);
+  const ageLabel = isNaN(ageDays) ? '' : (ageDays <= 0 ? 'today' : (ageDays === 1 ? '1d old' : (String(ageDays) + 'd old')));
+  const keywords = job.keywords ? '<div class="keywords-row">' + _escHtml(job.keywords) + '</div>' : '';
+  const reasoning = job.reasoning ? '<div class="reasoning-row">' + _escHtml(job.reasoning) + '</div>' : '';
+  const fullDesc = job.has_full_desc
+    ? '<details class="full-desc-details lazy" data-job-id="' + id + '" data-field="full_description" data-loaded="0"><summary class="expand-btn">Full Description (' + String(parseInt(job.full_desc_len || 0, 10) || 0) + ' chars)</summary><div class="full-desc">Loading...</div></details>'
+    : '';
+  const meta = [
+    '<span class="meta-tag site-tag" style="background:' + siteColor + '33;color:' + siteColor + '">' + site + '</span>',
+    company ? '<span class="meta-tag">' + company.slice(0, 48) + '</span>' : '',
+    '<span class="meta-tag status status-' + _escHtml(status) + '" data-role="status">' + statusLabel + '</span>',
+    String(job.sponsor_licensed || '').toLowerCase() === 'yes' ? '<span class="meta-tag" title="Licensed sponsor (Home Office register)">Sponsor: ' + sponsorName.slice(0, 48) + '</span>' : '',
+    String(job.sponsor_policy || '').toLowerCase() === 'yes' ? '<span class="meta-tag">Sponsorship: Yes</span>' : '',
+    String(job.sponsor_policy || '').toLowerCase() === 'conditional' ? '<span class="meta-tag">Sponsorship: Conditional</span>' : '',
+    String(job.sponsor_policy || '').toLowerCase() === 'no' ? '<span class="meta-tag">Sponsorship: No</span>' : '',
+    job.has_tailored ? '<span class="meta-tag artifact">Tailored</span>' : '',
+    job.tailor_failed ? '<span class="meta-tag meta-tag-failed">Tailor failed</span>' : '',
+    job.has_statement ? '<span class="meta-tag artifact">Statement</span>' : '',
+    job.has_cover ? '<span class="meta-tag artifact">Cover</span>' : '',
+    job.cover_failed ? '<span class="meta-tag meta-tag-failed">Cover failed</span>' : '',
+    salary ? '<span class="meta-tag salary">' + salary + '</span>' : '',
+    location ? '<span class="meta-tag location">' + location.slice(0, 40) + '</span>' : '',
+    roleLabel ? '<span class="meta-tag">' + roleLabel.slice(0, 36) + '</span>' : '',
+    ageLabel ? '<span class="meta-tag" title="Discovered: ' + _escHtml(job.discovered_at || '') + '">' + ageLabel + '</span>' : ''
+  ].filter(Boolean).join('');
+  const actions = [
+    job.url ? '<a href="' + _escHtml(job.url) + '" class="apply-link" target="_blank">Listing</a>' : '',
+    job.apply_url ? '<a href="' + _escHtml(job.apply_url) + '" class="apply-link primary" target="_blank">Apply</a>' : '',
+    status === 'selected'
+      ? '<button class="apply-link primary" data-live="1" onclick="selectJob(' + id + ', false)">Unpick</button>'
+      : '<button class="apply-link primary" data-live="1" onclick="selectJob(' + id + ', true, false)">Pick</button>',
+    '<button class="apply-link" data-live="1" onclick="markApplied(' + id + ')">Applied</button>',
+    '<button class="apply-link" data-live="1" onclick="markFailed(' + id + ')">Failed</button>',
+    '<button class="apply-link danger" data-live="1" onclick="blockJob(' + id + ')">Block</button>',
+    '<button class="apply-link danger" data-live="1" onclick="deleteJob(' + id + ')">Delete</button>',
+    '<button class="apply-link copy-btn" onclick="copyCmd(&quot;applypilot apply --mark-applied ' + id + '&quot;)">Copy mark applied</button>',
+    '<button class="apply-link copy-btn" onclick="copyCmd(&quot;applypilot apply --mark-failed ' + id + ' --fail-reason manual&quot;)">Copy mark failed</button>'
+  ].filter(Boolean).join('');
+
+  return '<div class="job-card" data-id="' + id + '" data-score="' + score + '" data-group="' + score + '" data-text="' + _escHtml(job.search_text || '') + '" data-site="' + site + '" data-status="' + _escHtml(status) + '" data-location="' + _escHtml(String(job.location || '').toLowerCase()) + '" data-role="' + _escHtml(String(job.role || '').toLowerCase()) + '" data-company="' + company + '" data-sponsor-policy="' + _escHtml(job.sponsor_policy || '') + '" data-sponsor-licensed="' + _escHtml(job.sponsor_licensed || '') + '" data-age-days="' + (isNaN(ageDays) ? '' : String(ageDays)) + '">'
+    + '<div class="card-header"><span class="score-pill" style="background:' + (score >= 7 ? '#10b981' : '#f59e0b') + '">' + score + '</span><span class="meta-tag" title="Stable job ID for manual marking">#' + id + '</span><a href="' + _escHtml(job.url || '') + '" class="job-title" target="_blank">' + title + '</a></div>'
+    + '<div class="meta-row">' + meta + '</div>'
+    + keywords + reasoning + '<p class="desc-preview">' + desc + (desc ? '...' : '') + '</p>' + fullDesc + '<div class="card-footer">' + actions + '</div></div>';
+}}
+
+function _renderVirtualJobs() {{
+  const root = document.getElementById('jobs-virtual-root');
+  if (!root) return;
+  if (_jobCountEl) _jobCountEl.textContent = 'Loading jobs...';
+  root.innerHTML = '<div class="meta">Loading jobs...</div>';
+  _fetchJobsPage().then(data => {{
+    const groups = (data && data.groups) || [];
+    const totalShown = parseInt((data && data.shown) || 0, 10) || 0;
+    const totalAll = parseInt((data && data.total) || 0, 10) || 0;
+    if (_jobCountEl) _jobCountEl.textContent = 'Showing ' + String(totalShown) + ' of ' + String(totalAll) + ' jobs';
+    if (!groups.length) {{
+      root.innerHTML = '<div class="meta">No jobs match the current filters.</div>';
+      return;
+    }}
+    const labels = {{ 10: 'Perfect Match', 9: 'Excellent Fit', 8: 'Strong Fit', 7: 'Good Fit', 6: 'Moderate+', 5: 'Moderate' }};
+    const chunks = groups.map(g => {{
+      const score = parseInt((g && g.score) || 0, 10) || 0;
+      const jobs = Array.isArray(g && g.jobs) ? g.jobs : [];
+      const totalCount = parseInt((g && g.total) || jobs.length || 0, 10) || 0;
+      const remaining = Math.max(0, totalCount - jobs.length);
+      const title = labels[score] || ('Score ' + String(score));
+      const open = score >= 7 ? ' open' : '';
+      const cards = jobs.map(_renderVirtualJobCard).join('');
+      const showCount = Math.min(_JOB_GROUP_BATCH, remaining);
+      return '<details class="score-group" data-score-group="' + score + '"' + open + '><summary class="score-header" style="border-color:' + (score >= 7 ? '#10b981' : '#f59e0b') + '"><span class="score-badge" style="background:' + (score >= 7 ? '#10b981' : '#f59e0b') + '">' + score + '</span>' + title + ' (' + totalCount + ' jobs)</summary><div class="job-grid">' + cards + '</div><div class="job-grid-more' + (remaining > 0 ? '' : ' hidden') + '" data-role="job-grid-more"><button type="button" class="filter-btn job-grid-more-btn" data-role="job-grid-more-btn" onclick="showMoreJobs(' + score + ')">Show ' + showCount + ' more</button><span class="job-grid-more-note" data-role="job-grid-more-note">' + (remaining > 0 ? (remaining + ' more hidden in this score group') : '') + '</span></div></details>';
+    }});
+    root.innerHTML = chunks.join('');
+    _initLazyDetails();
+  }}).catch(e => {{
+    root.innerHTML = '<div class="meta">Job load failed: ' + _escHtml((e && e.message) ? e.message : String(e)) + '</div>';
+    try {{ _diagSetErr('Jobs load failed: ' + ((e && e.message) ? e.message : String(e))); }} catch (err) {{}}
+  }});
+}}
+
+function _finalizeFilteredGroups(groupVisible, shown, total) {{
+  if (_largeJobsDataset) {{
+    _renderVirtualJobs();
+    return;
+  }}
   if (_jobCountEl) _jobCountEl.textContent = `Showing ${{shown}} of ${{total}} jobs`;
 
-  // Hide empty score groups without re-querying the DOM.
-  for (let i = 0; i < _scoreGroups.length; i++) {{
-    const group = _scoreGroups[i];
-    const k = (group.dataset.scoreGroup || '').toString();
-    group.style.display = (groupVisible[k] || 0) ? '' : 'none';
+  for (let i = 0; i < _scoreGroupMeta.length; i++) {{
+    const meta = _scoreGroupMeta[i];
+    const k = meta.key;
+    const group = meta.el;
+    const visible = groupVisible[k] || 0;
+    group.style.display = visible ? '' : 'none';
+
+    const limit = Math.max(_JOB_GROUP_BATCH, _jobVisibleLimitByGroup[k] || _JOB_GROUP_BATCH);
+    let rendered = 0;
+    for (let j = 0; j < meta.cards.length; j++) {{
+      const card = meta.cards[j];
+      if (!card || !card.isConnected) continue;
+      if (card.classList.contains('hidden')) {{
+        card.classList.remove('paginated-hidden');
+        continue;
+      }}
+      rendered += 1;
+      if (rendered <= limit) card.classList.remove('paginated-hidden');
+      else card.classList.add('paginated-hidden');
+    }}
+
+    const remaining = Math.max(0, rendered - limit);
+    if (meta.moreWrap) {{
+      if (remaining > 0) {{
+        meta.moreWrap.classList.remove('hidden');
+        if (meta.moreBtn) meta.moreBtn.textContent = `Show ${{Math.min(_JOB_GROUP_BATCH, remaining)}} more`;
+        if (meta.moreNote) meta.moreNote.textContent = `${{remaining}} more hidden in this score group`;
+      }} else {{
+        meta.moreWrap.classList.add('hidden');
+        if (meta.moreNote) meta.moreNote.textContent = '';
+      }}
+    }}
   }}
+}}
+
+function applyFilters() {{
+  if (_largeJobsDataset) {{
+    _renderVirtualJobs();
+    return;
+  }}
+  const seq = ++_applyFiltersSeq;
+  const groupVisible = {{}};
+  let shown = 0;
+  let total = 0;
+  let i = 0;
+
+  if (_jobCountEl) _jobCountEl.textContent = 'Filtering jobs...';
+
+  const step = () => {{
+    if (seq !== _applyFiltersSeq) return;
+    const end = Math.min(i + _JOB_FILTER_CHUNK, _jobCards.length);
+    for (; i < end; i++) {{
+      const card = _jobCards[i];
+      if (!card || !card.isConnected) continue;
+      total += 1;
+      const score = parseInt(card.dataset.score) || 0;
+      const text = card.dataset.text || '';
+      const scoreMatch = score >= (minScore || 5);
+      const moderateMatch = !hideModerate || score >= 7;
+      const textMatch = !searchText || text.includes(searchText);
+      const siteMatch = !siteText || (card.dataset.site || '').toLowerCase() === siteText;
+      const status = (card.dataset.status || '').toLowerCase();
+      const statusMatch = !statusText
+        || (statusText === 'active' && !['applied','failed','skipped','blocked','manual'].includes(status))
+        || status === statusText;
+      const roleMatch = !roleText || (card.dataset.role || '').toLowerCase() === roleText;
+      const ageDays = parseInt(card.dataset.ageDays || '0', 10);
+      const ageMatch = !ageDaysFilter || ((!isNaN(ageDays)) && ageDays >= ageDaysFilter);
+
+      const pol = (card.dataset.sponsorPolicy || '').toLowerCase();
+      const lic = (card.dataset.sponsorLicensed || '').toLowerCase();
+      let sponsorMatch = true;
+      if (sponsorFilter === 'licensed_yes') sponsorMatch = (lic === 'yes');
+      else if (sponsorFilter === 'policy_yes') sponsorMatch = (pol === 'yes');
+      else if (sponsorFilter === 'policy_conditional') sponsorMatch = (pol === 'conditional');
+      else if (sponsorFilter === 'policy_no') sponsorMatch = (pol === 'no');
+      else if (sponsorFilter === 'not_no') sponsorMatch = (pol !== 'no');
+      else if (sponsorFilter === 'unknown') sponsorMatch = (!pol || pol === 'unknown') && (!lic || lic === 'unknown');
+
+      const ok = scoreMatch && moderateMatch && textMatch && siteMatch && statusMatch && roleMatch && sponsorMatch && ageMatch;
+      const g = card.dataset.group || card.dataset.score || '';
+      if (ok) {{
+        card.classList.remove('hidden');
+        shown += 1;
+        if (g) groupVisible[g] = (groupVisible[g] || 0) + 1;
+      }} else {{
+        card.classList.add('hidden');
+        card.classList.remove('paginated-hidden');
+      }}
+    }}
+
+    if (i < _jobCards.length) {{
+      if (window.requestAnimationFrame) window.requestAnimationFrame(step);
+      else window.setTimeout(step, 0);
+      return;
+    }}
+    _finalizeFilteredGroups(groupVisible, shown, total);
+  }};
+
+  if (window.requestAnimationFrame) window.requestAnimationFrame(step);
+  else window.setTimeout(step, 0);
  }}
+
+function showMoreJobs(scoreGroup) {{
+  const key = String(scoreGroup || '');
+  if (!key) return;
+  _jobVisibleLimitByGroup[key] = Math.max(_JOB_GROUP_BATCH, _jobVisibleLimitByGroup[key] || _JOB_GROUP_BATCH) + _JOB_GROUP_BATCH;
+  applyFilters();
+}}
 
 // Lazy-load heavy job fields (e.g. full descriptions) to keep the dashboard fast.
 async function _lazyLoadJobField(detailsEl) {{
@@ -2484,7 +3427,6 @@ function _initLazyDetails() {{
  }}, true);
 
 toggleHideModerate(true);
-applyFilters();
 _initLazyDetails();
 
   function copyCmd(text) {{
@@ -2513,39 +3455,27 @@ _initLazyDetails();
     if (consoleBox) consoleBox.style.display = 'none';
     const setupPanel = document.getElementById('setup-panel');
     if (setupPanel) setupPanel.style.display = 'none';
+    // Hide Pipeline and Setup nav buttons in file mode (no API available)
+    document.querySelectorAll('.page-nav-btn[data-page="pipeline"], .page-nav-btn[data-page="setup"]').forEach(btn => {{
+      btn.style.display = 'none';
+    }});
+    document.querySelectorAll('.page-nav-sep').forEach((sep, i) => {{
+      if (i > 0) sep.style.display = 'none';
+    }});
   }}
 
-  // In served mode, keep console updated.
+  // In served mode, initialize only the active page.
   if (window.location.protocol !== 'file:') {{
     try {{
       const mt = document.getElementById('setup-mode-tag');
       if (mt) mt.textContent = 'mode: served';
     }} catch (e) {{}}
 
-    pipelineCheckApiOnce();
-    pipelineInitFromHistory();
-    pipelineStartPolling();
-    pipelinePollOnce();
-    pipelineRefreshStatusOnce();
-    setupRefresh(null);
-
-    try {{
-      const pdf = document.getElementById('setup-resume-pdf');
-      if (pdf) pdf.addEventListener('change', () => setupUpdatePdfName());
-      setupUpdatePdfName();
-    }} catch (e) {{}}
-
-    try {{
-      const adv = document.getElementById('setup-adv-yaml');
-      if (adv) setupToggleAdvancedYaml(!!adv.checked);
-      setupInitSearchBuilderDefaults();
-      setupLoadWorkspace(true, null);
-      setupInitNavObserver();
-      _setupNavSetActive('setup-sec-diagnostics');
-    }} catch (e) {{}}
-
-    // Lightweight ping to show whether APIs are reachable.
-    try {{ diagPing(true); }} catch (e) {{}}
+    if (!_servedInitDone) {{
+      _servedInitDone = true;
+      if (_currentPage === 'pipeline') ensurePipelinePageReady();
+      if (_currentPage === 'setup') ensureSetupPageReady();
+    }}
   }}
 
   if (window.location.protocol === 'file:') {{
@@ -2726,6 +3656,29 @@ function setupUseUkSmartSites() {{
   }}
   _setVal('search-smart-sites', SMART_UK_DEFAULTS.join(', '));
   toast('UK smart sites selected', 'success');
+}}
+
+function setupUseNhsPublicSponsorPreset() {{
+  const sites = (SMART_UK_PUBLIC_SPONSOR_DEFAULTS && SMART_UK_PUBLIC_SPONSOR_DEFAULTS.length)
+    ? SMART_UK_PUBLIC_SPONSOR_DEFAULTS
+    : SMART_UK_DEFAULTS;
+  if (!sites || !sites.length) {{
+    toast('No NHS/Gov smart-site presets found', 'warn', 3200);
+    return;
+  }}
+  _setVal('search-country', 'UK');
+  _setVal('search-location', 'London, UK');
+  _setVal('search-cities', 'London, UK, Birmingham, UK, Manchester, UK, Leeds, UK, Derby, UK, Nottingham, UK');
+  _setVal('search-roles', 'Application Support Analyst, Systems Tester, Software Tester, Test Analyst, IT Support Analyst, Service Desk Analyst, Data Analyst');
+  _setVal('search-hours-old', '72');
+  _setVal('search-results', '15');
+  _setVal('search-boards', 'indeed');
+  _setVal('search-smart-sites', sites.join(', '));
+  const r = document.getElementById('search-remote');
+  if (r) r.checked = true;
+  const ex = document.getElementById('search-exclude');
+  if (ex) ex.value = ['senior manager', 'head of', 'director', 'principal', 'clinical registration required', 'sc clearance required', 'dv clearance required'].join(String.fromCharCode(10));
+  toast('NHS/Gov sponsorship-focused preset applied', 'success', 3200);
 }}
 
 function setupClearSmartSites() {{
@@ -2931,6 +3884,65 @@ function _getTemplateItems(id) {{
   return _splitTemplateItems(raw);
 }}
 
+function _templateProjectEntriesFromAny(v) {{
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const raw of v) {{
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const header = (((raw.header || raw.title || '') + '')).trim();
+    if (!header) continue;
+    const subtitle = (((raw.subtitle || '') + '')).trim();
+    let bulletsRaw = raw.bullets || [];
+    if (typeof bulletsRaw === 'string') bulletsRaw = bulletsRaw.split(/\\r?\\n/);
+    const bullets = Array.isArray(bulletsRaw)
+      ? bulletsRaw.map(x => ((x || '') + '').trim()).filter(Boolean).map(x => x.replace(/^[\\-\\u2022]\\s*/, '').trim()).filter(Boolean)
+      : [];
+    out.push({{ header, subtitle, bullets }});
+  }}
+  return out;
+}}
+
+function _setTemplateProjectEntries(id, items) {{
+  const nl = String.fromCharCode(10);
+  const blocks = _templateProjectEntriesFromAny(items).map(entry => {{
+    const lines = [entry.header || ''];
+    if (entry.subtitle) lines.push(entry.subtitle);
+    for (const bullet of (entry.bullets || [])) {{
+      const s = ((bullet || '') + '').trim();
+      if (s) lines.push('- ' + s.replace(/^[\\-\\u2022]\\s*/, '').trim());
+    }}
+    return lines.join(nl).trim();
+  }}).filter(Boolean);
+  _setVal(id, blocks.join(nl + nl));
+}}
+
+function _getTemplateProjectEntries(id) {{
+  const nl = String.fromCharCode(10);
+  const raw = (((document.getElementById(id) || {{}}).value || '') + '').replace(/\\r\\n/g, nl);
+  if (!raw.trim()) return [];
+  const blocks = raw.split(/\\n\\s*\\n+/).map(x => x.trim()).filter(Boolean);
+  const out = [];
+  for (const block of blocks) {{
+    const lines = block.split(nl).map(x => x.trim()).filter(Boolean);
+    if (!lines.length) continue;
+    const header = lines[0] || '';
+    if (!header) continue;
+    let subtitle = '';
+    let bulletStart = 1;
+    if (lines.length > 1 && !/^[\\-\\u2022]\\s*/.test(lines[1])) {{
+      subtitle = lines[1];
+      bulletStart = 2;
+    }}
+    const bullets = [];
+    for (let i = bulletStart; i < lines.length; i += 1) {{
+      const s = (lines[i] || '').replace(/^[\\-\\u2022]\\s*/, '').trim();
+      if (s) bullets.push(s);
+    }}
+    out.push({{ header, subtitle, bullets }});
+  }}
+  return out;
+}}
+
 function setupTemplateFromJson(quiet) {{
   const skillsBoundary = _readJsonFieldOrEmpty('setup-skills-boundary');
   const resumeFacts = _readJsonFieldOrEmpty('setup-resume-facts');
@@ -2945,6 +3957,9 @@ function setupTemplateFromJson(quiet) {{
   _setTemplateItems('setup-tpl-education', resumeSections.education);
   _setTemplateItems('setup-tpl-certifications', resumeSections.certifications);
   _setTemplateItems('setup-tpl-techenv', resumeSections.technical_environment);
+  _setTemplateProjectEntries('setup-tpl-data-projects', resumeSections.data_projects);
+  _setTemplateProjectEntries('setup-tpl-support-projects', resumeSections.support_projects);
+  _setTemplateProjectEntries('setup-tpl-app-support-projects', resumeSections.application_support_projects);
 
   _setTemplateItems('setup-tpl-preserved-projects', resumeFacts.preserved_projects);
   _setTemplateItems('setup-tpl-preserved-companies', resumeFacts.preserved_companies);
@@ -3030,12 +4045,36 @@ function setupTemplateToJson(quiet) {{
   const education = _getTemplateItems('setup-tpl-education');
   const certifications = _getTemplateItems('setup-tpl-certifications');
   const techEnv = _getTemplateItems('setup-tpl-techenv');
+  const dataProjects = _getTemplateProjectEntries('setup-tpl-data-projects');
+  const supportProjects = _getTemplateProjectEntries('setup-tpl-support-projects');
+  const appSupportProjects = _getTemplateProjectEntries('setup-tpl-app-support-projects');
   const curEdu = _templateItemsFromAny(resumeSections.education);
   const curCerts = _templateItemsFromAny(resumeSections.certifications);
   const curTech = _templateItemsFromAny(resumeSections.technical_environment);
+  const curDataProjects = _templateProjectEntriesFromAny(resumeSections.data_projects);
+  const curSupportProjects = _templateProjectEntriesFromAny(resumeSections.support_projects);
+  const curAppSupportProjects = _templateProjectEntriesFromAny(resumeSections.application_support_projects);
   if (education.length) resumeSections.education = _mergeTemplateItems(curEdu, education);
   if (certifications.length) resumeSections.certifications = _mergeTemplateItems(curCerts, certifications);
   if (techEnv.length) resumeSections.technical_environment = _mergeTemplateItems(curTech, techEnv);
+  if (dataProjects.length) {{
+    resumeSections.data_projects = dataProjects;
+    summary.push((curDataProjects.length ? ('data/bi technical projects updated (' + dataProjects.length + ')') : ('data/bi technical projects added (' + dataProjects.length + ')')));
+  }} else if (curDataProjects.length) {{
+    summary.push('data/bi technical projects kept (' + curDataProjects.length + ')');
+  }}
+  if (supportProjects.length) {{
+    resumeSections.support_projects = supportProjects;
+    summary.push((curSupportProjects.length ? ('support technical projects updated (' + supportProjects.length + ')') : ('support technical projects added (' + supportProjects.length + ')')));
+  }} else if (curSupportProjects.length) {{
+    summary.push('support technical projects kept (' + curSupportProjects.length + ')');
+  }}
+  if (appSupportProjects.length) {{
+    resumeSections.application_support_projects = appSupportProjects;
+    summary.push((curAppSupportProjects.length ? ('application support projects updated (' + appSupportProjects.length + ')') : ('application support projects added (' + appSupportProjects.length + ')')));
+  }} else if (curAppSupportProjects.length) {{
+    summary.push('application support projects kept (' + curAppSupportProjects.length + ')');
+  }}
 
   const preservedProjects = _getTemplateItems('setup-tpl-preserved-projects');
   const preservedCompanies = _getTemplateItems('setup-tpl-preserved-companies');
@@ -3067,6 +4106,7 @@ const _TAILOR_FIELD_IDS = [
   'setup-resume-sections',
   'setup-resume-validation',
   'setup-safe-synonyms',
+  'setup-tailoring-mode',
   'setup-draft-count',
   'setup-role-pack'
 ];
@@ -3299,6 +4339,7 @@ async function setupImportProfileJsonFile(btn) {{
     _setVal('setup-full-profile-json', _prettyJson(obj));
 
     const tailoring = (obj.tailoring || {{}});
+    _setVal('setup-tailoring-mode', (tailoring.tailoring_mode || 'factual'));
     _setVal('setup-role-pack', (tailoring.role_pack_override || 'auto'));
     _setVal('setup-draft-count', (tailoring.draft_candidates != null ? tailoring.draft_candidates : '3'));
     _setVal('setup-skills-boundary', _prettyJson(obj.skills_boundary || {{}}));
@@ -3410,6 +4451,13 @@ async function setupSaveTailoring(btn) {{
   }}
   draftCount = Math.max(2, Math.min(3, draftCount));
 
+  let tailoringMode = (((document.getElementById('setup-tailoring-mode') || {{}}).value || '').trim() || 'factual').toLowerCase();
+  if (!['factual', 'balanced', 'aggressive'].includes(tailoringMode)) {{
+    _setFieldError('setup-tailoring-mode', 'Tailoring mode must be one of: factual, balanced, aggressive');
+    toast('Invalid tailoring mode', 'warn', 3200);
+    return;
+  }}
+
   let rolePack = (((document.getElementById('setup-role-pack') || {{}}).value || '').trim() || 'auto').toLowerCase();
   if (!['auto', 'data_bi', 'engineering', 'support', 'application_support', 'qa_testing', 'cloud_platform', 'business_analysis'].includes(rolePack)) {{
     _setFieldError('setup-role-pack', 'Role pack must be one of: auto, data_bi, engineering, support, application_support, qa_testing, cloud_platform, business_analysis');
@@ -3431,9 +4479,11 @@ async function setupSaveTailoring(btn) {{
         resume_sections: resumeSections,
         resume_validation: resumeValidation,
         tailoring: {{
+          tailoring_mode: tailoringMode,
           role_pack_override: rolePack,
           draft_candidates: draftCount,
-          safe_synonyms: safeSynonyms
+          safe_synonyms: safeSynonyms,
+          align_current_role_header: (tailoringMode !== 'factual')
         }}
       }}
     }};
@@ -3477,6 +4527,12 @@ async function setupValidateTailoring(btn) {{
     }}
     draftCount = Math.max(2, Math.min(3, draftCount));
 
+    let tailoringMode = (((document.getElementById('setup-tailoring-mode') || {{}}).value || '').trim() || 'factual').toLowerCase();
+    if (!['factual', 'balanced', 'aggressive'].includes(tailoringMode)) {{
+      _setFieldError('setup-tailoring-mode', 'Tailoring mode must be one of: factual, balanced, aggressive');
+      throw new Error('tailoring_mode must be one of: factual, balanced, aggressive');
+    }}
+
     let rolePack = (((document.getElementById('setup-role-pack') || {{}}).value || '').trim() || 'auto').toLowerCase();
     if (!['auto', 'data_bi', 'engineering', 'support', 'application_support', 'qa_testing', 'cloud_platform', 'business_analysis'].includes(rolePack)) {{
       _setFieldError('setup-role-pack', 'Role pack must be one of: auto, data_bi, engineering, support, application_support, qa_testing, cloud_platform, business_analysis');
@@ -3496,6 +4552,7 @@ async function setupValidateTailoring(btn) {{
     const ssKeys = Object.keys(safeSynonyms || {{}}).length;
 
     const msg = [
+      'tailoring_mode=' + tailoringMode,
       'role_pack=' + rolePack,
       'draft_candidates=' + draftCount,
       'skills_boundary keys=' + sbKeys,
@@ -3536,6 +4593,7 @@ async function setupLoadWorkspace(quiet, btn) {{
     setupFullProfileToJson(true);
 
     const tailoring = (p.tailoring || {{}});
+    _setVal('setup-tailoring-mode', (tailoring.tailoring_mode || 'factual'));
     _setVal('setup-role-pack', (tailoring.role_pack_override || 'auto'));
     _setVal('setup-draft-count', (tailoring.draft_candidates != null ? tailoring.draft_candidates : '3'));
     _setVal('setup-skills-boundary', _prettyJson(p.skills_boundary || {{}}));
@@ -3555,6 +4613,7 @@ async function setupLoadWorkspace(quiet, btn) {{
     try {{
       const arr = (data && data.resume_variants) || [];
       const have = {{}};
+      _jobMatchSyncVariantPicker(arr);
       for (const v of arr) {{
         const k = String((v && v.key) || '').trim().toLowerCase();
         if (k) have[k] = true;
@@ -3644,6 +4703,136 @@ function studioUseSavedResume() {{
   if (t) dst.value = t;
 }}
 
+function matchUseSavedResume() {{
+  const src = document.getElementById('setup-resume-text');
+  const dst = document.getElementById('match-resume');
+  if (!src || !dst) return;
+  const t = (src.value || '').trim();
+  if (t) dst.value = t;
+}}
+
+function matchUseVariant() {{
+  const dst = document.getElementById('match-resume');
+  if (!dst) return;
+  const key = _jobMatchSelectedVariantKey();
+  const selectedText = String(_variantCache[key] || '').trim();
+  if (selectedText) {{
+    dst.value = selectedText;
+    return;
+  }}
+  const src = document.getElementById('variants-text');
+  const activeText = String(((src || {{}}).value || '')).trim();
+  if (key === _variantKey && activeText) {{
+    dst.value = activeText;
+    _variantCache[key] = activeText;
+    return;
+  }}
+  if (window.location.protocol === 'file:') return;
+  variantsLoadKey(key, dst);
+}}
+
+async function variantsLoadKey(key, targetEl) {{
+  const k = String(key || '').trim().toLowerCase();
+  if (!k || window.location.protocol === 'file:') return;
+  try {{
+    const res = await fetch('/api/setup/resume-variant?key=' + encodeURIComponent(k));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data || !data.ok) throw new Error((data && (data.detail || data.error)) || 'read_failed');
+    const txt = String(data.text || '').trim();
+    _variantCache[k] = txt;
+    _variantLoaded[k] = true;
+    if (targetEl) targetEl.value = txt;
+    if (txt) toast('Loaded variant: ' + k, 'success', 2200);
+    else toast('No saved variant text for ' + k, 'warn', 2600);
+  }} catch (e) {{
+    toast('Failed to load variant: ' + _errMsg(e), 'error', 3600);
+  }}
+}}
+
+function _matchAutoCopyEnabled() {{
+  try {{
+    const el = document.getElementById('match-auto-copy');
+    if (el) return !!el.checked;
+  }} catch (e) {{}}
+  try {{
+    return window.localStorage.getItem('applypilot.match.auto_copy') === '1';
+  }} catch (e) {{}}
+  return false;
+}}
+
+function _matchSyncAutoCopyToggle() {{
+  try {{
+    const el = document.getElementById('match-auto-copy');
+    if (!el) return;
+    const saved = window.localStorage.getItem('applypilot.match.auto_copy');
+    el.checked = saved === '1';
+    if (!el.dataset.bound) {{
+      el.addEventListener('change', () => {{
+        try {{
+          window.localStorage.setItem('applypilot.match.auto_copy', el.checked ? '1' : '0');
+        }} catch (e) {{}}
+      }});
+      el.dataset.bound = '1';
+    }}
+  }} catch (e) {{}}
+}}
+
+async function matchSaveAsVariant(btn) {{
+  if (window.location.protocol === 'file:') return;
+  const ta = document.getElementById('match-resume');
+  const text = ((ta || {{}}).value || '').trim();
+  if (!text) {{ toast('Paste CV text first', 'warn', 2600); return; }}
+  const key = _jobMatchSelectedVariantKey();
+  return await _withAction(btn, {{ working: 'Saving...', success: 'Saved as selected variant', fail: 'Variant save failed' }}, async () => {{
+    await _apiJson('/api/setup/resume-variant', {{ key: key, text: text }});
+    _variantCache[key] = text;
+    _variantLoaded[key] = true;
+    const st = document.getElementById('variants-status');
+    if (st && key === _variantKey) st.textContent = 'active: ' + _variantKey + ' (saved from Job Match Studio)';
+    await matchRefreshHistory();
+  }});
+}}
+
+async function matchRenameVariant(btn) {{
+  if (window.location.protocol === 'file:') return;
+  const oldKey = _jobMatchSelectedVariantKey();
+  if (!oldKey) {{ toast('Pick a variant first', 'warn', 2600); return; }}
+  const nextKey = prompt('Rename variant to (a-z, 0-9, _, -):', oldKey) || '';
+  const newKey = String(nextKey || '').trim().toLowerCase();
+  if (!newKey || newKey === oldKey) return;
+  return await _withAction(btn, {{ working: 'Renaming...', success: 'Variant renamed', fail: 'Rename failed' }}, async () => {{
+    const res = await _apiJson('/api/setup/resume-variant-rename', {{ old_key: oldKey, new_key: newKey }});
+    const variants = (res && res.variants) || [];
+    _variantCache[newKey] = _variantCache[oldKey] || '';
+    _variantLoaded[newKey] = !!_variantLoaded[oldKey];
+    delete _variantCache[oldKey];
+    delete _variantLoaded[oldKey];
+    if (_variantKey === oldKey) _variantKey = newKey;
+    _jobMatchSyncVariantPicker(variants);
+    _setVal('match-variant-key', newKey);
+    await setupLoadWorkspace(true, null);
+  }});
+}}
+
+async function matchDuplicateVariant(btn) {{
+  if (window.location.protocol === 'file:') return;
+  const sourceKey = _jobMatchSelectedVariantKey();
+  if (!sourceKey) {{ toast('Pick a variant first', 'warn', 2600); return; }}
+  const nextKey = prompt('Duplicate variant to key (a-z, 0-9, _, -):', sourceKey + '_copy') || '';
+  const newKey = String(nextKey || '').trim().toLowerCase();
+  if (!newKey || newKey === sourceKey) return;
+  return await _withAction(btn, {{ working: 'Duplicating...', success: 'Variant duplicated', fail: 'Duplicate failed' }}, async () => {{
+    const res = await _apiJson('/api/setup/resume-variant-duplicate', {{ source_key: sourceKey, new_key: newKey }});
+    const variants = (res && res.variants) || [];
+    _variantCache[newKey] = _variantCache[sourceKey] || '';
+    _variantLoaded[newKey] = !!_variantLoaded[sourceKey];
+    _jobMatchSyncVariantPicker(variants);
+    _setVal('match-variant-key', newKey);
+    await setupLoadWorkspace(true, null);
+  }});
+}}
+
 function studioClear(id) {{
   const el = document.getElementById(id);
   if (el) el.value = '';
@@ -3669,11 +4858,573 @@ function _studioSetCount(wc, max) {{
   else el.textContent = String(wc) + ' words';
 }}
 
+function _matchSetStatus(msg) {{
+  const el = document.getElementById('match-status');
+  if (el) el.textContent = msg;
+}}
+
+function _matchSetScore(score, minScore) {{
+  const el = document.getElementById('match-score-pill');
+  if (!el) return;
+  if (score == null || score === '') {{
+    el.textContent = 'score: -';
+    return;
+  }}
+  el.textContent = 'score: ' + String(score) + ' / min ' + String(minScore || 7);
+}}
+
+function _matchSetMeta(txt) {{
+  const el = document.getElementById('match-result-meta');
+  if (el) el.textContent = txt || 'No result yet.';
+}}
+
+function _matchSetDownloadState(run) {{
+  _matchCurrentRun = run || null;
+  const txtBtn = document.getElementById('match-download-txt');
+  const pdfBtn = document.getElementById('match-download-pdf');
+  const hasRun = !!(_matchCurrentRun && _matchCurrentRun.run_id);
+  if (txtBtn) txtBtn.disabled = !(hasRun && _matchCurrentRun.tailored_path);
+  if (pdfBtn) pdfBtn.disabled = !(hasRun && _matchCurrentRun.pdf_path);
+}}
+
+function matchDownloadCurrent(kind) {{
+  const run = _matchCurrentRun || null;
+  const k = String(kind || 'txt').trim().toLowerCase();
+  if (!run || !run.run_id) {{
+    toast('Generate or load a matched CV first', 'warn', 2600);
+    return;
+  }}
+  if (k === 'pdf' && !run.pdf_path) {{
+    const detail = String((run && run.tailor_failure_detail) || '').trim();
+    if (detail && detail.toLowerCase() !== 'none') toast('No PDF: tailoring was not approved (' + detail + ')', 'warn', 4200);
+    else toast('No PDF available for this result', 'warn', 2600);
+    return;
+  }}
+  if (k === 'txt' && !run.tailored_path) {{
+    const detail = String((run && run.tailor_failure_detail) || '').trim();
+    if (detail && detail.toLowerCase() !== 'none') toast('No TXT: tailoring was not approved (' + detail + ')', 'warn', 4200);
+    else toast('No TXT file available for this result', 'warn', 2600);
+    return;
+  }}
+  window.location.href = '/api/job-match/download?run_id=' + encodeURIComponent(run.run_id) + '&kind=' + encodeURIComponent(k);
+}}
+
+function matchCopyOutput() {{
+  const el = document.getElementById('match-output');
+  if (!el) return;
+  const t = (el.value || '').trim();
+  if (!t) return;
+  navigator.clipboard.writeText(t);
+}}
+
+async function apiJobMatchHistory(limit) {{
+  const n = parseInt(limit || '10', 10) || 10;
+  const res = await fetch('/api/job-match/history?limit=' + n);
+  if (!res.ok) {{
+    const t = await res.text();
+    throw new Error(t || ('HTTP ' + res.status));
+  }}
+  return await res.json();
+}}
+
+async function apiJobMatchDelete(runId) {{
+  return await _apiJson('/api/job-match/history-delete', {{ run_id: runId, delete_files: true }});
+}}
+
+async function apiJobMatchClear() {{
+  return await _apiJson('/api/job-match/history-clear', {{ delete_files: true }});
+}}
+
+async function apiJobMatchPromote(runId) {{
+  return await _apiJson('/api/job-match/promote-resume', {{ run_id: runId }});
+}}
+
+async function apiJobMatchImport(runs) {{
+  return await _apiJson('/api/job-match/history-import', {{ runs: runs || [] }});
+}}
+
+async function apiJobMatchUpdate(runId, patch) {{
+  const payload = Object.assign({{ run_id: runId }}, patch || {{}});
+  return await _apiJson('/api/job-match/history-update', payload);
+}}
+
+function _matchHistoryFilterValue() {{
+  return (((document.getElementById('match-history-search') || {{}}).value || '') + '').trim().toLowerCase();
+}}
+
+function _matchHistorySortValue() {{
+  return (((document.getElementById('match-history-sort') || {{}}).value || 'newest') + '').trim().toLowerCase();
+}}
+
+function _matchQuickFilterPasses(r) {{
+  const mode = (_matchQuickFilter || 'all').toLowerCase();
+  const score = parseInt((r && r.score) || 0, 10) || 0;
+  const tailored = !!(r && r.tailored);
+  const status = String((r && r.tailor_status) || '').toLowerCase();
+  const favorite = !!(r && r.favorite);
+  if (mode === 'favorite') return favorite;
+  if (mode === 'tailored') return tailored;
+  if (mode === 'approved') return status === 'approved';
+  if (mode === 'skipped') return !tailored;
+  if (mode === 'high') return score >= 7;
+  if (mode === 'low') return score > 0 && score < 7;
+  return true;
+}}
+
+function _matchSyncQuickFilterButtons() {{
+  const ids = ['all', 'favorite', 'tailored', 'approved', 'skipped', 'high', 'low'];
+  ids.forEach(id => {{
+    const el = document.getElementById('match-chip-' + id);
+    if (!el) return;
+    if ((_matchQuickFilter || 'all') === id) el.classList.add('active');
+    else el.classList.remove('active');
+  }});
+}}
+
+function matchSetQuickFilter(mode, btn) {{
+  _matchQuickFilter = String(mode || 'all').trim().toLowerCase() || 'all';
+  _matchPage = 1;
+  _matchSyncQuickFilterButtons();
+  matchApplyHistoryFilter();
+}}
+
+function _setMatchPageMeta(page, totalPages, totalItems) {{
+  const el = document.getElementById('match-page-meta');
+  if (!el) return;
+  el.textContent = 'Page ' + String(page) + ' of ' + String(totalPages) + ' | ' + String(totalItems) + ' item(s)';
+}}
+
+function _setMatchDiff(summary, text) {{
+  const s = document.getElementById('match-diff-summary');
+  if (s) s.textContent = summary || 'Load a history item to inspect CV changes.';
+  const el = document.getElementById('match-diff');
+  if (el) el.textContent = text || '';
+}}
+
+function _setMatchDiffHtml(summary, html) {{
+  const s = document.getElementById('match-diff-summary');
+  if (s) s.textContent = summary || 'Load a history item to inspect CV changes.';
+  const el = document.getElementById('match-diff');
+  if (el) el.innerHTML = html || '';
+}}
+
+function _setCompareMeta() {{
+  const el = document.getElementById('match-compare-meta');
+  if (!el) return;
+  if (!_matchCompareIds.length) {{
+    el.textContent = 'compare: none';
+    return;
+  }}
+  el.textContent = 'compare: ' + _matchCompareIds.join(', ');
+}}
+
+function _setBulkMeta() {{
+  const el = document.getElementById('match-bulk-meta');
+  if (!el) return;
+  el.textContent = 'selected: ' + String((_matchSelectedIds || []).length);
+}}
+
+function _buildSimpleDiff(baseText, tailoredText) {{
+  const a = String(baseText || '').split('\\n');
+  const b = String(tailoredText || '').split('\\n');
+  const maxLen = Math.max(a.length, b.length);
+  const out = [];
+  let changed = 0;
+  for (let i = 0; i < maxLen; i += 1) {{
+    const left = (a[i] != null ? a[i] : '').trimEnd();
+    const right = (b[i] != null ? b[i] : '').trimEnd();
+    if (left === right) {{
+      if (left) out.push('  ' + left);
+      continue;
+    }}
+    changed += 1;
+    if (left) out.push('- ' + left);
+    if (right) out.push('+ ' + right);
+  }}
+  return {{ changed: changed, text: out.join('\\n') }};
+}}
+
+function _buildRichDiffHtml(baseText, tailoredText) {{
+  const diff = _buildSimpleDiff(baseText, tailoredText);
+  const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const html = diff.text.split('\\n').map(line => {{
+    if (line.startsWith('+ ')) return '<span class="diff-added">' + esc(line) + '</span>';
+    if (line.startsWith('- ')) return '<span class="diff-removed">' + esc(line) + '</span>';
+    return '<span class="diff-same">' + esc(line) + '</span>';
+  }}).join('');
+  return {{ changed: diff.changed, html: html }};
+}}
+
+function _renderJobMatchHistory(runs) {{
+  _matchHistoryRuns = Array.isArray(runs) ? runs.slice() : [];
+  const el = document.getElementById('match-history');
+  if (!el) return;
+  el.textContent = '';
+  const q = _matchHistoryFilterValue();
+  let filtered = (_matchHistoryRuns || []).filter(r => {{
+    if (!_matchQuickFilterPasses(r)) return false;
+    if (!q) return true;
+    const hay = [
+      (r && r.title) || '',
+      (r && r.org) || '',
+      (r && r.location) || '',
+      (r && r.tailor_status) || '',
+      (r && r.score != null) ? String(r.score) : '',
+      (r && r.min_score != null) ? String(r.min_score) : ''
+    ].join(' ').toLowerCase();
+    return hay.indexOf(q) >= 0;
+  }});
+  const sortMode = _matchHistorySortValue();
+  filtered = filtered.slice().sort((a, b) => {{
+    if (sortMode === 'oldest') return (a.started_at || 0) - (b.started_at || 0);
+    if (sortMode === 'score_desc') return (b.score || 0) - (a.score || 0);
+    if (sortMode === 'score_asc') return (a.score || 0) - (b.score || 0);
+    if (sortMode === 'title_asc') return String(a.title || '').localeCompare(String(b.title || ''));
+    if (sortMode === 'org_asc') return String(a.org || '').localeCompare(String(b.org || ''));
+    return (b.started_at || 0) - (a.started_at || 0);
+  }});
+  if (!filtered.length) {{
+    const d = document.createElement('div');
+    d.className = 'meta';
+    d.textContent = q ? 'No history matches your filter.' : 'No manual job matches yet.';
+    el.appendChild(d);
+    _setMatchPageMeta(1, 1, 0);
+    return;
+  }}
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / _MATCH_PAGE_SIZE));
+  if (_matchPage > totalPages) _matchPage = totalPages;
+  if (_matchPage < 1) _matchPage = 1;
+  _setMatchPageMeta(_matchPage, totalPages, filtered.length);
+  const start = (_matchPage - 1) * _MATCH_PAGE_SIZE;
+  const visible = filtered.slice(start, start + _MATCH_PAGE_SIZE);
+  _setBulkMeta();
+
+  visible.forEach(r => {{
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.gap = '0.35rem';
+    row.style.alignItems = 'center';
+    row.style.flexWrap = 'wrap';
+
+    const btn = document.createElement('button');
+    btn.className = 'apply-link copy-btn';
+    btn.textContent = String(r && r.score != null ? r.score : '-');
+    btn.title = 'Reuse this job description and tailored CV';
+    btn.onclick = () => {{
+      _setVal('match-title', (r && r.title) || '');
+      _setVal('match-org', (r && r.org) || '');
+      _setVal('match-location', (r && r.location) || '');
+      _setVal('match-min-score', (r && r.min_score) != null ? r.min_score : '7');
+      if (r && r.tailored_text) _setVal('match-output', r.tailored_text);
+      if (r && r.job_text) _setVal('match-job', r.job_text);
+      if (r && r.resume_text) _setVal('match-resume', r.resume_text);
+      _matchSetDownloadState(r || null);
+      _matchSetScore((r && r.score) != null ? r.score : '-', (r && r.min_score) != null ? r.min_score : 7);
+      _matchSetMeta(((r && r.tailored_path) ? ('saved: ' + r.tailored_path + ' | ') : '') + ((r && r.pdf_path) ? ('pdf: ' + r.pdf_path + ' | ') : '') + ((r && r.tailor_status) ? ('status: ' + r.tailor_status) : 'loaded'));
+      const diff = _buildRichDiffHtml((r && r.resume_text) || '', (r && r.tailored_text) || '');
+      _setMatchDiffHtml('Changed lines: ' + String(diff.changed), diff.html);
+      _matchSetStatus('Loaded previous manual match.');
+    }};
+
+    const selBtn = document.createElement('button');
+    selBtn.className = 'apply-link copy-btn';
+    const rid = String((r && r.run_id) || '');
+    selBtn.textContent = _matchSelectedIds.includes(rid) ? 'Selected' : 'Select';
+    selBtn.title = 'Select this history item for bulk actions';
+    selBtn.onclick = () => {{
+      if (!rid) return;
+      const idx = _matchSelectedIds.indexOf(rid);
+      if (idx >= 0) _matchSelectedIds.splice(idx, 1);
+      else _matchSelectedIds.push(rid);
+      _setBulkMeta();
+      _renderJobMatchHistory(_matchHistoryRuns || []);
+    }};
+
+    const pairBtn = document.createElement('button');
+    pairBtn.className = 'apply-link copy-btn';
+    pairBtn.textContent = (_matchCompareIds.includes(String((r && r.run_id) || '')) ? 'Picked' : 'Pick');
+    pairBtn.title = 'Pick this history item for pair comparison';
+    pairBtn.onclick = () => {{
+      const rid = String((r && r.run_id) || '');
+      if (!rid) return;
+      const idx = _matchCompareIds.indexOf(rid);
+      if (idx >= 0) _matchCompareIds.splice(idx, 1);
+      else {{
+        _matchCompareIds.push(rid);
+        if (_matchCompareIds.length > 2) _matchCompareIds = _matchCompareIds.slice(-2);
+      }}
+      _setCompareMeta();
+      _renderJobMatchHistory(_matchHistoryRuns || []);
+    }};
+
+    const favBtn = document.createElement('button');
+    favBtn.className = 'apply-link copy-btn';
+    favBtn.textContent = (r && r.favorite) ? 'Starred' : 'Star';
+    favBtn.title = 'Toggle favorite';
+    favBtn.onclick = async () => {{
+      if (!(r && r.run_id)) return;
+      try {{
+        await apiJobMatchUpdate(r.run_id, {{ favorite: !(r && r.favorite), notes: (r && r.notes) || '' }});
+        await matchRefreshHistory();
+      }} catch (e) {{
+        toast('Favorite update failed: ' + _errMsg(e), 'error', 3600);
+      }}
+    }};
+
+    const noteBtn = document.createElement('button');
+    noteBtn.className = 'apply-link copy-btn';
+    noteBtn.textContent = 'Note';
+    noteBtn.title = 'Add or edit notes';
+    noteBtn.onclick = async () => {{
+      if (!(r && r.run_id)) return;
+      const next = prompt('Notes for this job match:', String((r && r.notes) || ''));
+      if (next == null) return;
+      try {{
+        await apiJobMatchUpdate(r.run_id, {{ favorite: !!(r && r.favorite), notes: next }});
+        await matchRefreshHistory();
+      }} catch (e) {{
+        toast('Note update failed: ' + _errMsg(e), 'error', 3600);
+      }}
+    }};
+
+    const txtBtn = document.createElement('button');
+    txtBtn.className = 'apply-link copy-btn';
+    txtBtn.textContent = 'TXT';
+    txtBtn.title = 'Download tailored CV text';
+    txtBtn.disabled = !(r && r.tailored_path);
+    txtBtn.onclick = () => {{
+      if (!(r && r.run_id && r.tailored_path)) return;
+      window.location.href = '/api/job-match/download?run_id=' + encodeURIComponent(r.run_id) + '&kind=txt';
+    }};
+
+    const pdfBtn = document.createElement('button');
+    pdfBtn.className = 'apply-link copy-btn';
+    pdfBtn.textContent = 'PDF';
+    pdfBtn.title = 'Download tailored CV PDF';
+    pdfBtn.disabled = !(r && r.pdf_path);
+    pdfBtn.onclick = () => {{
+      if (!(r && r.run_id && r.pdf_path)) return;
+      window.location.href = '/api/job-match/download?run_id=' + encodeURIComponent(r.run_id) + '&kind=pdf';
+    }};
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'apply-link copy-btn';
+    delBtn.textContent = 'Delete';
+    delBtn.title = 'Delete this history item and its generated files';
+    delBtn.onclick = async () => {{
+      if (!(r && r.run_id)) return;
+      if (!confirm('Delete this job-match history item and its generated files?')) return;
+      try {{
+        await apiJobMatchDelete(r.run_id);
+        toast('Job-match history deleted', 'success', 2200);
+        await matchRefreshHistory();
+      }} catch (e) {{
+        toast('Delete failed: ' + _errMsg(e), 'error', 3600);
+      }}
+    }};
+
+    const promoteBtn = document.createElement('button');
+    promoteBtn.className = 'apply-link copy-btn';
+    promoteBtn.textContent = 'Make main';
+    promoteBtn.title = 'Promote this tailored CV to resume.txt';
+    promoteBtn.disabled = !(r && r.tailored_path);
+    promoteBtn.onclick = async () => {{
+      if (!(r && r.run_id && r.tailored_path)) return;
+      if (!confirm('Replace resume.txt with this tailored CV?')) return;
+      try {{
+        const out = await apiJobMatchPromote(r.run_id);
+        toast('Main resume updated', 'success', 2200);
+        await setupLoadWorkspace(true, null);
+        if (out && out.path) _matchSetStatus('Promoted to ' + out.path);
+      }} catch (e) {{
+        toast('Promote failed: ' + _errMsg(e), 'error', 3600);
+      }}
+    }};
+
+    const tags = document.createElement('span');
+    tags.className = 'meta';
+    const parts = [];
+    if (r && r.title) parts.push(String(r.title));
+    if (r && r.org) parts.push(String(r.org));
+    if (r && r.favorite) parts.push('favorite');
+    parts.push('score ' + String((r && r.score != null) ? r.score : '-') + '/' + String((r && r.min_score != null) ? r.min_score : 7));
+    parts.push((r && r.tailored) ? 'tailored' : (r && r.tailor_status ? ('status ' + r.tailor_status) : 'not tailored'));
+    if (r && r.notes) parts.push('note: ' + String(r.notes).slice(0, 80));
+    const when = _fmtTs(r && r.started_at);
+    if (when) parts.push(when);
+    tags.textContent = parts.join(' | ');
+
+    row.appendChild(btn);
+    row.appendChild(selBtn);
+    row.appendChild(pairBtn);
+    row.appendChild(favBtn);
+    row.appendChild(noteBtn);
+    row.appendChild(txtBtn);
+    row.appendChild(pdfBtn);
+    row.appendChild(promoteBtn);
+    row.appendChild(delBtn);
+    row.appendChild(tags);
+    el.appendChild(row);
+  }});
+}}
+
+function matchApplyHistoryFilter() {{
+  _matchPage = 1;
+  _renderJobMatchHistory(_matchHistoryRuns || []);
+}}
+
+function _currentVisibleHistoryIds() {{
+  const q = _matchHistoryFilterValue();
+  const sortMode = _matchHistorySortValue();
+  let arr = (_matchHistoryRuns || []).filter(r => {{
+    if (!_matchQuickFilterPasses(r)) return false;
+    if (!q) return true;
+    const hay = [String(r.title || ''), String(r.org || ''), String(r.location || ''), String(r.tailor_status || ''), String(r.score || ''), String(r.min_score || '')].join(' ').toLowerCase();
+    return hay.indexOf(q) >= 0;
+  }});
+  arr = arr.slice().sort((a, b) => {{
+    if (sortMode === 'oldest') return (a.started_at || 0) - (b.started_at || 0);
+    if (sortMode === 'score_desc') return (b.score || 0) - (a.score || 0);
+    if (sortMode === 'score_asc') return (a.score || 0) - (b.score || 0);
+    if (sortMode === 'title_asc') return String(a.title || '').localeCompare(String(b.title || ''));
+    if (sortMode === 'org_asc') return String(a.org || '').localeCompare(String(b.org || ''));
+    return (b.started_at || 0) - (a.started_at || 0);
+  }});
+  const start = (_matchPage - 1) * _MATCH_PAGE_SIZE;
+  return arr.slice(start, start + _MATCH_PAGE_SIZE).map(r => String(r.run_id || '')).filter(Boolean);
+}}
+
+function matchToggleSelectPage() {{
+  const ids = _currentVisibleHistoryIds();
+  if (!ids.length) return;
+  const allSelected = ids.every(id => _matchSelectedIds.includes(id));
+  if (allSelected) _matchSelectedIds = _matchSelectedIds.filter(id => !ids.includes(id));
+  else ids.forEach(id => {{ if (!_matchSelectedIds.includes(id)) _matchSelectedIds.push(id); }});
+  _setBulkMeta();
+  _renderJobMatchHistory(_matchHistoryRuns || []);
+}}
+
+function matchClearBulkSelection() {{
+  _matchSelectedIds = [];
+  _setBulkMeta();
+  _renderJobMatchHistory(_matchHistoryRuns || []);
+}}
+
+async function matchBulkFavorite(on) {{
+  const ids = (_matchSelectedIds || []).slice();
+  if (!ids.length) {{ toast('Select history items first', 'warn', 2400); return; }}
+  for (const rid of ids) {{
+    const rec = (_matchHistoryRuns || []).find(r => String(r.run_id || '') === rid);
+    if (!rec) continue;
+    await apiJobMatchUpdate(rid, {{ favorite: !!on, notes: String(rec.notes || '') }});
+  }}
+  toast((on ? 'Favorited ' : 'Unfavorited ') + String(ids.length) + ' item(s)', 'success', 2200);
+  await matchRefreshHistory();
+}}
+
+async function matchBulkDelete() {{
+  const ids = (_matchSelectedIds || []).slice();
+  if (!ids.length) {{ toast('Select history items first', 'warn', 2400); return; }}
+  if (!confirm('Delete ' + String(ids.length) + ' selected history item(s)?')) return;
+  for (const rid of ids) await apiJobMatchDelete(rid);
+  _matchSelectedIds = [];
+  toast('Deleted ' + String(ids.length) + ' item(s)', 'success', 2200);
+  await matchRefreshHistory();
+}}
+
+function matchPrevPage() {{
+  _matchPage = Math.max(1, _matchPage - 1);
+  _renderJobMatchHistory(_matchHistoryRuns || []);
+}}
+
+function matchNextPage() {{
+  _matchPage += 1;
+  _renderJobMatchHistory(_matchHistoryRuns || []);
+}}
+
+function matchClearComparePair() {{
+  _matchCompareIds = [];
+  _setCompareMeta();
+}}
+
+function matchCompareSelected() {{
+  if (_matchCompareIds.length !== 2) {{
+    toast('Pick exactly 2 history items to compare', 'warn', 2800);
+    return;
+  }}
+  const picked = (_matchHistoryRuns || []).filter(r => _matchCompareIds.includes(String((r && r.run_id) || '')));
+  if (picked.length !== 2) {{
+    toast('Comparison items not available', 'warn', 2800);
+    return;
+  }}
+  const left = picked[0];
+  const right = picked[1];
+  const diff = _buildRichDiffHtml((left && left.tailored_text) || '', (right && right.tailored_text) || '');
+  _setMatchDiffHtml('Compare ' + String(left.run_id || '') + ' vs ' + String(right.run_id || '') + ' | changed lines: ' + String(diff.changed), diff.html);
+}}
+
+function matchExportHistory() {{
+  if (window.location.protocol === 'file:') return;
+  window.location.href = '/api/job-match/history-export';
+}}
+
+function matchPickImportHistory() {{
+  const el = document.getElementById('match-history-import-file');
+  if (!el) return;
+  try {{ el.value = ''; }} catch (e) {{}}
+  el.click();
+}}
+
+async function matchImportHistoryFile(input) {{
+  if (window.location.protocol === 'file:') return;
+  const file = input && input.files && input.files.length ? input.files[0] : null;
+  if (!file) return;
+  try {{
+    const text = await file.text();
+    const obj = JSON.parse(text || '{{}}');
+    const runs = Array.isArray(obj && obj.runs) ? obj.runs : [];
+    const res = await apiJobMatchImport(runs);
+    toast('Imported ' + String((res && res.imported) || 0) + ' job-match entries', 'success', 2400);
+    await matchRefreshHistory();
+  }} catch (e) {{
+    toast('Import failed: ' + _errMsg(e), 'error', 3600);
+  }}
+}}
+
+async function matchRefreshHistory() {{
+  if (window.location.protocol === 'file:') return;
+  try {{
+    const res = await apiJobMatchHistory(10);
+    const runs = (res && res.runs) || [];
+    const currentRunId = String(((_matchCurrentRun || {{}}).run_id) || '');
+    if (currentRunId && !runs.some(r => String((r && r.run_id) || '') === currentRunId)) _matchSetDownloadState(null);
+    _matchSyncQuickFilterButtons();
+    _renderJobMatchHistory(runs);
+  }} catch (e) {{
+    const hint = document.getElementById('match-history-hint');
+    if (hint) hint.textContent = 'Job-match API unavailable';
+  }}
+}}
+
+async function matchClearHistory() {{
+  if (window.location.protocol === 'file:') return;
+  if (!confirm('Clear all manual job-match history and delete generated files?')) return;
+  try {{
+    const res = await apiJobMatchClear();
+    toast('Cleared ' + String((res && res.cleared) || 0) + ' job-match entries', 'success', 2400);
+    await matchRefreshHistory();
+  }} catch (e) {{
+    toast('Clear failed: ' + _errMsg(e), 'error', 3600);
+  }}
+}}
+
 async function studioGenerate(btn) {{
   const resume = ((document.getElementById('studio-resume') || {{}}).value || '').trim();
   const job = ((document.getElementById('studio-job') || {{}}).value || '').trim();
   const title = ((document.getElementById('studio-title') || {{}}).value || '').trim();
   const org = ((document.getElementById('studio-org') || {{}}).value || '').trim();
+  const facts = ((document.getElementById('studio-facts') || {{}}).value || '').trim();
   const mwRaw = ((document.getElementById('studio-max-words') || {{}}).value || '').trim();
   const maxWords = mwRaw ? parseInt(mwRaw, 10) : 1500;
 
@@ -3682,7 +5433,7 @@ async function studioGenerate(btn) {{
 
   _studioSetStatus('Generating...');
   try {{
-    const res = await _apiJson('/api/statement/generate', {{ resume_text: resume, job_text: job, title: title, org: org, max_words: maxWords }});
+    const res = await _apiJson('/api/statement/generate', {{ resume_text: resume, job_text: job, title: title, org: org, supplemental_facts: facts, max_words: maxWords }});
     if (!res || !res.ok) throw new Error((res && (res.detail || res.error)) || 'generate_failed');
     const out = document.getElementById('studio-output');
     if (out) out.value = String(res.statement || '').trim();
@@ -3691,6 +5442,69 @@ async function studioGenerate(btn) {{
   }} catch (e) {{
     _studioSetStatus('Failed: ' + (e && e.message ? e.message : String(e)));
   }}
+}}
+
+async function matchGenerate(btn) {{
+  const resume = ((document.getElementById('match-resume') || {{}}).value || '').trim();
+  const job = ((document.getElementById('match-job') || {{}}).value || '').trim();
+  const title = ((document.getElementById('match-title') || {{}}).value || '').trim();
+  const org = ((document.getElementById('match-org') || {{}}).value || '').trim();
+  const location = ((document.getElementById('match-location') || {{}}).value || '').trim();
+  const msRaw = ((document.getElementById('match-min-score') || {{}}).value || '').trim();
+  const minScore = msRaw ? parseInt(msRaw, 10) : 7;
+
+  if (!resume) {{ _matchSetStatus('Paste the CV text first.'); return; }}
+  if (!job) {{ _matchSetStatus('Paste the job description first.'); return; }}
+
+  return await _withAction(btn, {{ working: 'Scoring + tailoring...', fail: 'Job match failed' }}, async () => {{
+    _matchSetStatus('Scoring...');
+    _matchSetMeta('Working...');
+    _matchSetScore('-', minScore);
+
+    const res = await _apiJson('/api/job-match/generate', {{
+      resume_text: resume,
+      job_text: job,
+      title: title,
+      org: org,
+      location: location,
+      min_score: minScore
+    }});
+    if (!res || !res.ok) throw new Error((res && (res.detail || res.error)) || 'generate_failed');
+    _matchSetDownloadState(res || null);
+
+    const score = parseInt(res.score || 0, 10) || 0;
+    const min = parseInt(res.min_score || minScore || 7, 10) || 7;
+    _matchSetScore(score, min);
+
+    const bits = [];
+    bits.push('Score ' + score + '/' + min);
+    if (res.confidence != null && res.confidence !== '') bits.push('confidence ' + String(res.confidence));
+    if (res.keywords) bits.push('keywords: ' + String(res.keywords));
+    if (res.reasoning) bits.push(String(res.reasoning));
+    if (res.tailored_path) bits.push('saved: ' + String(res.tailored_path));
+    if (res.pdf_path) bits.push('pdf: ' + String(res.pdf_path));
+    if (res.tailor_failure_detail) bits.push('detail: ' + String(res.tailor_failure_detail));
+    _matchSetMeta(bits.join(' | '));
+
+    const out = document.getElementById('match-output');
+    if (out) out.value = String(res.tailored_text || '').trim();
+
+    if (res.tailored && _matchAutoCopyEnabled()) {{
+      try {{
+        await navigator.clipboard.writeText(String(res.tailored_text || '').trim());
+        toast('Tailored CV copied', 'success', 2200);
+      }} catch (e) {{}}
+    }}
+
+    if (res.tailored) _matchSetStatus('Tailored CV ready.');
+    else if (res.score_below_threshold) _matchSetStatus('Score below threshold. Tailoring skipped.');
+    else {{
+      const detail = String((res && res.tailor_failure_detail) || '').trim();
+      if (detail && detail.toLowerCase() !== 'none') _matchSetStatus('Tailoring blocked by validation: ' + detail);
+      else _matchSetStatus('Tailoring did not produce an approved CV.');
+    }}
+    await matchRefreshHistory();
+  }});
 }}
 
 function setupUpdatePdfName() {{
@@ -3851,6 +5665,68 @@ function setupInsertSearchExample() {{
     el._t = window.setTimeout(() => el.classList.remove('show'), dur);
  }}
 
+let _cleanupModalResolver = null;
+
+function cleanupModalCancel() {{
+  const el = document.getElementById('cleanup-modal');
+  if (el) {{
+    el.classList.remove('show');
+    try {{ el.setAttribute('aria-hidden', 'true'); }} catch (e) {{}}
+  }}
+  const resolve = _cleanupModalResolver;
+  _cleanupModalResolver = null;
+  if (resolve) resolve({{ confirmed: false }});
+}}
+
+function cleanupModalConfirm() {{
+  const wrap = document.getElementById('cleanup-modal-input-wrap');
+  const daysEl = document.getElementById('cleanup-modal-days');
+  let days = null;
+  if (wrap && wrap.style.display !== 'none') {{
+    const raw = String((daysEl && daysEl.value) || '').trim();
+    const n = parseInt(raw || '0', 10);
+    if (!isFinite(n) || n <= 0) {{
+      toast('Enter a valid number of days', 'warn', 3200);
+      try {{ if (daysEl) daysEl.focus(); }} catch (e) {{}}
+      return;
+    }}
+    days = n;
+  }}
+  const el = document.getElementById('cleanup-modal');
+  if (el) {{
+    el.classList.remove('show');
+    try {{ el.setAttribute('aria-hidden', 'true'); }} catch (e) {{}}
+  }}
+  const resolve = _cleanupModalResolver;
+  _cleanupModalResolver = null;
+  if (resolve) resolve({{ confirmed: true, days: days }});
+}}
+
+function openCleanupModal(opts) {{
+  return new Promise((resolve) => {{
+    _cleanupModalResolver = resolve;
+    const el = document.getElementById('cleanup-modal');
+    const title = document.getElementById('cleanup-modal-title');
+    const text = document.getElementById('cleanup-modal-text');
+    const wrap = document.getElementById('cleanup-modal-input-wrap');
+    const daysEl = document.getElementById('cleanup-modal-days');
+    const confirmBtn = document.getElementById('cleanup-modal-confirm');
+    if (title) title.textContent = String((opts && opts.title) || 'Confirm cleanup');
+    if (text) text.textContent = String((opts && opts.text) || 'Review the cleanup action.');
+    if (confirmBtn) confirmBtn.textContent = String((opts && opts.confirmLabel) || 'Confirm');
+    const needDays = !!(opts && opts.askDays);
+    if (wrap) wrap.style.display = needDays ? '' : 'none';
+    if (daysEl) daysEl.value = String((opts && opts.defaultDays) || '30');
+    if (el) {{
+      el.classList.add('show');
+      try {{ el.setAttribute('aria-hidden', 'false'); }} catch (e) {{}}
+    }}
+    window.setTimeout(() => {{
+      try {{ if (needDays && daysEl) daysEl.focus(); else if (confirmBtn) confirmBtn.focus(); }} catch (e) {{}}
+    }}, 20);
+  }});
+}}
+
 function _incStat(id, delta) {{
   const el = document.getElementById(id);
   if (!el) return;
@@ -3858,8 +5734,74 @@ function _incStat(id, delta) {{
   el.textContent = '' + (n + delta);
 }}
 
-function updateCardStatus(id, newStatus, newLabel) {{
-  const card = document.querySelector('.job-card[data-id="' + id + '"]');
+function _jobById(id) {{
+  if (_largeJobsDataset) return null;
+  if (!_jobsCompact.length) return null;
+  const n = parseInt(id || 0, 10) || 0;
+  if (!n) return null;
+  for (let i = 0; i < _jobsCompact.length; i++) {{
+    const job = _jobsCompact[i];
+    if ((parseInt(job.id || 0, 10) || 0) === n) return job;
+  }}
+  return null;
+}}
+
+function _cardMatchesFilters(card) {{
+  if (!card || !card.isConnected) return false;
+  const score = parseInt(card.dataset.score) || 0;
+  const text = card.dataset.text || '';
+  const scoreMatch = score >= (minScore || 5);
+  const moderateMatch = !hideModerate || score >= 7;
+  const textMatch = !searchText || text.includes(searchText);
+  const siteMatch = !siteText || (card.dataset.site || '').toLowerCase() === siteText;
+  const status = (card.dataset.status || '').toLowerCase();
+  const statusMatch = !statusText
+    || (statusText === 'active' && !['applied','failed','skipped','blocked','manual'].includes(status))
+    || status === statusText;
+  const roleMatch = !roleText || (card.dataset.role || '').toLowerCase() === roleText;
+  const ageDays = parseInt(card.dataset.ageDays || '0', 10);
+  const ageMatch = !ageDaysFilter || ((!isNaN(ageDays)) && ageDays >= ageDaysFilter);
+
+  const pol = (card.dataset.sponsorPolicy || '').toLowerCase();
+  const lic = (card.dataset.sponsorLicensed || '').toLowerCase();
+  let sponsorMatch = true;
+  if (sponsorFilter === 'licensed_yes') sponsorMatch = (lic === 'yes');
+  else if (sponsorFilter === 'policy_yes') sponsorMatch = (pol === 'yes');
+  else if (sponsorFilter === 'policy_conditional') sponsorMatch = (pol === 'conditional');
+  else if (sponsorFilter === 'policy_no') sponsorMatch = (pol === 'no');
+  else if (sponsorFilter === 'not_no') sponsorMatch = (pol !== 'no');
+  else if (sponsorFilter === 'unknown') sponsorMatch = (!pol || pol === 'unknown') && (!lic || lic === 'unknown');
+  return scoreMatch && moderateMatch && textMatch && siteMatch && statusMatch && roleMatch && sponsorMatch && ageMatch;
+}}
+
+function _refreshVirtualVisibleState() {{
+  const root = document.getElementById('jobs-virtual-root');
+  if (!root) return;
+  let shown = 0;
+  let total = 0;
+  root.querySelectorAll('.job-card[data-id]').forEach(card => {{
+    total += 1;
+    const ok = _cardMatchesFilters(card);
+    if (ok) {{
+      card.classList.remove('hidden');
+      shown += 1;
+    }} else {{
+      card.classList.add('hidden');
+    }}
+  }});
+  root.querySelectorAll('.score-group[data-score-group]').forEach(group => {{
+    const visible = group.querySelectorAll('.job-card[data-id]:not(.hidden)').length;
+    if (visible > 0) group.classList.remove('hidden');
+    else group.classList.add('hidden');
+  }});
+  if (_jobCountEl) _jobCountEl.textContent = 'Showing ' + String(shown) + ' of ' + String(total) + ' jobs';
+}}
+
+function updateCardStatus(id, newStatus, newLabel, opts) {{
+  const selector = _largeJobsDataset
+    ? '#jobs-virtual-root .job-card[data-id="' + id + '"]'
+    : '.job-card[data-id="' + id + '"]';
+  const card = document.querySelector(selector);
   if (!card) return;
 
   const oldStatus = (card.dataset.status || '').toLowerCase();
@@ -3878,7 +5820,20 @@ function updateCardStatus(id, newStatus, newLabel) {{
     if (ns === 'blocked') _incStat('stat-blocked', 1);
   }}
 
-  applyFilters();
+  if (_largeJobsDataset) {{
+    const footer = card.querySelector('.card-footer');
+    if (footer) {{
+      const pickAction = ns === 'selected'
+        ? '<button type="button" class="apply-link primary" data-live="1" onclick="selectJob(' + id + ', false)">Unpick</button>'
+        : '<button type="button" class="apply-link primary" data-live="1" onclick="selectJob(' + id + ', true, false)">Pick</button>';
+      const existing = footer.querySelector('button.apply-link.primary[data-live="1"]');
+      if (existing) existing.outerHTML = pickAction;
+    }}
+    if (!(opts && opts.skipRefresh)) _refreshVirtualVisibleState();
+    return;
+  }}
+
+  if (!(opts && opts.skipRefresh)) applyFilters();
 }}
 
 async function apiMark(id, status, reason) {{
@@ -3903,6 +5858,13 @@ async function apiSelect(id, selected, exclusive) {{
   return await _apiJson('/api/jobs/select', {{ id: parseInt(id), selected: !!selected, exclusive: !!exclusive }});
 }}
 
+async function apiClearSelected() {{
+  if (window.location.protocol === 'file:') {{
+     throw new Error('Live actions require `applypilot dashboard-serve`');
+  }}
+  return await _apiJson('/api/jobs/select-clear', {{}});
+}}
+
 async function apiDeleteJob(id) {{
   if (window.location.protocol === 'file:') {{
      throw new Error('Live actions require `applypilot dashboard-serve`');
@@ -3917,7 +5879,18 @@ async function apiDeleteJobsBulk(ids) {{
   return await _apiJson('/api/jobs/delete-bulk', {{ ids: ids || [] }});
 }}
 
+async function apiDeleteJobsRule(rule, opts) {{
+  if (window.location.protocol === 'file:') {{
+     throw new Error('Live actions require `applypilot dashboard-serve`');
+  }}
+  const payload = Object.assign({{ rule: String(rule || '') }}, opts || {{}});
+  return await _apiJson('/api/jobs/delete-rule', payload);
+}}
+
 function _visibleJobIds() {{
+  if (_largeJobsDataset) {{
+    return Array.from(document.querySelectorAll('#jobs-virtual-root .job-card[data-id]')).map(card => parseInt(card.getAttribute('data-id') || '0', 10) || 0).filter(id => id > 0);
+  }}
   const ids = [];
   document.querySelectorAll('.job-card[data-id]:not(.hidden)').forEach(card => {{
     const id = parseInt(card.getAttribute('data-id') || '0', 10) || 0;
@@ -3932,7 +5905,12 @@ async function deleteVisibleJobs() {{
     toast('No visible jobs to delete', 'warn', 3200);
     return;
   }}
-  if (!confirm('Delete ' + ids.length + ' visible jobs permanently? This cannot be undone.')) return;
+  const decision = await openCleanupModal({{
+    title: 'Delete shown jobs',
+    text: 'Delete ' + ids.length + ' currently visible jobs permanently? This cannot be undone.',
+    confirmLabel: 'Delete shown'
+  }});
+  if (!(decision && decision.confirmed)) return;
   try {{
     const res = await apiDeleteJobsBulk(ids);
     toast('Deleted ' + ((res && res.deleted) || 0) + ' jobs', 'success');
@@ -3952,10 +5930,97 @@ async function deleteRoleJobs() {{
     toast('No jobs to delete for this role', 'warn', 3200);
     return;
   }}
-  if (!confirm('Delete all currently visible jobs for role "' + roleText + '"?')) return;
+  const decision = await openCleanupModal({{
+    title: 'Delete role jobs',
+    text: 'Delete all currently visible jobs for role "' + roleText + '" permanently? This cannot be undone.',
+    confirmLabel: 'Delete role jobs'
+  }});
+  if (!(decision && decision.confirmed)) return;
   try {{
     const res = await apiDeleteJobsBulk(ids);
     toast('Deleted ' + ((res && res.deleted) || 0) + ' jobs', 'success');
+    setTimeout(() => window.location.reload(), 300);
+  }} catch (e) {{
+    toast('Delete failed: ' + (e && e.message ? e.message : e), 'error', 4200);
+  }}
+}}
+
+async function deleteLowScoreJobs() {{
+  try {{
+    const preview = await apiDeleteJobsRule('low_score', {{ threshold: 7, dry_run: true }});
+    const count = parseInt((preview && preview.matched) || 0, 10) || 0;
+    if (!count) {{ toast('No scored jobs below 7 to delete', 'warn', 3200); return; }}
+    const decision = await openCleanupModal({{
+      title: 'Delete low-score jobs',
+      text: 'Delete ' + count + ' scored jobs with score below 7 permanently? This cannot be undone.',
+      confirmLabel: 'Delete low-score jobs'
+    }});
+    if (!(decision && decision.confirmed)) return;
+    const res = await apiDeleteJobsRule('low_score', {{ threshold: 7 }});
+    toast('Deleted ' + ((res && res.deleted) || 0) + ' low-score jobs', 'success');
+    setTimeout(() => window.location.reload(), 300);
+  }} catch (e) {{
+    toast('Delete failed: ' + (e && e.message ? e.message : e), 'error', 4200);
+  }}
+}}
+
+async function deleteUnscoredJobs() {{
+  try {{
+    const preview = await apiDeleteJobsRule('unscored', {{ dry_run: true }});
+    const count = parseInt((preview && preview.matched) || 0, 10) || 0;
+    if (!count) {{ toast('No unscored jobs to delete', 'warn', 3200); return; }}
+    const decision = await openCleanupModal({{
+      title: 'Delete unscored jobs',
+      text: 'Delete ' + count + ' unscored jobs permanently? This cannot be undone.',
+      confirmLabel: 'Delete unscored jobs'
+    }});
+    if (!(decision && decision.confirmed)) return;
+    const res = await apiDeleteJobsRule('unscored', {{}});
+    toast('Deleted ' + ((res && res.deleted) || 0) + ' unscored jobs', 'success');
+    setTimeout(() => window.location.reload(), 300);
+  }} catch (e) {{
+    toast('Delete failed: ' + (e && e.message ? e.message : e), 'error', 4200);
+  }}
+}}
+
+async function deleteOldJobsPrompt() {{
+  return await _deleteAgeRulePrompt('older_than', 'old jobs', 'Delete jobs older than how many days?', 'No jobs older than ');
+}}
+
+async function deleteOldScoredJobsPrompt() {{
+  return await _deleteAgeRulePrompt('older_scored', 'old scored jobs', 'Delete scored jobs older than how many days?', 'No scored jobs older than ');
+}}
+
+async function deleteOldUnscoredJobsPrompt() {{
+  return await _deleteAgeRulePrompt('older_unscored', 'old unscored jobs', 'Delete unscored jobs older than how many days?', 'No unscored jobs older than ');
+}}
+
+async function deleteOldLowScoreJobsPrompt() {{
+  return await _deleteAgeRulePrompt('older_low_score', 'old low-score jobs', 'Delete scored jobs below 7 older than how many days?', 'No low-score jobs older than ');
+}}
+
+async function _deleteAgeRulePrompt(ruleName, label, promptText, emptyPrefix) {{
+  const picked = await openCleanupModal({{
+    title: 'Choose age threshold',
+    text: String(promptText || 'Delete jobs older than how many days?'),
+    confirmLabel: 'Check matches',
+    askDays: true,
+    defaultDays: 30
+  }});
+  if (!(picked && picked.confirmed)) return;
+  const days = parseInt(String(picked.days || '0'), 10) || 0;
+  try {{
+    const preview = await apiDeleteJobsRule(ruleName, {{ days: days, dry_run: true }});
+    const count = parseInt((preview && preview.matched) || 0, 10) || 0;
+    if (!count) {{ toast(emptyPrefix + days + ' days to delete', 'warn', 3200); return; }}
+    const decision = await openCleanupModal({{
+      title: 'Confirm age-based cleanup',
+      text: 'Delete ' + count + ' ' + label + ' older than ' + days + ' days? This uses discovered date and cannot be undone.',
+      confirmLabel: 'Delete ' + label
+    }});
+    if (!(decision && decision.confirmed)) return;
+    const res = await apiDeleteJobsRule(ruleName, {{ days: days }});
+    toast('Deleted ' + ((res && res.deleted) || 0) + ' ' + label, 'success');
     setTimeout(() => window.location.reload(), 300);
   }} catch (e) {{
     toast('Delete failed: ' + (e && e.message ? e.message : e), 'error', 4200);
@@ -4287,9 +6352,13 @@ async function pipelinePollOnce() {{
       _pipeAppend(['[log truncated: showing recent output only]']);
     }}
     const entries = logs.entries || [];
+    const fresh = entries.filter(e => (parseInt((e && e.seq) || 0) || 0) > _pipeRenderedSeq);
+    if (fresh.length) {{
+      _pipeAppend(fresh.map(e => e.line));
+      _pipeRenderedSeq = parseInt(fresh[fresh.length - 1].seq || 0) || _pipeRenderedSeq;
+    }}
     if (entries.length) {{
-      _pipeAppend(entries.map(e => e.line));
-      _pipeSince = entries[entries.length - 1].seq;
+      _pipeSince = parseInt(entries[entries.length - 1].seq || 0) || _pipeSince;
     }}
   }} catch (e) {{
     const wasOk = _pipeApiOk;
@@ -4303,6 +6372,7 @@ async function pipelineRefreshStatusOnce() {{
     const res = await apiPipelineStatus();
     const st = (res && res.status) || {{}};
     const running = !!(st.running || st.starting);
+    const wasRunning = _pipeRunning;
     _pipeRunning = running;
 
     if (st.starting) {{
@@ -4320,6 +6390,15 @@ async function pipelineRefreshStatusOnce() {{
     }}
 
     _pipeSetControlsEnabled(!running);
+
+    // Adaptive polling: switch cadence when state changes
+    if (running && !_pipePollingFast) {{
+      pipelineStartPolling(true);
+    }} else if (!running && _pipePollingFast) {{
+      // Pipeline just stopped: do one final log poll, then slow down
+      if (wasRunning) {{ try {{ await pipelinePollOnce(); }} catch (e) {{}} }}
+      pipelineStartPolling(false);
+    }}
   }} catch (e) {{
     const wasOk = _pipeApiOk;
     _pipeApiOk = false;
@@ -4329,10 +6408,16 @@ async function pipelineRefreshStatusOnce() {{
   }}
 }}
 
-function pipelineStartPolling() {{
-  if (_pipeTimer) return;
-  _pipeTimer = window.setInterval(pipelinePollOnce, 900);
-  if (!_pipeStatusTimer) _pipeStatusTimer = window.setInterval(pipelineRefreshStatusOnce, 1200);
+function pipelineStartPolling(fast) {{
+  pipelineStopPolling();
+  if (fast) {{
+    _pipePollingFast = true;
+    _pipeTimer = window.setInterval(pipelinePollOnce, {DASHBOARD_PIPELINE_LOG_POLL_MS});
+    _pipeStatusTimer = window.setInterval(pipelineRefreshStatusOnce, {DASHBOARD_PIPELINE_STATUS_FAST_POLL_MS});
+  }} else {{
+    _pipePollingFast = false;
+    _pipeStatusTimer = window.setInterval(pipelineRefreshStatusOnce, {DASHBOARD_PIPELINE_STATUS_IDLE_POLL_MS});
+  }}
 }}
 
 function pipelineStopPolling() {{
@@ -4340,6 +6425,28 @@ function pipelineStopPolling() {{
   _pipeTimer = null;
   if (_pipeStatusTimer) window.clearInterval(_pipeStatusTimer);
   _pipeStatusTimer = null;
+  _pipePollingFast = false;
+}}
+
+function pipelineUseNhsGovPreset() {{
+  const sites = (SMART_UK_PUBLIC_SPONSOR_DEFAULTS && SMART_UK_PUBLIC_SPONSOR_DEFAULTS.length)
+    ? SMART_UK_PUBLIC_SPONSOR_DEFAULTS
+    : SMART_UK_DEFAULTS;
+  const q = document.getElementById('pipe-search-query');
+  const boards = document.getElementById('pipe-jobspy-sites');
+  const smart = document.getElementById('pipe-smarte-sites');
+  const results = document.getElementById('pipe-results-per-site');
+  const hours = document.getElementById('pipe-hours-old');
+  const skipJobspy = document.getElementById('pipe-skip-jobspy');
+  const skipSmarte = document.getElementById('pipe-skip-smarte');
+  if (q) q.value = 'Application Support Analyst';
+  if (boards) boards.value = 'indeed';
+  if (smart) smart.value = (sites || []).join(', ');
+  if (results) results.value = '15';
+  if (hours) hours.value = '72';
+  if (skipJobspy) skipJobspy.checked = false;
+  if (skipSmarte) skipSmarte.checked = false;
+  toast('NHS/Gov discover preset loaded. Change the role query, then run Discover or Prep-only.', 'success', 3600);
 }}
 
 async function pipelineRun(stages) {{
@@ -4393,7 +6500,7 @@ async function pipelineRun(stages) {{
       _pipeAppend(['[pipeline] run_id=' + res.run_id]);
     }}
     toast(dryRun ? 'Dry-run started' : 'Pipeline started');
-    pipelineStartPolling();
+    pipelineStartPolling(true);
     pipelinePollOnce();
     pipelineRefreshStatusOnce();
     pipelineRefreshRecent();
@@ -4456,9 +6563,14 @@ function pipelineClear() {{
   if (!el) return;
   el.textContent = '';
   _pipeSince = 0;
+   _pipeRenderedSeq = 0;
 }}
 
   function removeCard(id) {{
+    if (_largeJobsDataset) {{
+      applyFilters();
+      return;
+    }}
     const card = document.querySelector('.job-card[data-id="' + id + '"]');
     if (card) card.remove();
     applyFilters();
@@ -4487,21 +6599,39 @@ async function markFailed(id) {{
 
 async function selectJob(id, selected, exclusive) {{
   try {{
-    const r = await apiSelect(id, selected, exclusive);
+    await apiSelect(id, selected, exclusive);
     if (selected) {{
       updateCardStatus(id, 'selected', 'Selected');
-      if ((r && r.cleared ? r.cleared : 0) > 0) {{
-        toast('Picked only job #' + id + ' and cleared ' + r.cleared + ' old picks', 'success');
-        setTimeout(() => window.location.reload(), 250);
-      }} else {{
-        toast('Picked for apply: #' + id, 'success');
-      }}
+      toast('Picked for apply: #' + id, 'success');
     }} else {{
       updateCardStatus(id, 'ready', 'Ready');
       toast('Removed from picked list: #' + id, 'info');
     }}
   }} catch (e) {{
     toast('Pick failed: ' + (e && e.message ? e.message : e), 'error', 4200);
+  }}
+}}
+
+async function clearSelectedJobs() {{
+  if (!confirm('Clear all picked jobs?')) return;
+  try {{
+    const r = await apiClearSelected();
+    toast('Cleared ' + ((r && r.cleared) || 0) + ' picked jobs', 'info');
+    if (_largeJobsDataset) {{
+      document.querySelectorAll('#jobs-virtual-root .job-card[data-status="selected"]').forEach(card => {{
+        const id = parseInt(card.getAttribute('data-id') || '0', 10) || 0;
+        if (id > 0) updateCardStatus(id, 'ready', 'Ready', {{ skipRefresh: true }});
+      }});
+      _refreshVirtualVisibleState();
+    }} else {{
+      document.querySelectorAll('.job-card[data-status="selected"]').forEach(card => {{
+        const id = parseInt(card.getAttribute('data-id') || '0', 10) || 0;
+        if (id > 0) updateCardStatus(id, 'ready', 'Ready', {{ skipRefresh: true }});
+      }});
+      applyFilters();
+    }}
+  }} catch (e) {{
+    toast('Clear picks failed: ' + (e && e.message ? e.message : e), 'error', 4200);
   }}
 }}
 

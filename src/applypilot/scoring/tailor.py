@@ -20,7 +20,7 @@ from pathlib import Path
 from applypilot.config import RESUME_PATH, TAILORED_DIR, load_profile, load_search_config
 from applypilot.role_routing import route_resume_for_job
 from applypilot.database import get_connection, get_jobs_by_stage
-from applypilot.llm import chat_json, get_client
+from applypilot.llm import chat_json, get_client, temporary_model
 from applypilot import naming
 from applypilot.scoring.validator import (
     FABRICATION_WATCHLIST,
@@ -157,7 +157,7 @@ def _strict_evidence_enabled(profile: dict) -> bool:
         return False
 
     # In strict mode, evidence should be strict by default.
-    return True
+    return False
 
 
 def _min_coverage_required(profile: dict) -> float:
@@ -249,11 +249,36 @@ def _max_missing_domain_requirements(profile: dict) -> int:
     return default
 
 
-def _current_role_alignment_enabled(profile: dict) -> bool:
+def _tailoring_mode(profile: dict) -> str:
     try:
         cfg = (profile or {}).get("tailoring") or {}
+        if isinstance(cfg, dict) and cfg.get("tailoring_mode") is not None:
+            mode = str(cfg.get("tailoring_mode") or "").strip().lower()
+            if mode in {"factual", "balanced", "aggressive"}:
+                return mode
         if isinstance(cfg, dict) and cfg.get("align_current_role_header") is not None:
             v = cfg.get("align_current_role_header")
+            if isinstance(v, bool):
+                return "balanced" if v else "factual"
+            s = str(v or "").strip().lower()
+            if s in ("1", "true", "yes", "y", "on"):
+                return "balanced"
+            if s in ("0", "false", "no", "n", "off"):
+                return "factual"
+    except Exception:
+        pass
+    return "factual"
+
+
+def _current_role_alignment_enabled(profile: dict) -> bool:
+    return _tailoring_mode(profile) in {"balanced", "aggressive"}
+
+
+def _smart_model_fallback_enabled(profile: dict) -> bool:
+    try:
+        cfg = (profile or {}).get("tailoring") or {}
+        if isinstance(cfg, dict) and cfg.get("smart_model_fallback") is not None:
+            v = cfg.get("smart_model_fallback")
             if isinstance(v, bool):
                 return v
             s = str(v or "").strip().lower()
@@ -263,7 +288,12 @@ def _current_role_alignment_enabled(profile: dict) -> bool:
                 return False
     except Exception:
         pass
-    return True
+    env_v = str(os.environ.get("GEMINI_SMART_FALLBACK", "") or "").strip().lower()
+    return env_v in ("1", "true", "yes", "y", "on")
+
+
+def _smart_model_fallback_name() -> str:
+    return str(os.environ.get("GEMINI_SMART_FALLBACK_MODEL", "gemini-2.5-pro") or "gemini-2.5-pro").strip()
 
 
 def _load_skip_titles() -> list[str]:
@@ -493,6 +523,35 @@ def _build_tailor_prompt(
     targets_block = jd_targets_text.strip()
     resp_block = responsibility_map_text.strip()
     summary_guidance_block = summary_gap_guidance.strip()
+    tailoring_mode = _tailoring_mode(profile)
+
+    if tailoring_mode == "aggressive":
+        current_role_block = f""" MOST RECENT ROLE TITLE (important):
+ - Current company (must remain exact): {current_company}
+ - Official internal title (for context only): {official_title}
+ - For the FIRST experience entry (current role), you may rewrite the title to an exact or near-exact target title when the underlying responsibilities strongly support it.
+ - Keep the company name exactly the same.
+ - Do NOT rewrite previous job titles unless they already naturally match.
+ - Do NOT change seniority arbitrarily.
+ - Format should be: \"<Target-Aligned Title> at <Company>\"."""
+    elif tailoring_mode == "balanced":
+        current_role_block = f""" MOST RECENT ROLE TITLE (important):
+ - Current company (must remain exact): {current_company}
+ - Official internal title (must remain exact for context): {official_title}
+ - For the FIRST experience entry (current role), you may use a close market-equivalent title only if it stays in the same family and seniority.
+ - Keep the company name exactly the same.
+ - Do NOT copy the target job title verbatim.
+ - Do NOT rewrite previous job titles to match the target role.
+ - Format should be: \"<Market-Equivalent Title> at <Company>\"."""
+    else:
+        current_role_block = f""" MOST RECENT ROLE TITLE (important):
+ - Current company (must remain exact): {current_company}
+ - Official internal title (must remain exact): {official_title}
+ - For the FIRST experience entry (current role), preserve the real job title.
+ - Keep the company name exactly the same.
+ - Do NOT rewrite the current or previous job titles to match the target role.
+ - Do NOT copy the target job title into any experience header.
+ - Format should be: \"<Actual Title> at <Company>\"."""
 
     return f"""You are a senior technical recruiter rewriting a resume to get this person an interview.
 
@@ -528,7 +587,9 @@ In particular, do NOT mention Power Automate, Copilot Studio, Power Apps, ALM, o
 
 ## TAILORING RULES:
 
-TITLE: Match the target role. Keep seniority (Senior/Lead/Staff). Drop company suffixes and team names.
+TAILORING MODE: {tailoring_mode}
+
+TITLE: Match the target role for the resume headline only. Keep seniority (Senior/Lead/Staff). Drop company suffixes and team names.
 
 SUMMARY: Rewrite from scratch. Lead with the 1-2 skills that matter most for THIS role. Sound like someone who's done this job.
 
@@ -543,14 +604,7 @@ Reframe EVERY bullet for this role. Same real work, different angle. Every bulle
 
  EXPERIENCE ORDER: Reverse chronological. The FIRST experience entry is the current/most recent role.
 
- MOST RECENT ROLE TITLE (important):
- - Current company (must remain exact): {current_company}
- - Official internal title (for context only): {official_title}
- - For the FIRST experience entry (current role), choose a market-equivalent title for THIS job family.
- - Keep the company name exactly the same.
- - Do NOT use parentheses.
- - Do NOT copy the target job title verbatim.
- - Format should be: "<Market Title> at <Company>".
+{current_role_block}
 
  BULLETS: Strong verb + what you built + quantified impact. Vary verbs (Built, Designed, Implemented, Reduced, Automated, Deployed, Operated, Optimized). Most relevant first.
 
@@ -604,7 +658,7 @@ Quant rule:
 {{"title":"Role Title","summary":"2-3 tailored sentences.","core_skills":["skill 1","skill 2"],"skills":{{"Languages":"...","Analytics":"...","Data":"...","Tools":"...","Governance":"..."}},"experience":[{{"header":"Title at Company","subtitle":"Dates | Location","bullets":["bullet 1","bullet 2","bullet 3","bullet 4"]}}],"projects":[{{"header":"Project Name - Description","subtitle":"Tech | Dates","bullets":["bullet 1","bullet 2"]}}],"education":"{school} | {education_level}"}}"""
 
 
-def _build_judge_prompt(profile: dict) -> str:
+def _build_judge_prompt(profile: dict, job_title: str = "") -> str:
     """Build the LLM judge prompt from the user's profile."""
     boundary = profile.get("skills_boundary", {})
     resume_facts = profile.get("resume_facts", {})
@@ -622,11 +676,61 @@ def _build_judge_prompt(profile: dict) -> str:
 
     # Technical Environment is profile-driven and may include items not present
     # in the base resume text; the judge must not treat those as fabrication.
+    title_l = str(job_title or "").lower()
+    is_data_like_title = bool(
+        re.search(
+            r"\bdata\b|\banalytics?\b|\breporting\b|\bbusiness\s+intelligence\b|\bbi\b|\bmi\b|\binsights?\b",
+            title_l,
+            flags=re.IGNORECASE,
+        )
+    )
+    support_like_title = any(
+        k in title_l
+        for k in (
+            "support",
+            "service desk",
+            "helpdesk",
+            "desktop",
+            "it support",
+            "technical support",
+            "systems support",
+        )
+    )
+    app_support_like_title = any(
+        k in title_l
+        for k in (
+            "application support",
+            "production support",
+            "platform support",
+            "software support",
+        )
+    )
+
     tech_env = extras.get("technical_environment")
+    if is_data_like_title and extras.get("data_technical_environment"):
+        tech_env = extras.get("data_technical_environment")
+    elif app_support_like_title and extras.get("application_support_technical_environment"):
+        tech_env = extras.get("application_support_technical_environment")
+    elif support_like_title and extras.get("support_technical_environment"):
+        tech_env = extras.get("support_technical_environment")
     tech_env_items: list[str] = []
     if isinstance(tech_env, list):
         tech_env_items = [sanitize_text(str(x)) for x in tech_env if str(x).strip()]
     tech_env_str = ", ".join(tech_env_items) if tech_env_items else "N/A"
+    tailoring_mode = _tailoring_mode(profile)
+    if tailoring_mode == "aggressive":
+        title_mode_allowed = "- Current role title may be rewritten to an exact or near-exact target title when the underlying work strongly supports it"
+        title_mode_fabrication = "5. Rewriting previous role titles, or rewriting the current role title in a way that changes company/seniority or has no basis in the original work."
+    elif tailoring_mode == "balanced":
+        title_mode_allowed = (
+            "- Current role title may be adjusted to a close market-equivalent title in the same family/seniority"
+        )
+        title_mode_fabrication = "5. Rewriting previous role titles, or rewriting the current role title to an unrelated/exact target title with no basis in the original work."
+    else:
+        title_mode_allowed = (
+            "- Keep all experience titles factual; only the top resume headline may match the target role"
+        )
+        title_mode_fabrication = "5. Rewriting any real experience title into a different role title."
 
     return f"""You are a resume quality judge. A tailoring engine rewrote a resume to target a specific job. Your job is to catch LIES, not style changes.
 
@@ -635,20 +739,22 @@ VERDICT: PASS or FAIL
 ISSUES: (list any problems, or "none")
 
 ## CONTEXT -- what the tailoring engine was instructed to do (all of this is ALLOWED):
-- Change the title to match the target role
+- Change the resume headline title to match the target role
 - Rewrite the summary from scratch for the target job
 - Reorder bullets and projects to put the most relevant first
 - Reframe bullets to use the job's language
 - Drop low-relevance bullets and replace with more relevant ones from other sections
 - Reorder the skills section to put job-relevant skills first
 - Change tone and wording extensively
+{title_mode_allowed}
 
 ## WHAT IS FABRICATION (FAIL for these):
 1. Adding tools, languages, or frameworks to CORE TECHNICAL SKILLS / TECHNICAL SKILLS that aren't in the original. The allowed skills are ONLY: {skills_str}
 2. Inventing NEW metrics or numbers not in the original. The real metrics are: {metrics_str}
 3. Inventing work that has no basis in any original bullet (completely new achievements).
 4. Adding companies, roles, or degrees that don't exist.
-5. Changing real numbers (inflating 80% to 95%, 500 nodes to 1000 nodes).
+{title_mode_fabrication}
+6. Changing real numbers (inflating 80% to 95%, 500 nodes to 1000 nodes).
 
 ## WHAT IS NOT FABRICATION (do NOT fail for these):
 - Rewording any bullet, even heavily, as long as the underlying work is real
@@ -725,7 +831,7 @@ def extract_json(raw: str) -> dict:
 # ── Resume Assembly (profile-driven header) ──────────────────────────────
 
 
-def assemble_resume_text(data: dict, profile: dict) -> str:
+def assemble_resume_text(data: dict, profile: dict, job: dict | None = None) -> str:
     """Convert JSON resume data to formatted plain text.
 
     Header (name, location, contact) is ALWAYS code-injected from the profile,
@@ -897,6 +1003,29 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
                 out.append(s)
         return out
 
+    def _project_section_entries(value: object) -> list[dict[str, object]]:
+        if not isinstance(value, list):
+            return []
+        out: list[dict[str, object]] = []
+        for raw in value:
+            if not isinstance(raw, dict):
+                continue
+            header = sanitize_text(str(raw.get("header", "") or raw.get("title", "") or ""))
+            if not header:
+                continue
+            subtitle = sanitize_text(str(raw.get("subtitle", "") or ""))
+            bullets_raw = raw.get("bullets", []) or []
+            if isinstance(bullets_raw, str):
+                bullets_raw = bullets_raw.splitlines()
+            bullets: list[str] = []
+            if isinstance(bullets_raw, list):
+                for bullet in bullets_raw:
+                    s = sanitize_text(str(bullet))
+                    if s:
+                        bullets.append(s)
+            out.append({"header": header, "subtitle": subtitle, "bullets": bullets})
+        return out
+
     def _projects_enabled() -> bool:
         # Projects are helpful for data/analytics roles, but noisy for support-focused CVs.
         # Enable when the tailored title is clearly data/analytics/BI, or when the
@@ -904,6 +1033,14 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
         try:
             extras_obj = profile.get("resume_sections", {}) or {}
             if extras_obj.get("projects"):
+                return True
+            if any(
+                _project_section_entries(extras_obj.get(k))
+                for k in ("data_projects", "support_projects", "application_support_projects")
+            ):
+                return True
+            preserved = (profile.get("resume_facts", {}) or {}).get("preserved_projects", []) or []
+            if any(str(x).strip() for x in preserved):
                 return True
             rv = profile.get("resume_validation", {}) or {}
             req = rv.get("required_sections")
@@ -916,7 +1053,7 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
         title = re.sub(r"\s+", " ", title).strip()
         is_data_like = bool(
             re.search(
-                r"\bdata\b|\banalytics?\b|\breporting\b|\bbusiness\s+intelligence\b|\bbi\b",
+                r"\bdata\b|\banalytics?\b|\breporting\b|\bbusiness\s+intelligence\b|\bbi\b|\bmi\b|\bmanagement\s+information\b|\binsights?\b",
                 title,
                 flags=re.IGNORECASE,
             )
@@ -928,8 +1065,63 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
             return True
         return False
 
-    # Technical Environment (optional, profile-driven)
+    title_l = str(data.get("title") or "").lower()
+    job_title_l = str((job or {}).get("title") or "").lower()
+    context_title_l = job_title_l or title_l
+    role_pack_name = ""
+    try:
+        if isinstance(job, dict) and job:
+            role_pack_name = str((detect_role_pack(job, profile) or {}).get("pack") or "").strip().lower()
+    except Exception:
+        role_pack_name = ""
+
+    is_data_like_title = bool(
+        re.search(
+            r"\bdata\b|\banalytics?\b|\breporting\b|\bbusiness\s+intelligence\b|\bbi\b|\bmi\b|\binsights?\b",
+            context_title_l,
+            flags=re.IGNORECASE,
+        )
+    )
+
+    support_like_title = any(
+        k in context_title_l
+        for k in (
+            "support",
+            "service desk",
+            "helpdesk",
+            "desktop",
+            "it support",
+            "technical support",
+            "systems support",
+        )
+    )
+    app_support_like_title = any(
+        k in context_title_l
+        for k in (
+            "application support",
+            "production support",
+            "platform support",
+            "software support",
+        )
+    )
+    is_data_context = role_pack_name == "data_bi" or is_data_like_title
+    is_app_support_context = role_pack_name == "application_support" or app_support_like_title
+    is_support_context = role_pack_name == "support" or support_like_title
+
+    # Technical Environment (optional, profile-driven, family-aware)
     tech_env_lines = _section_lines(extras.get("technical_environment"))
+    if is_data_context:
+        specific = _section_lines(extras.get("data_technical_environment"))
+        if specific:
+            tech_env_lines = specific
+    elif is_app_support_context:
+        specific = _section_lines(extras.get("application_support_technical_environment"))
+        if specific:
+            tech_env_lines = specific
+    elif is_support_context:
+        specific = _section_lines(extras.get("support_technical_environment"))
+        if specific:
+            tech_env_lines = specific
     if tech_env_lines:
         lines.append("TECHNICAL ENVIRONMENT")
         for s in tech_env_lines:
@@ -958,8 +1150,6 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
 
     # Projects (optional)
     if _projects_enabled():
-        lines.append("PROJECTS")
-
         def _allowed_skills_lower(p: dict) -> set[str]:
             boundary = p.get("skills_boundary", {}) or {}
             out: set[str] = set()
@@ -998,7 +1188,9 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
             has_pbi = "power bi" in allowed
             has_sql = "sql" in allowed
             if "supply chain" in name_l:
-                b1 = "Built a dashboard to analyse and visualise supply chain performance and bottlenecks."
+                b1 = "Designed and implemented a Power BI dashboard to support supply chain analysis, combining data modelling and visualisation techniques."
+                b2 = "Used SQL and Python to prepare, structure, and analyse data for reporting and insight generation."
+                return [b1, b2]
             elif has_pbi:
                 b1 = "Built a Power BI dashboard to analyse performance trends and support decision-making."
             else:
@@ -1013,12 +1205,29 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
 
         allowed = _allowed_skills_lower(profile)
         year = _guess_year_from_education(extras)
+        project_section_header = "TECHNICAL PROJECTS" if (is_support_context or is_app_support_context) else "PROJECTS"
 
-        # Prefer LLM-provided projects, but ensure each has at least 1 bullet.
+        configured_project_entries = _project_section_entries(extras.get("projects"))
+        if is_data_context:
+            specific = _project_section_entries(extras.get("data_projects"))
+            if specific:
+                configured_project_entries = specific
+        elif is_app_support_context:
+            specific = _project_section_entries(extras.get("application_support_projects"))
+            if specific:
+                configured_project_entries = specific
+            elif not configured_project_entries:
+                specific = _project_section_entries(extras.get("support_projects"))
+                if specific:
+                    configured_project_entries = specific
+        elif is_support_context:
+            specific = _project_section_entries(extras.get("support_projects"))
+            if specific:
+                configured_project_entries = specific
+
         project_entries: list[dict] = []
-        raw_projects = data.get("projects")
-        if isinstance(raw_projects, list):
-            for entry in raw_projects:
+        if configured_project_entries:
+            for entry in configured_project_entries:
                 header = sanitize_text(str(entry.get("header", "") or ""))
                 if not header:
                     continue
@@ -1027,6 +1236,19 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
                 if not bullets:
                     bullets = _fallback_project_bullets(header, allowed)
                 project_entries.append({"header": header, "subtitle": subtitle, "bullets": bullets[:2]})
+        else:
+            # Prefer LLM-provided projects, but ensure each has at least 1 bullet.
+            raw_projects = data.get("projects")
+            if isinstance(raw_projects, list):
+                for entry in raw_projects:
+                    header = sanitize_text(str(entry.get("header", "") or ""))
+                    if not header:
+                        continue
+                    subtitle = sanitize_text(str(entry.get("subtitle", "") or ""))
+                    bullets = [sanitize_text(str(b)) for b in (entry.get("bullets", []) or []) if str(b).strip()]
+                    if not bullets:
+                        bullets = _fallback_project_bullets(header, allowed)
+                    project_entries.append({"header": header, "subtitle": subtitle, "bullets": bullets[:2]})
 
         # Hardening: if no projects were generated, inject a safe project from the profile.
         if not project_entries:
@@ -1083,13 +1305,15 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
                     project_entries.append({"header": proj_header, "subtitle": proj_subtitle, "bullets": proj_bullets})
                     break
 
-            for entry in project_entries:
-                lines.append(entry["header"])
-                if entry.get("subtitle"):
-                    lines.append(entry["subtitle"])
-                for b in entry.get("bullets", []) or []:
-                    lines.append(f"- {sanitize_text(strip_fact_citations(str(b)))}")
-                lines.append("")
+        if project_entries:
+            lines.append(project_section_header)
+        for entry in project_entries:
+            lines.append(entry["header"])
+            if entry.get("subtitle"):
+                lines.append(entry["subtitle"])
+            for b in entry.get("bullets", []) or []:
+                lines.append(f"- {sanitize_text(strip_fact_citations(str(b)))}")
+            lines.append("")
 
     # Education (prefer profile-driven entries so courses/certs are preserved)
     lines.append("EDUCATION")
@@ -1123,8 +1347,29 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
         if s:
             lines.append(s)
 
-    # Certifications (optional, profile-driven)
+    # Certifications (optional, profile-driven, family-aware)
     certs = _section_lines(extras.get("certifications"))
+    if is_data_like_title or is_data_context:
+        certs.extend(_section_lines(extras.get("data_certifications")))
+    elif is_app_support_context:
+        certs.extend(_section_lines(extras.get("application_support_certifications")))
+        # Reuse support-family certs for application-support roles unless a
+        # more specific application-support list exists.
+        if not _section_lines(extras.get("application_support_certifications")):
+            certs.extend(_section_lines(extras.get("support_certifications")))
+    elif support_like_title or is_support_context:
+        certs.extend(_section_lines(extras.get("support_certifications")))
+    # de-dupe while preserving order
+    if certs:
+        seen_certs: set[str] = set()
+        deduped: list[str] = []
+        for c in certs:
+            key = c.strip().lower()
+            if not key or key in seen_certs:
+                continue
+            seen_certs.add(key)
+            deduped.append(c)
+        certs = deduped
     if certs:
         lines.append("")
         lines.append("CERTIFICATIONS")
@@ -1150,7 +1395,7 @@ def judge_tailored_resume(original_text: str, tailored_text: str, job_title: str
     Returns:
         {"passed": bool, "verdict": str, "issues": str, "raw": str}
     """
-    judge_prompt = _build_judge_prompt(profile)
+    judge_prompt = _build_judge_prompt(profile, job_title=job_title)
 
     messages = [
         {"role": "system", "content": judge_prompt},
@@ -1185,7 +1430,15 @@ def judge_tailored_resume(original_text: str, tailored_text: str, job_title: str
 # ── Core Tailoring ───────────────────────────────────────────────────────
 
 
-def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int = 3) -> tuple[str, dict]:
+def tailor_resume(
+    resume_text: str,
+    job: dict,
+    profile: dict,
+    max_retries: int = 3,
+    *,
+    _allow_smart_fallback: bool = True,
+    _model_override: str | None = None,
+) -> tuple[str, dict]:
     """Generate a tailored resume via JSON output + fresh context on each retry.
 
     Key design choices:
@@ -1203,6 +1456,17 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
     Returns:
         (tailored_text, report) where report contains validation details.
     """
+    if _model_override:
+        with temporary_model(_model_override):
+            return tailor_resume(
+                resume_text,
+                job,
+                profile,
+                max_retries=max_retries,
+                _allow_smart_fallback=_allow_smart_fallback,
+                _model_override=None,
+            )
+
     job_desc = str(job.get("full_description") or "")[:6000]
     job_text = (
         f"TITLE: {job['title']}\n"
@@ -1301,7 +1565,8 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
         return re.sub(r"[^a-z0-9]+", " ", str(s).lower()).strip()
 
     def _should_align_current_role(job_title: str) -> bool:
-        if not _current_role_alignment_enabled(profile):
+        mode = _tailoring_mode(profile)
+        if mode == "factual":
             return False
         t = _normalize_title(job_title)
         # Align for more role families, but keep market-title mapping logic narrow.
@@ -1336,6 +1601,10 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
             if not _should_align_current_role(str(job.get("title", "") or "")):
                 return
 
+            mode = _tailoring_mode(profile)
+            if mode == "factual":
+                return
+
             header0 = str(exp[0].get("header", "") or "")
             if current_company.lower() not in header0.lower():
                 return
@@ -1348,6 +1617,7 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
             def _sanitize_market_title(raw_title: str) -> str:
                 s = sanitize_text(raw_title)
                 s = re.sub(r"\([^)]*\)", "", s).strip()  # drop parentheses content
+                s = re.split(r"\s+\|\s+|\s+-\s+", s, maxsplit=1)[0].strip()
                 s = re.sub(r"\s+", " ", s).strip()
                 # Strip a trailing "at ..." if the model included it.
                 if " at " in s.lower():
@@ -1358,18 +1628,51 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
                 return s
 
             def _pick_allowed_market_title(job_title: str, job_desc: str, official: str, proposed: str) -> str:
-                allowed = [
-                    "Data & Quality Systems Analyst",
-                    "Data Analyst",
-                    "BI Analyst",
-                    "Reporting Analyst",
-                ]
-
-                def _toks(s: str) -> set[str]:
-                    return {t for t in _normalize_title(s).split() if len(t) >= 3}
+                if mode == "aggressive":
+                    exact_target = _sanitize_market_title(job_title)
+                    if exact_target:
+                        return exact_target
 
                 jt = _normalize_title(job_title)
                 jd = _normalize_title((job_desc or "")[:6000])
+                scope = f"{jt} {jd}"
+
+                if any(
+                    k in scope
+                    for k in ("application support", "production support", "software support", "platform support")
+                ):
+                    allowed = [
+                        "Application Support Analyst",
+                        "Application Support Engineer",
+                        "Production Support Engineer",
+                        "Technical Systems Analyst",
+                    ]
+                elif any(
+                    k in scope
+                    for k in ("service desk", "helpdesk", "desktop support", "it support", "1st line", "2nd line")
+                ):
+                    allowed = [
+                        "IT Support Analyst",
+                        "Service Desk Analyst",
+                        "Technical Support Analyst",
+                        "Systems Support Analyst",
+                    ]
+                elif any(k in scope for k in ("technical support", "product support")):
+                    allowed = [
+                        "Technical Support Analyst",
+                        "Systems Support Analyst",
+                        "IT Support Analyst",
+                    ]
+                else:
+                    allowed = [
+                        "Data & Quality Systems Analyst",
+                        "Data Analyst",
+                        "BI Analyst",
+                        "Reporting Analyst",
+                    ]
+
+                def _toks(s: str) -> set[str]:
+                    return {t for t in _normalize_title(s).split() if len(t) >= 3}
 
                 # Score title + description separately (title signals count more).
                 scores: dict[str, int] = {a: 0 for a in allowed}
@@ -1384,45 +1687,136 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
                         if ph and ph in jd:
                             scores[bucket] += w_desc
 
-                _add_if(
-                    title_phrases=["business intelligence", " power bi ", " bi "],
-                    desc_phrases=["power bi", "dax", "tabular", "semantic model", "tableau"],
-                    bucket="BI Analyst",
-                    w_title=6,
-                    w_desc=2,
-                )
+                if "BI Analyst" in scores:
+                    _add_if(
+                        title_phrases=["business intelligence", " power bi ", " bi "],
+                        desc_phrases=["power bi", "dax", "tabular", "semantic model", "tableau"],
+                        bucket="BI Analyst",
+                        w_title=6,
+                        w_desc=2,
+                    )
 
-                _add_if(
-                    title_phrases=["report", "reporting", "dashboard"],
-                    desc_phrases=["report", "reporting", "dashboard", "kpi", "insight", "metrics"],
-                    bucket="Reporting Analyst",
-                    w_title=5,
-                    w_desc=2,
-                )
+                if "Reporting Analyst" in scores:
+                    _add_if(
+                        title_phrases=["report", "reporting", "dashboard"],
+                        desc_phrases=["report", "reporting", "dashboard", "kpi", "insight", "metrics"],
+                        bucket="Reporting Analyst",
+                        w_title=5,
+                        w_desc=2,
+                    )
 
-                _add_if(
-                    title_phrases=["data analyst", "analytics"],
-                    desc_phrases=["analysis", "analytics", "ad hoc", "sql", "python"],
-                    bucket="Data Analyst",
-                    w_title=5,
-                    w_desc=2,
-                )
+                if "Data Analyst" in scores:
+                    _add_if(
+                        title_phrases=["data analyst", "analytics"],
+                        desc_phrases=["analysis", "analytics", "ad hoc", "sql", "python"],
+                        bucket="Data Analyst",
+                        w_title=5,
+                        w_desc=2,
+                    )
 
-                _add_if(
-                    title_phrases=["quality", "governance", "compliance", "controls"],
-                    desc_phrases=[
-                        "data quality",
-                        "reconciliation",
-                        "controls",
-                        "audit",
-                        "compliance",
-                        "governance",
-                        "gdpr",
-                    ],
-                    bucket="Data & Quality Systems Analyst",
-                    w_title=4,
-                    w_desc=2,
-                )
+                if "Data & Quality Systems Analyst" in scores:
+                    _add_if(
+                        title_phrases=["quality", "governance", "compliance", "controls"],
+                        desc_phrases=[
+                            "data quality",
+                            "reconciliation",
+                            "controls",
+                            "audit",
+                            "compliance",
+                            "governance",
+                            "gdpr",
+                        ],
+                        bucket="Data & Quality Systems Analyst",
+                        w_title=4,
+                        w_desc=2,
+                    )
+
+                if "Application Support Analyst" in scores:
+                    _add_if(
+                        title_phrases=["application support", "business application support"],
+                        desc_phrases=["application support", "incident", "ticket", "sql", "support"],
+                        bucket="Application Support Analyst",
+                        w_title=6,
+                        w_desc=2,
+                    )
+
+                if "Application Support Engineer" in scores:
+                    _add_if(
+                        title_phrases=[
+                            "application support engineer",
+                            "software support engineer",
+                            "technical application support",
+                        ],
+                        desc_phrases=["production support", "monitoring", "incident", "logs", "troubleshooting"],
+                        bucket="Application Support Engineer",
+                        w_title=6,
+                        w_desc=2,
+                    )
+
+                if "Production Support Engineer" in scores:
+                    _add_if(
+                        title_phrases=["production support", "platform support", "product support"],
+                        desc_phrases=["production support", "incident triage", "monitoring", "platform stability"],
+                        bucket="Production Support Engineer",
+                        w_title=5,
+                        w_desc=2,
+                    )
+
+                if "Technical Systems Analyst" in scores:
+                    _add_if(
+                        title_phrases=["technical systems analyst", "systems support", "technical support"],
+                        desc_phrases=["systems", "analysis", "technical troubleshooting", "issue resolution"],
+                        bucket="Technical Systems Analyst",
+                        w_title=5,
+                        w_desc=2,
+                    )
+
+                if "IT Support Analyst" in scores:
+                    _add_if(
+                        title_phrases=["it support", "desktop support", "user support"],
+                        desc_phrases=[
+                            "it support",
+                            "user support",
+                            "microsoft 365",
+                            "active directory",
+                            "device support",
+                        ],
+                        bucket="IT Support Analyst",
+                        w_title=6,
+                        w_desc=2,
+                    )
+
+                if "Service Desk Analyst" in scores:
+                    _add_if(
+                        title_phrases=["service desk", "helpdesk", "1st line", "2nd line"],
+                        desc_phrases=["service desk", "ticket", "incident", "sla", "triage"],
+                        bucket="Service Desk Analyst",
+                        w_title=6,
+                        w_desc=2,
+                    )
+
+                if "Technical Support Analyst" in scores:
+                    _add_if(
+                        title_phrases=["technical support", "product support", "platform support"],
+                        desc_phrases=["technical support", "troubleshooting", "root cause", "support"],
+                        bucket="Technical Support Analyst",
+                        w_title=5,
+                        w_desc=2,
+                    )
+
+                if "Systems Support Analyst" in scores:
+                    _add_if(
+                        title_phrases=["systems support", "system support", "infrastructure support"],
+                        desc_phrases=[
+                            "systems support",
+                            "operational support",
+                            "issue resolution",
+                            "service improvement",
+                        ],
+                        bucket="Systems Support Analyst",
+                        w_title=5,
+                        w_desc=2,
+                    )
 
                 # Keep it honest: tiny bias toward staying close to official title,
                 # but do not let it override job relevance.
@@ -1440,10 +1834,26 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
                 best = max(allowed, key=lambda a: (scores[a], -len(a)))
                 return best
 
-            # Prefer whatever the model wrote as the title, then map to an allowed
-            # market-equivalent title list for data-focused roles only.
+            # Only align for the supported job families in balanced mode.
             if not any(
-                k in _normalize_title(str(job.get("title", "") or "")) for k in ["data", "analytics", "bi", "report"]
+                k in _normalize_title(str(job.get("title", "") or ""))
+                for k in [
+                    "data",
+                    "analytics",
+                    "bi",
+                    "report",
+                    "application support",
+                    "production support",
+                    "platform support",
+                    "it support",
+                    "service desk",
+                    "helpdesk",
+                    "technical support",
+                    "systems support",
+                    "desktop support",
+                    "1st line",
+                    "2nd line",
+                ]
             ):
                 return
 
@@ -1528,6 +1938,49 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
                     bs = p.get("bullets")
                     if isinstance(bs, list):
                         p["bullets"] = [_fix(str(b)) for b in bs]
+        except Exception:
+            return
+
+    def _normalize_support_summary(data_obj: dict) -> None:
+        """Keep support-family summaries framed as support, not data roles."""
+
+        try:
+            summary = str(data_obj.get("summary") or "").strip()
+            if not summary:
+                return
+            job_title_norm = _normalize_title(str(job.get("title", "") or ""))
+            if not any(
+                k in job_title_norm
+                for k in (
+                    "technical support",
+                    "it support",
+                    "service desk",
+                    "helpdesk",
+                    "desktop support",
+                    "systems support",
+                )
+            ):
+                return
+
+            summary = re.sub(
+                r"^(?:experienced\s+|skilled\s+|results[- ]driven\s+|master'?s[- ]qualified\s+)?data analyst\b",
+                "Technical support professional",
+                summary,
+                flags=re.IGNORECASE,
+            )
+            summary = re.sub(
+                r"^(?:experienced\s+|skilled\s+|results[- ]driven\s+|master'?s[- ]qualified\s+)?reporting analyst\b",
+                "Technical support professional",
+                summary,
+                flags=re.IGNORECASE,
+            )
+            summary = re.sub(
+                r"^(?:experienced\s+|skilled\s+|results[- ]driven\s+|master'?s[- ]qualified\s+)?bi analyst\b",
+                "Technical support professional",
+                summary,
+                flags=re.IGNORECASE,
+            )
+            data_obj["summary"] = summary
         except Exception:
             return
 
@@ -1652,6 +2105,7 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
             if isinstance(data, dict):
                 _align_current_role_header(data)
                 _soften_banned_phrases(data)
+                _normalize_support_summary(data)
                 _ensure_minimum_shape(data)
 
                 # Keep the strict anti-invention guard for specific chronic tools.
@@ -1718,8 +2172,8 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
             citation_check = validate_fact_citations(data, fact_ids)
             validation = validate_json_fields(data, profile, runtime_rules=runtime_rules)
             citation_gate_ok = bool(citation_check.get("passed") or not strict_evidence)
-            if validation.get("passed") and citation_gate_ok:
-                tailored_candidate = assemble_resume_text(data, profile)
+            if citation_gate_ok:
+                tailored_candidate = assemble_resume_text(data, profile, job=job)
                 coverage = score_jd_coverage(tailored_candidate, jd_targets, jd_synonyms)
                 quant_check = check_quant_consistency(data, evidence_numbers)
             else:
@@ -1851,7 +2305,7 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
             tailored = str(best.get("tailored") or "")
             if not tailored:
                 try:
-                    tailored = assemble_resume_text(best_data, profile)
+                    tailored = assemble_resume_text(best_data, profile, job=job)
                 except Exception:
                     tailored = ""
             report["status"] = "failed_validation"
@@ -1865,7 +2319,7 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
 
         tailored = str(best.get("tailored") or "")
         if not tailored:
-            tailored = assemble_resume_text(best_data, profile)
+            tailored = assemble_resume_text(best_data, profile, job=job)
 
         # Refresh highlight keywords using the final selected draft.
         try:
@@ -1948,6 +2402,38 @@ def tailor_resume(resume_text: str, job: dict, profile: dict, max_retries: int =
         return tailored, report
 
     report["status"] = "exhausted_retries"
+    client = get_client()
+    should_try_smart_fallback = (
+        _allow_smart_fallback
+        and _smart_model_fallback_enabled(profile)
+        and (client.provider or "").lower() == "gemini"
+        and report.get("status") in {"failed_validation", "failed_full_validation", "failed_judge"}
+    )
+    if should_try_smart_fallback:
+        fallback_model = _smart_model_fallback_name()
+        if fallback_model and fallback_model != client.model:
+            log.warning(
+                "Tailor quality failed for '%s' on %s; retrying once on %s",
+                str(job.get("title") or "job"),
+                client.model,
+                fallback_model,
+            )
+            fb_tailored, fb_report = tailor_resume(
+                resume_text,
+                job,
+                profile,
+                max_retries=max_retries,
+                _allow_smart_fallback=False,
+                _model_override=fallback_model,
+            )
+            fb_report["smart_fallback"] = {
+                "attempted": True,
+                "from_model": client.model,
+                "to_model": fallback_model,
+                "trigger_status": report.get("status"),
+            }
+            return fb_tailored, fb_report
+
     return tailored, report
 
 
@@ -2128,20 +2614,6 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
             txt_path = TAILORED_DIR / f"{prefix}.txt"
             txt_path.write_text(tailored, encoding="utf-8")
 
-            # Save job description for traceability
-            job_path = TAILORED_DIR / f"{prefix}_JOB.txt"
-            job_num = str(job.get("job_id") or job.get("id") or "").strip()
-            job_num_line = f"Job ID: {job_num}\n" if job_num else ""
-            job_desc = (
-                job_num_line + f"Title: {job['title']}\n"
-                f"Company: {job['site']}\n"
-                f"Location: {job.get('location', 'N/A')}\n"
-                f"Score: {job.get('fit_score', 'N/A')}\n"
-                f"URL: {job['url']}\n\n"
-                f"{job.get('full_description', '')}"
-            )
-            job_path.write_text(job_desc, encoding="utf-8")
-
             # Save validation report
             report_path = TAILORED_DIR / f"{prefix}_REPORT.json"
             report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -2150,9 +2622,14 @@ def run_tailoring(min_score: int = 7, limit: int = 0) -> dict:
             pdf_path = None
             if report["status"] == "approved":
                 try:
-                    from applypilot.scoring.pdf import convert_to_pdf
+                    from applypilot.scoring.pdf import build_pdf_metadata, convert_to_pdf
 
-                    pdf_path = str(convert_to_pdf(txt_path))
+                    pdf_path = str(
+                        convert_to_pdf(
+                            txt_path,
+                            pdf_metadata=build_pdf_metadata("resume", personal=profile.get("personal", {}), job=job),
+                        )
+                    )
                 except Exception as e:
                     log.warning("PDF generation failed for %s: %s", txt_path.name, e)
                     log.debug("PDF generation failed for %s", txt_path, exc_info=True)

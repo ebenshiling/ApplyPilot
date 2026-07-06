@@ -29,7 +29,54 @@ log = logging.getLogger(__name__)
 MAX_ATTEMPTS = 5
 
 
-def _statement_cache_path(resume_text: str, job: dict) -> Path:
+def _word_count(text: str) -> int:
+    return len(re.findall(r"[A-Za-z0-9%]+", (text or "").strip()))
+
+
+def _trim_text_to_word_limit(text: str, max_words: int) -> str:
+    t = (text or "").strip()
+    if not t or max_words <= 0:
+        return t
+    if _word_count(t) <= max_words:
+        return t
+
+    # Prefer sentence-aware trimming first so the final output still reads naturally.
+    sentences = re.split(r"(?<=[.!?])\s+", t)
+    kept: list[str] = []
+    total = 0
+    for s in sentences:
+        s = s.strip()
+        if not s:
+            continue
+        wc = _word_count(s)
+        if kept and total + wc > max_words:
+            break
+        if not kept and wc > max_words:
+            break
+        kept.append(s)
+        total += wc
+        if total >= max_words:
+            break
+    if kept:
+        out = " ".join(kept).strip()
+        if _word_count(out) <= max_words:
+            return out
+
+    # Fall back to a hard word trim when sentence boundaries are not enough.
+    tokens = re.findall(r"\S+", t)
+    if len(tokens) <= max_words:
+        return t
+    return " ".join(tokens[:max_words]).rstrip(" ,;:-")
+
+
+def _statement_cache_path(
+    resume_text: str,
+    job: dict,
+    *,
+    min_words: int | None = None,
+    max_words: int | None = None,
+    supplemental_facts: str | None = None,
+) -> Path:
     # Stable cache key: resume + role + org + description.
     blob = "\n".join(
         [
@@ -37,6 +84,9 @@ def _statement_cache_path(resume_text: str, job: dict) -> Path:
             str(job.get("company") or job.get("site") or ""),
             str(job.get("full_description") or ""),
             str(resume_text or ""),
+            str(supplemental_facts or ""),
+            str(min_words or ""),
+            str(max_words or ""),
         ]
     )
     h = hashlib.sha1(blob.encode("utf-8", errors="ignore")).hexdigest()
@@ -133,13 +183,22 @@ def _extract_person_spec_criteria(text: str) -> list[str]:
 
 
 def _build_prompt(
-    *, variant: dict[str, str], resume_text: str, job: dict, criteria: list[str], profile: dict
+    *,
+    variant: dict[str, str],
+    resume_text: str,
+    job: dict,
+    criteria: list[str],
+    profile: dict,
+    supplemental_facts: str = "",
+    min_words: int = 900,
+    max_words: int = 1400,
 ) -> list[dict]:
     personal = profile.get("personal", {}) if isinstance(profile, dict) else {}
     name = (personal.get("preferred_name") or personal.get("full_name") or "").strip()
     role = str(job.get("title") or "").strip()
     org = str(job.get("company") or job.get("site") or "").strip()
     criteria_txt = "\n".join(f"- {c}" for c in (criteria or []))
+    facts_txt = sanitize_text(supplemental_facts or "").strip()
 
     banned = ", ".join(sorted({w.lower() for w in BANNED_WORDS}))
 
@@ -150,6 +209,11 @@ def _build_prompt(
         "Avoid generic filler and avoid banned phrases. "
         "Do not include personal contact details (address/phone/email) in the statement."
     )
+
+    if max_words <= 400:
+        length_rule = f"Length: under {max_words} words. Aim for {min_words} to {max_words} words."
+    else:
+        length_rule = f"Length: {min_words} to {max_words} words unless the job text clearly requests otherwise."
 
     user = f"""
 ROLE: {role}
@@ -165,13 +229,17 @@ JOB DESCRIPTION (verbatim):
 CANDIDATE CV/RESUME (verbatim):
 {sanitize_text(resume_text or "")[:9000]}
 
+SUPPLEMENTAL CANDIDATE FACTS / EVIDENCE (use only if relevant and truthful):
+{facts_txt[:5000] if facts_txt else "- (none provided)"}
+
 WRITE a supporting statement suitable for NHS / UK public sector application forms.
 
 CONSTRAINTS:
-- Length: 900 to 1400 words unless the job text clearly requests otherwise.
+- {length_rule}
 - Structure: {variant["name"]} ({variant["guidance"]}).
 - Use plain English, UK spelling.
 - Do not include personal details or duplicate contact information already in the application.
+- You may use the supplemental evidence section, but do not treat it as employment unless it explicitly says so.
 - Use concrete examples with scope/actions/outcomes.
 - If criteria are available, explicitly cover them without listing them as a checklist.
 - Do NOT use or echo these phrases (banned): {banned}
@@ -183,15 +251,15 @@ Return JSON only:
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
-def _validate_statement(text: str) -> list[str]:
+def _validate_statement(text: str, *, min_words: int = 650, max_words: int = 1800) -> list[str]:
     errors: list[str] = []
     t = (text or "").strip()
     if not t:
         return ["Empty statement"]
-    wc = len(re.findall(r"[A-Za-z0-9%]+", t))
-    if wc < 650:
+    wc = _word_count(t)
+    if wc < max(1, int(min_words or 0)):
         errors.append(f"Too short ({wc} words)")
-    if wc > 1800:
+    if wc > max(1, int(max_words or 1800)):
         errors.append(f"Too long ({wc} words)")
 
     low = t.lower()
@@ -208,10 +276,24 @@ def _validate_statement(text: str) -> list[str]:
     return errors
 
 
-def generate_supporting_statement(resume_text: str, job: dict, profile: dict) -> str:
+def generate_supporting_statement(
+    resume_text: str,
+    job: dict,
+    profile: dict,
+    *,
+    supplemental_facts: str = "",
+    min_words: int = 900,
+    max_words: int = 1400,
+) -> str:
     # Deterministic cache: if inputs are identical, reuse the same statement.
     try:
-        cp = _statement_cache_path(resume_text, job)
+        cp = _statement_cache_path(
+            resume_text,
+            job,
+            min_words=min_words,
+            max_words=max_words,
+            supplemental_facts=supplemental_facts,
+        )
         if cp.exists():
             cached = cp.read_text(encoding="utf-8").strip()
             if cached:
@@ -224,7 +306,16 @@ def generate_supporting_statement(resume_text: str, job: dict, profile: dict) ->
 
     last = ""
     for attempt in range(MAX_ATTEMPTS):
-        msgs = _build_prompt(variant=variant, resume_text=resume_text, job=job, criteria=criteria, profile=profile)
+        msgs = _build_prompt(
+            variant=variant,
+            resume_text=resume_text,
+            job=job,
+            criteria=criteria,
+            profile=profile,
+            supplemental_facts=supplemental_facts,
+            min_words=min_words,
+            max_words=max_words,
+        )
         try:
             out = chat_json(msgs, max_tokens=1800, temperature=0.0)
             data = None
@@ -244,10 +335,17 @@ def generate_supporting_statement(resume_text: str, job: dict, profile: dict) ->
             log.debug("Statement LLM error: %s", e)
             continue
 
-        errs = _validate_statement(last)
+        last = _trim_text_to_word_limit(last, max_words)
+        errs = _validate_statement(last, min_words=min_words, max_words=max_words)
         if not errs:
             try:
-                cp = _statement_cache_path(resume_text, job)
+                cp = _statement_cache_path(
+                    resume_text,
+                    job,
+                    min_words=min_words,
+                    max_words=max_words,
+                    supplemental_facts=supplemental_facts,
+                )
                 cp.parent.mkdir(parents=True, exist_ok=True)
                 cp.write_text(last + "\n", encoding="utf-8")
             except Exception:

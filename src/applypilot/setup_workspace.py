@@ -50,6 +50,26 @@ def _validate_string_list(name: str, value: Any, *, max_items: int = 300, item_m
     return out
 
 
+def _validate_project_entry_list(name: str, value: Any, *, max_items: int = 40) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{name} must be a list")
+    if len(value) > max_items:
+        raise ValueError(f"{name} has too many items")
+    out: list[dict[str, Any]] = []
+    for idx, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"{name}[{idx}] must be an object")
+        header = _clean_str(item.get("header") or item.get("title") or "", max_len=200)
+        if not header:
+            raise ValueError(f"{name}[{idx}].header is required")
+        subtitle = _clean_str(item.get("subtitle", ""), max_len=300)
+        bullets = _validate_string_list(f"{name}[{idx}].bullets", item.get("bullets"), max_items=12, item_max_len=500)
+        out.append({"header": header, "subtitle": subtitle, "bullets": bullets})
+    return out
+
+
 def _validate_profile_patch(patch: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(patch, dict):
         raise ValueError("profile patch must be an object")
@@ -125,12 +145,15 @@ def _validate_profile_patch(patch: dict[str, Any]) -> dict[str, Any]:
     if sections is not None:
         if not isinstance(sections, dict):
             raise ValueError("resume_sections must be an object")
-        rs: dict[str, list[str]] = {}
+        rs: dict[str, Any] = {}
         for k, v in sections.items():
             kk = _clean_str(k, max_len=80)
             if not kk:
                 continue
-            rs[kk] = _validate_string_list(f"resume_sections.{kk}", v, max_items=120, item_max_len=400)
+            if kk in {"projects", "data_projects", "support_projects", "application_support_projects"}:
+                rs[kk] = _validate_project_entry_list(f"resume_sections.{kk}", v)
+            else:
+                rs[kk] = _validate_string_list(f"resume_sections.{kk}", v, max_items=120, item_max_len=400)
         out["resume_sections"] = rs
 
     rv = out.get("resume_validation")
@@ -452,6 +475,77 @@ def write_resume_variant(app_dir: Path, key: str, text: str) -> None:
     ensure_app_dir(Path(app_dir))
     resume_variants_dir(app_dir).mkdir(parents=True, exist_ok=True)
     _atomic_write_text(resume_variant_path(app_dir, k), t)
+
+
+def rename_resume_variant(app_dir: Path, old_key: str, new_key: str) -> dict[str, Any]:
+    src_key = str(old_key or "").strip().lower()
+    dst_key = str(new_key or "").strip().lower()
+    if not re.match(r"^[a-z0-9_\-]{2,40}$", src_key):
+        raise ValueError("old variant key must be 2-40 chars (a-z, 0-9, _, -)")
+    if not re.match(r"^[a-z0-9_\-]{2,40}$", dst_key):
+        raise ValueError("new variant key must be 2-40 chars (a-z, 0-9, _, -)")
+    if src_key == dst_key:
+        raise ValueError("new variant key must be different")
+
+    ensure_app_dir(Path(app_dir))
+    src = resume_variant_path(app_dir, src_key)
+    dst = resume_variant_path(app_dir, dst_key)
+    if not src.exists() or not src.is_file():
+        raise ValueError("source variant not found")
+    if dst.exists():
+        raise ValueError("destination variant already exists")
+
+    resume_variants_dir(app_dir).mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_suffix(dst.suffix + ".tmp")
+    tmp.write_bytes(src.read_bytes())
+    tmp.replace(dst)
+    src.unlink()
+
+    try:
+        st = dst.stat()
+        return {
+            "key": dst.stem,
+            "name": dst.name,
+            "path": str(dst),
+            "bytes": int(st.st_size),
+            "mtime": float(st.st_mtime),
+        }
+    except Exception:
+        return {"key": dst.stem, "name": dst.name, "path": str(dst)}
+
+
+def duplicate_resume_variant(app_dir: Path, source_key: str, new_key: str) -> dict[str, Any]:
+    src_key = str(source_key or "").strip().lower()
+    dst_key = str(new_key or "").strip().lower()
+    if not re.match(r"^[a-z0-9_\-]{2,40}$", src_key):
+        raise ValueError("source variant key must be 2-40 chars (a-z, 0-9, _, -)")
+    if not re.match(r"^[a-z0-9_\-]{2,40}$", dst_key):
+        raise ValueError("new variant key must be 2-40 chars (a-z, 0-9, _, -)")
+    if src_key == dst_key:
+        raise ValueError("new variant key must be different")
+
+    ensure_app_dir(Path(app_dir))
+    src = resume_variant_path(app_dir, src_key)
+    dst = resume_variant_path(app_dir, dst_key)
+    if not src.exists() or not src.is_file():
+        raise ValueError("source variant not found")
+    if dst.exists():
+        raise ValueError("destination variant already exists")
+
+    text, _ = read_text(src, max_chars=700_000)
+    write_resume_variant(app_dir, dst_key, text)
+
+    try:
+        st = dst.stat()
+        return {
+            "key": dst.stem,
+            "name": dst.name,
+            "path": str(dst),
+            "bytes": int(st.st_size),
+            "mtime": float(st.st_mtime),
+        }
+    except Exception:
+        return {"key": dst.stem, "name": dst.name, "path": str(dst)}
 
 
 def write_resume_pdf(app_dir: Path, data: bytes) -> None:

@@ -1191,9 +1191,14 @@ def run_cover_letters(min_score: int = 7, limit: int = 0) -> dict:
             # Generate PDF (best-effort)
             pdf_path = None
             try:
-                from applypilot.scoring.pdf import convert_to_pdf
+                from applypilot.scoring.pdf import build_pdf_metadata, convert_to_pdf
 
-                pdf_path = str(convert_to_pdf(cl_path))
+                pdf_path = str(
+                    convert_to_pdf(
+                        cl_path,
+                        pdf_metadata=build_pdf_metadata("cover_letter", personal=profile.get("personal", {}), job=job),
+                    )
+                )
             except Exception:
                 log.debug("PDF generation failed for %s", cl_path, exc_info=True)
 

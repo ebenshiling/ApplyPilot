@@ -9,7 +9,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from applypilot.config import DB_PATH
 
@@ -183,7 +183,8 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
 def normalize_url(url: str | None) -> str:
     """Normalize a URL for prefix-based blocking.
 
-    Strips query string, fragment, and trailing slashes.
+    Strips fragment and trailing slashes. For boards like Indeed that encode
+    the job identity in the query string, preserve the stable identity keys.
     """
     raw = (url or "").strip()
     if not raw:
@@ -194,7 +195,18 @@ def normalize_url(url: str | None) -> str:
             path = (p.path or "").strip()
             if path != "/":
                 path = path.rstrip("/")
-            base = urlunsplit((p.scheme.lower(), p.netloc.lower(), path, "", "")).strip()
+            query = ""
+            host = p.netloc.lower()
+            if "indeed." in host:
+                keep_pairs = []
+                for k, v in parse_qsl(p.query, keep_blank_values=False):
+                    key = (k or "").strip().lower()
+                    val = (v or "").strip()
+                    if key in {"jk", "vjk"} and val:
+                        keep_pairs.append((key, val))
+                if keep_pairs:
+                    query = urlencode(keep_pairs)
+            base = urlunsplit((p.scheme.lower(), host, path, query, "")).strip()
             return base
     except Exception:
         pass

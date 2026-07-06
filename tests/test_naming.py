@@ -1,3 +1,5 @@
+import hashlib
+
 from applypilot import naming
 
 
@@ -22,8 +24,12 @@ def test_cv_filename_includes_job_number_when_available() -> None:
         "url": "https://example.com/jobs/123",
     }
     out = naming.cv_filename(personal, ext="pdf", username="jdoe", job=job)
-    assert out.startswith("Jane_Doe_CV_J123_Data_Analyst_LinkedIn_")
-    assert out.endswith(".pdf")
+    assert out == f"Jane_Doe_CV_J123_{hashlib.sha1(job['url'].encode('utf-8')).hexdigest()[:8]}.pdf"
+
+
+def test_display_name_does_not_duplicate_last_name_when_preferred_already_has_it() -> None:
+    personal = {"full_name": "Ebenezer Otchere Brefo", "preferred_name": "Ebenezer Otchere Brefo"}
+    assert naming.display_name(personal) == "Ebenezer Otchere Brefo"
 
 
 def test_cover_letter_filename_uses_dashboard_id_fallback_key() -> None:
@@ -35,5 +41,4 @@ def test_cover_letter_filename_uses_dashboard_id_fallback_key() -> None:
         "url": "https://example.com/jobs/bi-77",
     }
     out = naming.cover_letter_filename(personal, ext="pdf", username="jdoe", job=job)
-    assert out.startswith("Jane_Doe_Cover_Letter_J77_BI_Analyst_Indeed_")
-    assert out.endswith(".pdf")
+    assert out == f"Jane_Doe_Cover_Letter_J77_{hashlib.sha1(job['url'].encode('utf-8')).hexdigest()[:8]}.pdf"

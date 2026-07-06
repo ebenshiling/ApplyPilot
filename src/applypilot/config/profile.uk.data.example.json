@@ -77,6 +77,28 @@
       "Hardware: Desktops, laptops, printers, MFDs, peripherals",
       "Networking: VPN, Remote Desktop Services",
       "Tools: ITSM ticketing platforms, remote support tools"
+    ],
+    "data_projects": [
+      {
+        "header": "Optimisation of Supply Chain Using Analytics and Visualisation in a BI Environment",
+        "subtitle": "Technologies: Power BI, SQL, Python",
+        "bullets": [
+          "Designed and implemented a Power BI dashboard to support supply chain analysis, combining data modelling and visualisation techniques",
+          "Used SQL and Python to prepare, structure, and analyse data for reporting and insight generation"
+        ]
+      }
+    ],
+    "application_support_projects": [
+      {
+        "header": "Poultry ERP Management System",
+        "subtitle": "Technologies: Django REST Framework, React, SQL, REST APIs",
+        "bullets": [
+          "Developed and supported an integrated ERP platform for poultry farm operations covering inventory, finance, sales, purchases, analytics, and operational reporting",
+          "Investigated and resolved business logic, API, and data consistency issues across interconnected modules",
+          "Worked with SQL-backed transactional data, automation workflows, and production-style operational processes",
+          "Implemented reporting, monitoring, and analytics features to support operational decision making"
+        ]
+      }
     ]
   },
   "resume_validation": {

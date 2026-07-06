@@ -13,7 +13,8 @@ from typing import Any
 _ROLE_PACK_INSTRUCTIONS: dict[str, str] = {
     "data_bi": (
         "Focus on analytics impact, dashboard/reporting outcomes, stakeholder communication, "
-        "and clear metric traceability. Prefer concise business-language bullets with concrete numbers."
+        "and clear metric traceability. Prioritise bullets that show SQL querying, Power BI/reporting, ETL/data preparation, "
+        "data validation, KPI analysis, and decision-support outputs. Prefer concise business-language bullets with concrete numbers."
     ),
     "engineering": (
         "Focus on system design, reliability, performance, architecture, and delivery ownership. "
@@ -21,11 +22,13 @@ _ROLE_PACK_INSTRUCTIONS: dict[str, str] = {
     ),
     "support": (
         "Focus on service quality, incident reduction, SLA outcomes, user support, and operational reliability. "
-        "Prefer practical troubleshooting outcomes and process improvements."
+        "Prioritise bullets that show troubleshooting, end-user support, ticket handling, Microsoft 365/access issues, "
+        "device or system support, and continuity of service. Prefer practical troubleshooting outcomes and process improvements."
     ),
     "application_support": (
         "Focus on production support, incident triage, monitoring, log analysis, SQL-backed investigation, "
-        "service continuity, and business impact. Prefer concrete issue-resolution and stability outcomes."
+        "service continuity, and business impact. Prioritise bullets that show incident triage, root-cause investigation, "
+        "application/workflow troubleshooting, monitoring, production stability, and SQL/log-based diagnosis. Prefer concrete issue-resolution and stability outcomes."
     ),
     "qa_testing": (
         "Focus on test coverage, defect prevention, regression safety, automation depth, and release confidence. "
@@ -201,6 +204,17 @@ _DOMAIN_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\bfinancial services\b|\bbanking\b|\binsurance\b|\bfintech\b", "financial services"),
 )
 
+_DOMAIN_IGNORE_LINE_PATTERNS: tuple[str, ...] = (
+    r"\bprivate healthcare\b",
+    r"\bbenefits?\b",
+    r"\bbonus(?:es)?\b",
+    r"\brecognition rewards?\b",
+    r"\bprogression\b",
+    r"\bflexible working\b",
+    r"\bprofessional development\b",
+    r"\bupskilling\b",
+)
+
 _CREDENTIAL_ALIASES: dict[str, tuple[str, ...]] = {
     "itil": ("itil foundation",),
     "azure certification": ("microsoft certified",),
@@ -371,6 +385,24 @@ def detect_role_pack(job: dict[str, Any], profile: dict[str, Any]) -> dict[str, 
     title = str(job.get("title") or "").lower()
     desc = str(job.get("full_description") or "").lower()
     hay = f"{title}\n{desc}"
+
+    # Strong title-first routing: if the title is explicitly in a support family,
+    # do not let generic SQL/reporting keywords in the description pull it into data_bi.
+    if any(k in title for k in ("application support", "production support", "software support", "platform support")):
+        return {
+            "pack": "application_support",
+            "reason": "title_override_application_support",
+            "instructions": _ROLE_PACK_INSTRUCTIONS["application_support"],
+        }
+    if any(
+        k in title
+        for k in ("service desk", "helpdesk", "desktop support", "it support", "technical support", "systems support")
+    ):
+        return {
+            "pack": "support",
+            "reason": "title_override_support",
+            "instructions": _ROLE_PACK_INSTRUCTIONS["support"],
+        }
 
     scores: dict[str, int] = {}
     for pack_name, keywords in _PACK_KEYWORDS.items():
@@ -646,9 +678,18 @@ def extract_jd_requirements(
     elif any(k in hay for k in ("junior", "entry level", "graduate", "trainee", "apprentice")):
         seniority = "junior"
 
-    for pat, label in _DOMAIN_PATTERNS:
-        if re.search(pat, hay, flags=re.IGNORECASE):
-            _add_unique(domains, seen_domain, label)
+    title_l = title.lower()
+    if any(re.search(pat, title_l, flags=re.IGNORECASE) for pat, _ in _DOMAIN_PATTERNS):
+        for pat, label in _DOMAIN_PATTERNS:
+            if re.search(pat, title_l, flags=re.IGNORECASE):
+                _add_unique(domains, seen_domain, label)
+
+    for line in lines:
+        if any(re.search(pat, line, flags=re.IGNORECASE) for pat in _DOMAIN_IGNORE_LINE_PATTERNS):
+            continue
+        for pat, label in _DOMAIN_PATTERNS:
+            if re.search(pat, line, flags=re.IGNORECASE):
+                _add_unique(domains, seen_domain, label)
 
     hard_lines = [ln for ln in lines if any(p in ln for p in _HARD_REQUIREMENT_PHRASES)]
     soft_lines = [ln for ln in lines if any(p in ln for p in _SOFT_REQUIREMENT_PHRASES)]

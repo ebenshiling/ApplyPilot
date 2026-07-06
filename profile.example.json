@@ -51,6 +51,20 @@
     "preserved_school": "Your University",
     "real_metrics": ["50% improvement", "10x faster"]
   },
+  "resume_sections": {
+    "application_support_projects": [
+      {
+        "header": "Poultry ERP Management System",
+        "subtitle": "Technologies: Django REST Framework, React, SQL, REST APIs",
+        "bullets": [
+          "Developed and supported an integrated ERP platform for poultry farm operations covering inventory, finance, sales, purchases, analytics, and operational reporting",
+          "Investigated and resolved business logic, API, and data consistency issues across interconnected modules",
+          "Worked with SQL-backed transactional data, automation workflows, and production-style operational processes",
+          "Implemented reporting, monitoring, and analytics features to support operational decision making"
+        ]
+      }
+    ]
+  },
   "eeo_voluntary": {
     "gender": "Decline to self-identify",
     "race_ethnicity": "Decline to self-identify",

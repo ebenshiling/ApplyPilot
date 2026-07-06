@@ -23,6 +23,10 @@ def display_name(personal: dict) -> str:
     parts = [p for p in full.split(" ") if p]
     last = parts[-1] if parts else ""
 
+    preferred_parts = [p for p in preferred.split(" ") if p]
+    if preferred_parts and last and preferred_parts[-1].casefold() == last.casefold():
+        return preferred
+
     first = preferred or (parts[0] if parts else "")
     out = f"{first} {last}".strip()
     return out or full
@@ -72,6 +76,33 @@ def _job_number(job: dict | None) -> str:
     return f"J{num}"
 
 
+def job_number_token(job: dict | None) -> str:
+    """Public helper used by filename and metadata builders."""
+    return _job_number(job)
+
+
+def _job_unique_token(job: dict | None) -> str:
+    if not isinstance(job, dict) or not job:
+        return ""
+
+    url = str(job.get("url") or job.get("application_url") or "").strip()
+    if url:
+        basis = url
+    else:
+        basis = "|".join(
+            p
+            for p in (
+                _job_number(job),
+                str(job.get("title") or "").strip(),
+                str(job.get("site") or "").strip(),
+            )
+            if p
+        )
+    if not basis:
+        return ""
+    return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:8]
+
+
 def _job_suffix(job: dict | None) -> str:
     if not isinstance(job, dict) or not job:
         return ""
@@ -104,17 +135,23 @@ def _filename_prefix(personal: dict, username: str = "") -> str:
 
 def cv_filename(personal: dict, ext: str = "pdf", *, username: str = "", job: dict | None = None) -> str:
     prefix = _filename_prefix(personal, username=username)
-    job_suf = _job_suffix(job)
-    if job_suf:
-        return f"{prefix}_CV_{job_suf}.{ext}"
+    job_num = _job_number(job)
+    job_uid = _job_unique_token(job)
+    if job_num and job_uid:
+        return f"{prefix}_CV_{job_num}_{job_uid}.{ext}"
+    if job_uid:
+        return f"{prefix}_CV_{job_uid}.{ext}"
     return f"{prefix}_CV.{ext}"
 
 
 def cover_letter_filename(personal: dict, ext: str = "pdf", *, username: str = "", job: dict | None = None) -> str:
     prefix = _filename_prefix(personal, username=username)
-    job_suf = _job_suffix(job)
-    if job_suf:
-        return f"{prefix}_Cover_Letter_{job_suf}.{ext}"
+    job_num = _job_number(job)
+    job_uid = _job_unique_token(job)
+    if job_num and job_uid:
+        return f"{prefix}_Cover_Letter_{job_num}_{job_uid}.{ext}"
+    if job_uid:
+        return f"{prefix}_Cover_Letter_{job_uid}.{ext}"
     return f"{prefix}_Cover_Letter.{ext}"
 
 

@@ -195,6 +195,8 @@ def _load_resume_validation(profile: dict, runtime_rules: dict | None = None) ->
                 "responsible for",
                 "worked on",
                 "helped",
+            ],
+            "warning_phrases": [
                 "assisted",
             ],
         },
@@ -248,6 +250,14 @@ def _lint_bullet(bullet: str, allowed_skills: set[str], cfg: dict) -> tuple[list
             continue
         if re.search(r"\b" + re.escape(p) + r"\b", s_l):
             errors.append(f"Low-signal bullet phrase: '{p}'")
+            break
+
+    for phrase in cfg.get("warning_phrases") or []:
+        p = str(phrase).strip().lower()
+        if not p:
+            continue
+        if re.search(r"\b" + re.escape(p) + r"\b", s_l):
+            warnings.append(f"Low-signal bullet phrase: '{p}'")
             break
 
     # Minimum length.
@@ -508,14 +518,22 @@ def validate_tailored_resume(
         "SUMMARY": ["summary", "professional summary", "profile"],
         "CORE TECHNICAL SKILLS": ["core technical skills", "technical skills", "skills", "tech stack", "core skills"],
         "PROFESSIONAL EXPERIENCE": ["professional experience", "experience", "work experience"],
-        "PROJECTS": ["projects", "personal projects", "key projects", "selected projects"],
+        "PROJECTS": ["projects", "technical projects", "personal projects", "key projects", "selected projects"],
         "EDUCATION": ["education", "academic background"],
     }
 
     rules = _load_resume_validation(profile, runtime_rules=runtime_rules)
+    resume_sections = profile.get("resume_sections", {}) or {}
     required_cfg = rules.get("required_sections") or {}
     require_projects = bool(required_cfg.get("projects", False))
     require_education = bool(required_cfg.get("education", True))
+    configured_projects = False
+    for key in ("projects", "data_projects", "support_projects", "application_support_projects"):
+        val = resume_sections.get(key)
+        if isinstance(val, list) and any(isinstance(x, dict) for x in val):
+            configured_projects = True
+            break
+    require_projects = require_projects or configured_projects
 
     for section, variants in section_variants_required.items():
         if section == "PROJECTS" and not require_projects:
@@ -526,15 +544,49 @@ def validate_tailored_resume(
             errors.append(f"Missing required section: {section} (or variant)")
 
     # Optional sections: only require them if profile config provides content.
-    resume_sections = profile.get("resume_sections", {}) or {}
-    if isinstance(resume_sections.get("certifications"), list) and any(
-        str(x).strip() for x in resume_sections.get("certifications", [])
-    ):
+    title_l = text_lower.splitlines()[1].strip() if len(text_lower.splitlines()) > 1 else ""
+    is_data_like_title = bool(
+        re.search(
+            r"\bdata\b|\banalytics?\b|\breporting\b|\bbusiness\s+intelligence\b|\bbi\b|\bmi\b|\binsights?\b",
+            title_l,
+            flags=re.IGNORECASE,
+        )
+    )
+    support_like_title = any(
+        k in title_l
+        for k in (
+            "support",
+            "service desk",
+            "helpdesk",
+            "desktop",
+            "it support",
+            "technical support",
+            "systems support",
+        )
+    )
+    cert_list: list[str] = []
+    if isinstance(resume_sections.get("certifications"), list):
+        cert_list.extend(str(x).strip() for x in resume_sections.get("certifications", []) if str(x).strip())
+    if is_data_like_title and isinstance(resume_sections.get("data_certifications"), list):
+        cert_list.extend(str(x).strip() for x in resume_sections.get("data_certifications", []) if str(x).strip())
+    if support_like_title and isinstance(resume_sections.get("support_certifications"), list):
+        cert_list.extend(str(x).strip() for x in resume_sections.get("support_certifications", []) if str(x).strip())
+    require_certs = bool(cert_list)
+    if require_certs:
         if "certifications" not in text_lower:
             errors.append("Missing required section: CERTIFICATIONS")
-    if isinstance(resume_sections.get("technical_environment"), list) and any(
-        str(x).strip() for x in resume_sections.get("technical_environment", [])
-    ):
+    tech_env_list: list[str] = []
+    if isinstance(resume_sections.get("technical_environment"), list):
+        tech_env_list.extend(str(x).strip() for x in resume_sections.get("technical_environment", []) if str(x).strip())
+    if is_data_like_title and isinstance(resume_sections.get("data_technical_environment"), list):
+        specific = [str(x).strip() for x in resume_sections.get("data_technical_environment", []) if str(x).strip()]
+        if specific:
+            tech_env_list = specific
+    elif support_like_title and isinstance(resume_sections.get("support_technical_environment"), list):
+        specific = [str(x).strip() for x in resume_sections.get("support_technical_environment", []) if str(x).strip()]
+        if specific:
+            tech_env_list = specific
+    if any(tech_env_list):
         if "technical environment" not in text_lower:
             errors.append("Missing required section: TECHNICAL ENVIRONMENT")
 

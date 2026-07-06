@@ -38,6 +38,8 @@ queries:
     tier: 2
   - query: "Desktop Support Analyst"
     tier: 2
+  - query: "Data Analyst"
+    tier: 2
 
   - query: "1st Line Support Analyst"
     tier: 3
@@ -133,6 +135,7 @@ boards:
   - zip_recruiter
 
 smart_sites:
+  - "GOV.UK Find a job"
   - "NHS Jobs"
   - "Jobs Go Public"
   - "LG Jobs"
@@ -148,6 +151,7 @@ resume_routing:
     it_support_analyst: "resume_variants/it_support_analyst.txt"
     application_support_engineer: "resume_variants/application_support_engineer.txt"
     technical_systems_analyst: "resume_variants/technical_systems_analyst.txt"
+    data_analyst: "resume_variants/data_analyst.txt"
     public_sector_main: "resume_variants/public_sector_main.txt"
     commercial_main: "resume_variants/commercial_main.txt"
     public_it_support: "resume_variants/public_it_support.txt"
@@ -163,6 +167,9 @@ resume_routing:
     - name: "technical_systems_analyst"
       variant: "technical_systems_analyst"
       keywords: ["technical support engineer", "support engineer", "product support engineer", "technical systems analyst", "systems support analyst", "system support analyst", "cloud support", "infrastructure support", "implementation support", "api support", "technical troubleshooting", "root cause analysis", "issue resolution", "operational support", "service improvement"]
+    - name: "data_analyst"
+      variant: "data_analyst"
+      keywords: ["data analyst", "bi analyst", "power bi analyst", "reporting analyst", "sql analyst", "mi analyst", "analytics engineer", "power bi", "tableau", "reporting", "dashboard", "data visualization"]
   context_families:
     - name: "public_sector_main"
       variant: "public_sector_main"

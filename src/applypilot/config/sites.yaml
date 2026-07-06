@@ -49,6 +49,8 @@ base_urls:
   "LG Jobs": "https://www.lgjobs.com"
   "HealthJobsUK": "https://www.healthjobsuk.com"
   "MoJ Jobs": "https://jobs.justice.gov.uk"
+  "GOV.UK Find a job": "https://www.jobs.service.gov.uk"
+  "Civil Service Jobs": "https://www.civilservicejobs.service.gov.uk"
   "RemoteOK": null
   "WelcomeToTheJungle": null
   "Workopolis": "https://www.workopolis.com"
@@ -191,8 +193,10 @@ sites:
 
   # UK-specific
   - name: "GOV.UK Find a job"
-    url: "https://findajob.dwp.gov.uk/search?q={query_encoded}"
+    url: "https://www.jobs.service.gov.uk/jobs/search?keywords={query_encoded}&location={location_encoded}"
     type: search
+    omit_generic_location: true
+    location_first_segment: true
 
   - name: "Reed"
     url: "https://www.reed.co.uk/jobs/jobs?keywords={query_encoded}"
@@ -202,6 +206,7 @@ sites:
     url: "https://www.jobs.nhs.uk/candidate/search/results?keyword={query_encoded}&location={location_encoded}"
     type: search
     omit_generic_location: true
+    location_first_segment: true
 
   - name: "Adzuna UK"
     url: "https://www.adzuna.co.uk/search?q={query_encoded}&w={location_encoded}"
@@ -232,4 +237,9 @@ sites:
   - name: "MoJ Jobs"
     # Ministry of Justice jobs portal (Avature). Query is supported via `search=`.
     url: "https://jobs.justice.gov.uk/careers/SearchJobs?search={query_encoded}"
+    type: search
+
+  - name: "Civil Service Jobs"
+    # Covers many central-government departments, including Ministry of Defence roles.
+    url: "https://www.civilservicejobs.service.gov.uk/csr/jobs.cgi?search_page=1&keywords={query_encoded}"
     type: search

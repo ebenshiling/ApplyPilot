@@ -82,11 +82,100 @@ def test_generate_dashboard_writes_html_and_contains_panels() -> None:
             assert "setupSaveFullProfile" in html
             assert "setup-profile-json-file" in html
             assert "setupImportProfileJsonFile" in html
+            assert "Job Match Studio" in html
+            assert "setup-tpl-data-projects" in html
+            assert "setup-tpl-support-projects" in html
+            assert "setup-tpl-app-support-projects" in html
+            assert "Leave a blank line between projects" in html
+            assert "matchGenerate" in html
+            assert "matchUseVariant" in html
+            assert "match-score-pill" in html
+            assert "matchSaveAsVariant" in html
+            assert "match-auto-copy" in html
+            assert "match-download-txt" in html
+            assert "match-download-pdf" in html
+            assert "matchDownloadCurrent('txt')" in html
+            assert "matchDownloadCurrent('pdf')" in html
+            assert "match-history" in html
+            assert "matchRefreshHistory" in html
+            assert "matchClearHistory" in html
+            assert "match-variant-key" in html
+            assert "apiJobMatchDelete" in html
+            assert "apiJobMatchClear" in html
+            assert "match-history-search" in html
+            assert "matchApplyHistoryFilter" in html
+            assert "matchRenameVariant" in html
+            assert "matchDuplicateVariant" in html
+            assert "matchPinVariant" in html
+            assert "apiJobMatchPromote" in html
+            assert "matchExportHistory" in html
+            assert "matchPickImportHistory" in html
+            assert "matchImportHistoryFile" in html
+            assert "matchSetQuickFilter" in html
+            assert "matchPrevPage" in html
+            assert "matchNextPage" in html
+            assert "apiJobMatchUpdate" in html
+            assert "Base vs Tailored Diff" in html
+            assert "match-diff" in html
+            assert "match-history-sort" in html
+            assert "Delete score &lt; 7" in html
+            assert "Delete unscored" in html
+            assert "Delete old..." in html
+            assert "Delete old scored..." in html
+            assert "Delete old unscored..." in html
+            assert "Delete old score &lt; 7..." in html
+            assert "apiDeleteJobsRule" in html
+            assert "matchCompareSelected" in html
+            assert "matchClearComparePair" in html
+            assert "match-compare-meta" in html
+            assert "matchToggleSelectPage" in html
+            assert "matchClearBulkSelection" in html
+            assert "matchBulkFavorite" in html
+            assert "matchBulkDelete" in html
+            assert "match-history-view" in html
+            assert "matchSaveCurrentView" in html
+            assert "matchDeleteCurrentView" in html
+            assert "matchApplySavedView" in html
+            assert "match-bulk-meta" in html
+            assert ">Age:</span>" in html
+            assert "filterAgeDays(this.value)" in html
+            assert "7+ days" in html
+            assert "30+ days" in html
+            assert 'onclick="clearSelectedJobs()"' in html
+            assert "setTimeout(() => window.location.reload(), 200)" not in html
+            assert 'type="button" class="apply-link primary" data-live="1" onclick="selectJob(' in html
+            assert "function _refreshVirtualVisibleState()" in html
+            assert "selected: " in html
+            assert "compare: none" in html
+            assert "Select page" in html
+            assert "Clear selection" in html
+            assert "Bulk favorite" in html
+            assert "Bulk unfavorite" in html
+            assert "_historyViews" in html
+            assert "_saveHistoryViews" in html
+            assert "_syncHistoryViewsSelect" in html
+            assert "DASHBOARD_LARGE_DATASET_THRESHOLD" not in html
+            assert "paginated-hidden" in html
+            assert "initial_open_groups < 1" not in html
+            assert "Filtering jobs..." in html
+            assert "diff-added" in html
+            assert "diff-removed" in html
+            assert "diff-same" in html
+            assert "_setMatchDiffHtml" in html
+            assert "el.innerHTML = html || ''" in html
+            assert "_setMatchDiffHtml('Changed lines: ' + String(diff.changed), diff.html);" in html
+            assert "_setMatchDiffHtml('Compare " in html
+            assert "Make main" in html
             assert "String.fromCharCode(10)" in html
             assert "split(cr).join(nl)" in html
             assert "out.join('\\n')" in html
             assert "return await _apiJson('/api/pipeline/run', payload);" in html
             assert "return await _apiJson('/api/jobs/mark', payload);" in html
+            assert "window.addEventListener('DOMContentLoaded', () =>" not in html
+            assert "function ensureSetupPageReady()" in html
+            assert "try { matchRefreshHistory(); } catch (e) {}" in html
+            assert "if (_servedInitDone) return;" not in html
+            assert "if (!_servedInitDone) {" in html
 
             # Collapsible + scrollable panels
             assert 'class="panel"' in html
