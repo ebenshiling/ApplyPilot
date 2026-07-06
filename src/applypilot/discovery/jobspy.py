@@ -13,8 +13,6 @@ import sqlite3
 import time
 from datetime import datetime, timezone
 
-from jobspy import scrape_jobs
-
 from applypilot import config
 from applypilot.database import find_existing_job_url, get_connection, init_db, normalize_url
 from applypilot.discovery.salary_filter import jobspy_salary_ok, load_salary_preference
@@ -61,6 +59,11 @@ def parse_proxy(proxy_str: str) -> dict:
 
 def _scrape_with_retry(kwargs: dict, max_retries: int = 2, backoff: float = 5.0):
     """Call scrape_jobs with retry on transient failures."""
+    try:
+        from jobspy import scrape_jobs
+    except ImportError as exc:
+        raise RuntimeError("python-jobspy is required for JobSpy discovery") from exc
+
     for attempt in range(max_retries + 1):
         try:
             return scrape_jobs(**kwargs)
@@ -512,7 +515,7 @@ def search_jobs(
         kwargs["linkedin_fetch_description"] = True
 
     try:
-        df = scrape_jobs(**kwargs)
+        df = _scrape_with_retry(kwargs)
     except Exception as e:
         log.error("JobSpy search failed: %s", e)
         return {"error": str(e), "total": 0, "new": 0, "existing": 0}

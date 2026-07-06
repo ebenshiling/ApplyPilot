@@ -1,8 +1,12 @@
 from pathlib import Path
 
-from pypdf import PdfReader, PdfWriter
+import pytest
 
 from applypilot.scoring import pdf
+
+pypdf = pytest.importorskip("pypdf")
+PdfReader = pypdf.PdfReader
+PdfWriter = pypdf.PdfWriter
 
 
 def _write_stub_pdf(path: Path) -> None:

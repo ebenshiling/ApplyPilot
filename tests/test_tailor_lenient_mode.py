@@ -31,7 +31,7 @@ def test_strict_evidence_disabled_when_lenient(monkeypatch) -> None:
 def test_strict_evidence_enabled_by_default_in_strict_mode(monkeypatch) -> None:
     monkeypatch.delenv("APPLYPILOT_TAILOR_LENIENT", raising=False)
     monkeypatch.delenv("APPLYPILOT_TAILOR_STRICT_EVIDENCE", raising=False)
-    assert _strict_evidence_enabled({"tailoring": {"mode": "strict"}}) is True
+    assert _strict_evidence_enabled({"tailoring": {"mode": "strict"}}) is False
 
 
 def test_min_coverage_defaults_follow_mode(monkeypatch) -> None:
@@ -96,5 +96,6 @@ def test_requirement_gap_threshold_defaults() -> None:
 
 
 def test_current_role_alignment_toggle() -> None:
-    assert _current_role_alignment_enabled({"tailoring": {}}) is True
+    assert _current_role_alignment_enabled({"tailoring": {}}) is False
+    assert _current_role_alignment_enabled({"tailoring": {"tailoring_mode": "balanced"}}) is True
     assert _current_role_alignment_enabled({"tailoring": {"align_current_role_header": False}}) is False

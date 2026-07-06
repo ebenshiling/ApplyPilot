@@ -5,6 +5,7 @@ and exports to PDF using headless Chromium via Playwright.
 """
 
 import logging
+import json
 import re
 from pathlib import Path
 
@@ -184,7 +185,16 @@ def build_html(resume: dict) -> str:
     sections = resume["sections"]
 
     def _highlight_keywords(s: str, kws: list[str] | None = None) -> str:
-        return _escape_html(s)
+        html = _escape_html(s)
+        keywords = [str(k).strip() for k in (kws if kws is not None else resume.get("keywords", [])) if str(k).strip()]
+        for kw in sorted(dict.fromkeys(keywords), key=len, reverse=True):
+            pattern = re.compile(rf"(?<![\w])({re.escape(_escape_html(kw))})(?![\w])", flags=re.IGNORECASE)
+            parts = re.split(r'(<strong class="kw">.*?</strong>)', html, flags=re.IGNORECASE)
+            html = "".join(
+                part if idx % 2 else pattern.sub(r'<strong class="kw">\1</strong>', part)
+                for idx, part in enumerate(parts)
+            )
+        return html
 
     def _render_simple_bullets(section_key: str, title: str, bold_label: bool = False) -> str:
         if section_key not in sections:
@@ -202,9 +212,10 @@ def build_html(resume: dict) -> str:
                 left, right = s.split(":", 1)
                 left_h = _escape_html(left.strip())
                 right_h = _escape_html(right.strip())
+                right_h = _highlight_keywords(right.strip())
                 items.append(f"<strong>{left_h}:</strong> {right_h}" if right_h else f"<strong>{left_h}</strong>")
             else:
-                items.append(_escape_html(s))
+                items.append(_highlight_keywords(s))
         if not items:
             return ""
         li = "".join(f"<li>{x}</li>" for x in items)
@@ -231,7 +242,7 @@ def build_html(resume: dict) -> str:
         entries = parse_entries(sections[exp_key])
         items = ""
         for e in entries:
-            bullets = "".join(f"<li>{_escape_html(b)}</li>" for b in e["bullets"])
+            bullets = "".join(f"<li>{_highlight_keywords(b)}</li>" for b in e["bullets"])
             subtitle = f'<div class="entry-subtitle">{_escape_html(e["subtitle"])}</div>' if e["subtitle"] else ""
             title = _escape_html(e["title"])
             items += f'<div class="entry"><div class="entry-title">{title}</div>{subtitle}<ul>{bullets}</ul></div>'
@@ -248,7 +259,7 @@ def build_html(resume: dict) -> str:
         entries = parse_entries(sections[proj_key])
         items = ""
         for e in entries:
-            bullets = "".join(f"<li>{_escape_html(b)}</li>" for b in e["bullets"])
+            bullets = "".join(f"<li>{_highlight_keywords(b)}</li>" for b in e["bullets"])
             subtitle = f'<div class="entry-subtitle">{_escape_html(e["subtitle"])}</div>' if e["subtitle"] else ""
             title = _escape_html(e["title"])
             items += f'<div class="entry"><div class="entry-title">{title}</div>{subtitle}<ul>{bullets}</ul></div>'
@@ -266,7 +277,7 @@ def build_html(resume: dict) -> str:
     # Summary
     summary_html = ""
     if "SUMMARY" in sections:
-        summary_html = f'<div class="section"><div class="section-title">Professional Summary</div><div class="summary">{_escape_html(sections["SUMMARY"].strip())}</div></div>'
+        summary_html = f'<div class="section"><div class="section-title">Professional Summary</div><div class="summary">{_highlight_keywords(sections["SUMMARY"].strip())}</div></div>'
 
     # Contact line parsing
     contact = resume["contact"]
