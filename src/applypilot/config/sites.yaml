@@ -51,6 +51,7 @@ base_urls:
   "MoJ Jobs": "https://jobs.justice.gov.uk"
   "GOV.UK Find a job": "https://www.jobs.service.gov.uk"
   "Civil Service Jobs": "https://www.civilservicejobs.service.gov.uk"
+  "DWP Civil Service Jobs": "https://www.civilservicejobs.service.gov.uk"
   "RemoteOK": null
   "WelcomeToTheJungle": null
   "Workopolis": "https://www.workopolis.com"
@@ -242,4 +243,9 @@ sites:
   - name: "Civil Service Jobs"
     # Covers many central-government departments, including Ministry of Defence roles.
     url: "https://www.civilservicejobs.service.gov.uk/csr/jobs.cgi?search_page=1&keywords={query_encoded}"
+    type: search
+
+  - name: "DWP Civil Service Jobs"
+    # Department for Work and Pensions roles on Civil Service Jobs.
+    url: "https://www.civilservicejobs.service.gov.uk/csr/index.cgi?department=Department%20for%20Work%20and%20Pensions&keywords={query_encoded}"
     type: search

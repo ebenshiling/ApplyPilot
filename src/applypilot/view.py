@@ -141,6 +141,7 @@ def generate_dashboard(
             "HealthJobsUK",
             "MoJ Jobs",
             "Civil Service Jobs",
+            "DWP Civil Service Jobs",
         ]
         if any(n.lower() == s.lower() for s in smart_site_names)
     ]
@@ -151,6 +152,7 @@ def generate_dashboard(
             "HealthJobsUK",
             "GOV.UK Find a job",
             "Civil Service Jobs",
+            "DWP Civil Service Jobs",
             "MoJ Jobs",
             "Jobs Go Public",
             "LG Jobs",
@@ -2564,7 +2566,7 @@ def generate_dashboard(
           </div>
 
           <textarea id="setup-searches" class="full-desc" style="display:none;min-height:160px;max-height:260px;margin-top:0.65rem" placeholder="searches.yaml (advanced mode)"></textarea>
-          <div class="job-desc" style="margin-top:0.5rem">Guardrails: JobSpy boards are validated; smart site names support 1..N selection; hours_old capped to 720; results_per_site capped to 300; empty roles default to Software Engineer. For sponsorship search, prefer NHS Jobs, HealthJobsUK, GOV.UK Find a job, Civil Service Jobs, MoJ Jobs and licensed-sponsor checks after enrichment.</div>
+          <div class="job-desc" style="margin-top:0.5rem">Guardrails: JobSpy boards are validated; smart site names support 1..N selection; hours_old capped to 720; results_per_site capped to 300; empty roles default to Software Engineer. For sponsorship search, prefer NHS Jobs, HealthJobsUK, GOV.UK Find a job, Civil Service Jobs, DWP Civil Service Jobs, MoJ Jobs and licensed-sponsor checks after enrichment.</div>
       </section>
 
         </div>

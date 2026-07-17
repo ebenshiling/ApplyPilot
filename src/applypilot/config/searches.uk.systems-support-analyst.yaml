@@ -113,6 +113,8 @@ smart_sites:
   - "Jobs Go Public"
   - "LG Jobs"
   - "HealthJobsUK"
+  - "Civil Service Jobs"
+  - "DWP Civil Service Jobs"
   - "MoJ Jobs"
 
 defaults:
