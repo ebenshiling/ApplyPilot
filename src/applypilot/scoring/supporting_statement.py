@@ -100,7 +100,7 @@ _STRUCTURE_VARIANTS: tuple[dict[str, str], ...] = (
     },
     {
         "name": "story-then-criteria",
-        "guidance": "Open with a brief first-week impact plan, then map evidence to criteria.",
+        "guidance": "Open with reasons for applying, then map evidence to criteria. Do not use a first-week plan.",
     },
     {
         "name": "values-first",
@@ -110,9 +110,30 @@ _STRUCTURE_VARIANTS: tuple[dict[str, str], ...] = (
 
 
 def _pick_variant(job: dict) -> dict[str, str]:
+    if _is_nhs_supporting_information_job(job):
+        return dict(_STRUCTURE_VARIANTS[0])
     seed = f"{job.get('url', '')}|{job.get('title', '')}|{job.get('site', '')}|statement"
     idx = int(hashlib.sha1(seed.encode("utf-8")).hexdigest(), 16) % len(_STRUCTURE_VARIANTS)
     return dict(_STRUCTURE_VARIANTS[idx])
+
+
+def _is_nhs_supporting_information_job(job: dict) -> bool:
+    hay = "\n".join(
+        str(job.get(k) or "")
+        for k in ("title", "company", "site", "url", "full_description", "description")
+    ).lower()
+    return any(
+        marker in hay
+        for marker in (
+            "nhs",
+            "health board",
+            "university health board",
+            "supporting information",
+            "person specification",
+            "clinical application",
+            "clinical system",
+        )
+    )
 
 
 def _extract_person_spec_criteria(text: str) -> list[str]:
@@ -199,6 +220,7 @@ def _build_prompt(
     org = str(job.get("company") or job.get("site") or "").strip()
     criteria_txt = "\n".join(f"- {c}" for c in (criteria or []))
     facts_txt = sanitize_text(supplemental_facts or "").strip()
+    avoid_txt = sanitize_text(str(job.get("_statement_avoid") or "")).strip()
 
     banned = ", ".join(sorted({w.lower() for w in BANNED_WORDS}))
 
@@ -206,8 +228,10 @@ def _build_prompt(
         "You write UK supporting statements for competitive public-sector roles. "
         "Output must be human, specific, evidence-led, and truthful. "
         "Do not invent qualifications, registrations, employers, dates, metrics, or tools. "
+        "Do not inflate transferable experience into direct NHS, clinical-system, hospital, or patient-administration experience. "
         "Avoid generic filler and avoid banned phrases. "
-        "Do not include personal contact details (address/phone/email) in the statement."
+        "Do not include personal contact details (address/phone/email) in the statement. "
+        "Do not write speculative first-day, first-week, or 'upon joining' plans."
     )
 
     if max_words <= 400:
@@ -239,10 +263,19 @@ CONSTRAINTS:
 - Structure: {variant["name"]} ({variant["guidance"]}).
 - Use plain English, UK spelling.
 - Do not include personal details or duplicate contact information already in the application.
-- You may use the supplemental evidence section, but do not treat it as employment unless it explicitly says so.
-- Use concrete examples with scope/actions/outcomes.
-- If criteria are available, explicitly cover them without listing them as a checklist.
+- Treat pasted application-form instructions in the supplemental section as instructions, not candidate evidence. Do not repeat them back.
+- You may use supplemental candidate facts such as certificates, but do not treat it as employment unless it explicitly says so.
+- Start with a short reason for applying to the organisation/role, then evidence against the person specification.
+- Use concrete examples with scope/actions/outcomes, but only where the CV/facts support them.
+- If criteria are available, explicitly cover the essential criteria first and relevant desirable criteria second without copying the criteria as a checklist.
+- If a criterion is not directly evidenced, explain the closest transferable evidence briefly; do not pretend direct experience.
+- Do not claim direct clinical systems, patient administration systems, Health Board systems, NHS hospital systems, or formal clinical-system training unless those words appear in the CV or supplemental facts as candidate evidence.
+- Do not claim group training, training scheduling, attendance recording, delegate feedback, or audit reports unless directly evidenced. If not evidenced, refer only to user guidance, onboarding, documentation, or one-to-one support.
+- Do not overstate process mapping or project management. Use "transferable understanding" only where supported by documentation, workflows, incident handling, or project evidence.
+- Mention certificates only as supporting knowledge, not as workplace experience: Google Advanced Data Analytics Professional Certificate and IBM Data Engineering Professional Certificate if provided.
+- Avoid weak apology phrases such as "while I do not", "although I have not", and avoid speculative phrases such as "my immediate focus", "upon joining", or "from the outset".
 - Do NOT use or echo these phrases (banned): {banned}
+{('- Previous draft issues to fix: ' + avoid_txt) if avoid_txt else ''}
 
 Return JSON only:
 {{"statement":"..."}}
@@ -272,6 +305,19 @@ def _validate_statement(text: str, *, min_words: int = 650, max_words: int = 180
     # Avoid obvious LLM meta.
     if any(p in low for p in ("as an ai", "i cannot", "language model")):
         errors.append("Contains AI meta language")
+
+    if re.search(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b", t):
+        errors.append("Contains email address")
+    if re.search(r"\b(?:\+?44\s?7\d{3}|07\d{3})\s?\d{3}\s?\d{3}\b", t):
+        errors.append("Contains phone number")
+
+    speculative = ("my immediate focus", "upon joining", "first week", "from the outset")
+    if any(p in low for p in speculative):
+        errors.append("Contains speculative joining plan language")
+
+    weak_gap_phrases = ("while i do not", "although i have not", "while i have not")
+    if any(p in low for p in weak_gap_phrases):
+        errors.append("Contains weak gap-framing language")
 
     return errors
 
