@@ -34,7 +34,7 @@ from applypilot import config
 from applypilot.config import CONFIG_DIR
 from applypilot.database import get_stats, init_db, normalize_url
 from applypilot.discovery.salary_filter import load_salary_preference, salary_text_ok
-from applypilot.llm import get_client
+from applypilot.llm import get_client, structured_json
 
 log = logging.getLogger(__name__)
 
@@ -1037,7 +1037,6 @@ def judge_api_responses(api_responses: list[dict]) -> list[dict]:
     if not _env_flag("SMARTE_JUDGE", "1"):
         return api_responses
 
-    client = get_client()
     relevant: list[dict] = []
 
     for resp in api_responses:
@@ -1071,8 +1070,13 @@ def judge_api_responses(api_responses: list[dict]) -> list[dict]:
         )
 
         try:
-            raw = client.ask(prompt, temperature=0.0, max_tokens=1024)
-            verdict = extract_json(raw)
+            verdict = structured_json(
+                [{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=1024,
+                task_name="smart-extract API judge",
+                repair_attempts=1,
+            )
             is_relevant = verdict.get("relevant", False)
             reason = verdict.get("reason", "?")
             log.info("Judge: %s -> %s (%s)", resp.get("url", "?")[:80], "KEEP" if is_relevant else "DROP", reason)
@@ -1663,18 +1667,20 @@ def execute_css_selectors(intel: dict, site_name: str | None = None) -> tuple[di
     prompt = FULL_PAGE_SELECTOR_PROMPT.format(page_html=cleaned)
 
     try:
-        raw, elapsed, meta = ask_llm(prompt)
+        t0 = time.time()
+        selectors = structured_json(
+            [{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=4096,
+            task_name=f"smart-extract selectors:{site_name or 'site'}",
+            repair_attempts=1,
+        )
+        elapsed = time.time() - t0
     except Exception as e:
         log.error("LLM_ERROR in Phase 2: %s", e)
         return {}, []
 
-    log.info("Phase 2 LLM: %d chars, %.1fs", meta["response_chars"], elapsed)
-
-    try:
-        selectors = extract_json(raw)
-    except Exception as e:
-        log.error("PARSE_ERROR in Phase 2: %s | raw: %s", e, raw[:500])
-        return {}, []
+    log.info("Phase 2 LLM: %d structured chars, %.1fs", len(json.dumps(selectors)), elapsed)
 
     if "error" in selectors:
         log.warning("LLM: %s", selectors["error"])
@@ -1855,18 +1861,20 @@ def _run_one_site(name: str, url: str) -> dict:
 
     prompt = STRATEGY_PROMPT.format(briefing=briefing)
     try:
-        raw, elapsed, meta = ask_llm(prompt)
+        t0 = time.time()
+        plan = structured_json(
+            [{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=4096,
+            task_name=f"smart-extract strategy:{name}",
+            repair_attempts=1,
+        )
+        elapsed = time.time() - t0
     except Exception as e:
         log.error("LLM_ERROR: %s", e)
         return {"name": name, "status": "LLM_ERROR", "error": str(e)}
 
-    log.info("LLM: %d chars, %.1fs", meta["response_chars"], elapsed)
-
-    try:
-        plan = extract_json(raw)
-    except Exception as e:
-        log.error("PARSE_ERROR: %s | raw: %s", e, raw[:500])
-        return {"name": name, "status": "PARSE_ERROR", "error": str(e), "raw": raw}
+    log.info("LLM: %d structured chars, %.1fs", len(json.dumps(plan)), elapsed)
 
     strategy = plan.get("strategy", "?")
     reasoning = plan.get("reasoning", "?")

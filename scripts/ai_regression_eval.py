@@ -1,4 +1,4 @@
-"""Run deterministic AI regression checks for scoring/tailoring."""
+"""Run deterministic AI regression checks for scoring, tailoring, and statements."""
 
 from __future__ import annotations
 

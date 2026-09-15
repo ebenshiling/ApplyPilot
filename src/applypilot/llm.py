@@ -11,12 +11,15 @@ Optional:
 LLM_MODEL env var overrides the model name for any provider.
 """
 
+import json
 import logging
 import os
 import random
+import re
 import threading
 import time
 from contextlib import contextmanager
+from typing import Any
 
 import httpx
 
@@ -205,9 +208,20 @@ class LLMClient:
                 thinking_budget=thinking_budget,
             )
 
-        return self._chat_openai_compat(messages, temperature=temperature, max_tokens=max_tokens)
+        return self._chat_openai_compat(
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_mime_type=response_mime_type,
+        )
 
-    def _chat_openai_compat(self, messages: list[dict], temperature: float, max_tokens: int) -> str:
+    def _chat_openai_compat(
+        self,
+        messages: list[dict],
+        temperature: float,
+        max_tokens: int,
+        response_mime_type: str | None = None,
+    ) -> str:
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -218,6 +232,8 @@ class LLMClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if response_mime_type == "application/json" and self.provider == "openai":
+            payload["response_format"] = {"type": "json_object"}
 
         for attempt in range(_MAX_RETRIES):
             try:
@@ -372,7 +388,7 @@ class LLMClient:
 def chat_json(messages: list[dict], temperature: float = 0.0, max_tokens: int = 2048) -> str:
     """Request JSON output when supported by the provider."""
     client = get_client()
-    # Gemini supports responseMimeType.
+    # Gemini supports responseMimeType; OpenAI supports response_format.
     if (client.provider or "").lower() == "gemini":
         # Default: disable thinking to avoid MAX_TOKENS truncation in JSON mode.
         tb_raw = (os.environ.get("GEMINI_JSON_THINKING_BUDGET", "0") or "0").strip()
@@ -387,7 +403,107 @@ def chat_json(messages: list[dict], temperature: float = 0.0, max_tokens: int = 
             response_mime_type="application/json",
             thinking_budget=thinking_budget,
         )
+    if (client.provider or "").lower() == "openai":
+        return client.chat(
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_mime_type="application/json",
+        )
     return client.chat(messages, temperature=temperature, max_tokens=max_tokens)
+
+
+class StructuredOutputError(ValueError):
+    """Raised when an LLM response cannot satisfy a structured JSON contract."""
+
+
+def parse_json_response(text: str) -> Any:
+    """Parse JSON from a model response with conservative formatting tolerance.
+
+    Models sometimes add markdown fences, a short preamble, or a hidden-thinking
+    block despite being asked for JSON. We accept those wrappers but never invent
+    or repair field values here.
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        raise StructuredOutputError("LLM returned an empty response")
+
+    if "</think>" in raw:
+        raw = raw.rsplit("</think>", 1)[1].strip()
+
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", raw, flags=re.IGNORECASE | re.DOTALL)
+    if fenced:
+        raw = fenced.group(1).strip()
+
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(raw):
+        if char not in "[{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(raw[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, (dict, list)):
+            return value
+
+    raise StructuredOutputError(f"LLM returned invalid JSON ({len(raw)} response chars)")
+
+
+def structured_json(
+    messages: list[dict],
+    *,
+    temperature: float = 0.0,
+    max_tokens: int = 2048,
+    required_keys: tuple[str, ...] = (),
+    task_name: str = "structured output",
+    repair_attempts: int = 1,
+) -> dict[str, Any]:
+    """Request a JSON object, retrying once when the response shape is invalid.
+
+    Transport retries remain inside the provider client. This wrapper handles the
+    separate failure mode where the provider responds successfully but the model
+    emits empty, malformed, or incorrectly shaped JSON.
+    """
+    base_messages = [dict(message) for message in messages]
+    total_attempts = max(0, int(repair_attempts)) + 1
+    last_error = "invalid response"
+
+    for attempt in range(total_attempts):
+        request_messages = base_messages
+        if attempt:
+            keys = ", ".join(required_keys) or "the requested fields"
+            request_messages = base_messages + [
+                {
+                    "role": "user",
+                    "content": (
+                        "Your previous response did not satisfy the JSON contract. "
+                        f"Return only one valid JSON object with these top-level keys: {keys}. "
+                        "Do not use markdown, commentary, or a code fence."
+                    ),
+                }
+            ]
+
+        raw = chat_json(request_messages, temperature=temperature, max_tokens=max_tokens)
+        try:
+            parsed = parse_json_response(raw)
+            if not isinstance(parsed, dict):
+                raise StructuredOutputError("LLM JSON response was not an object")
+            missing = [key for key in required_keys if key not in parsed]
+            if missing:
+                raise StructuredOutputError("LLM JSON response missing required fields: " + ", ".join(missing))
+            return parsed
+        except StructuredOutputError as exc:
+            last_error = str(exc)
+            if attempt < total_attempts - 1:
+                log.warning(
+                    "LLM structured output rejected task=%s attempt=%d/%d: %s",
+                    task_name,
+                    attempt + 1,
+                    total_attempts,
+                    last_error,
+                )
+
+    raise StructuredOutputError(f"LLM structured output failed for {task_name}: {last_error}")
 
 
 def close_client() -> None:

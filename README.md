@@ -243,12 +243,14 @@ applypilot workspace-import ARCHIVE.zip # Restore workspace zip
 
 ## AI Eval Gates
 
-ApplyPilot includes deterministic offline evals for scoring/tailoring logic:
+ApplyPilot includes deterministic offline evals for scoring, tailoring, NHS Statement Studio, and structured LLM output:
 
 ```bash
 python scripts/ai_regression_eval.py --strict      # fast guardrail checks
 python scripts/ai_eval_dataset.py --strict         # formal dataset suites + trend log
 ```
+
+The regression harness includes a redacted NHS Application Support case. It rejects copied form instructions, personal contact details, speculative joining plans, and unsupported clinical or training claims while allowing honest transferable-evidence gaps.
 
 Formal eval trend history is written to `logs/ai_eval_history.jsonl` under your ApplyPilot workspace.
 

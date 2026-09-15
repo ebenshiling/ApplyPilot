@@ -3,7 +3,9 @@ from applypilot.scoring.supporting_statement import (
     _pick_variant,
     _trim_text_to_word_limit,
     _validate_statement,
+    evaluate_statement_quality,
 )
+from applypilot.scoring import supporting_statement as supporting_statement_module
 
 
 def test_trim_text_to_word_limit_enforces_cap() -> None:
@@ -102,3 +104,56 @@ def test_validate_statement_rejects_contact_details_and_joining_plan_language() 
     assert "Contains speculative joining plan language" in errs
     assert "Contains email address" in errs
     assert "Contains phone number" in errs
+
+
+def test_statement_quality_harness_rejects_unsupported_nhs_claims() -> None:
+    job = {
+        "title": "Application Support Specialist",
+        "company": "University Health Board",
+        "full_description": (
+            "Person Specification\nEssential\n"
+            "Educated to Degree standard or Equivalent\n"
+            "Experience providing application support\n"
+            "Experience of training groups of learners\n"
+            "Desirable\nIn depth knowledge of Patient administration and clinical systems"
+        ),
+    }
+    resume = "MSc Information Technology. Supported live web applications. Provided user guidance."
+    statement = (
+        "My immediate focus upon joining would be to learn the service. "
+        "I have extensive clinical systems, patient administration, group training, and training administration experience. "
+        "Please contact me at candidate@example.invalid."
+    )
+
+    quality = evaluate_statement_quality(statement, resume, job)
+
+    assert quality["status"] == "fail"
+    assert quality["unsupported_claims"]
+    assert "Repeats application-form instructions" not in quality["hard_failures"]
+    assert "Contains personal email address" in quality["hard_failures"] or "Contains personal phone number" in quality["hard_failures"]
+
+
+def test_generation_retries_after_statement_quality_failure(monkeypatch, tmp_path) -> None:
+    responses = [
+        {"statement": "My immediate focus upon joining would be to learn the service. Contact candidate@example.invalid."},
+        {"statement": "I support live applications through incident triage, SQL investigation, user guidance, and clear technical documentation."},
+    ]
+    calls = []
+
+    def fake_structured_json(messages, **kwargs):
+        calls.append(kwargs)
+        return responses.pop(0)
+
+    monkeypatch.setattr(supporting_statement_module, "STATEMENT_DIR", tmp_path)
+    monkeypatch.setattr(supporting_statement_module, "structured_json", fake_structured_json)
+
+    result = supporting_statement_module.generate_supporting_statement(
+        "Application support, SQL investigation, user guidance, documentation.",
+        {"title": "Application Support Specialist", "company": "NHS", "full_description": "Experience providing application support."},
+        {},
+        min_words=1,
+        max_words=100,
+    )
+
+    assert result.startswith("I support live applications")
+    assert len(calls) == 2

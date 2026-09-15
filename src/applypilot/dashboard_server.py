@@ -2788,7 +2788,10 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/statement/generate":
             try:
                 from applypilot.config import check_tier
-                from applypilot.scoring.supporting_statement import generate_supporting_statement
+                from applypilot.scoring.supporting_statement import (
+                    evaluate_statement_quality,
+                    generate_supporting_statement,
+                )
                 from applypilot.setup_workspace import read_profile
 
                 check_tier(2, "supporting statement generation")
@@ -2823,12 +2826,13 @@ class _Handler(BaseHTTPRequestHandler):
                     "full_description": job_text,
                 }
 
+                min_words = max(80, min(int(max_words), int(max_words * 0.6)))
                 statement = generate_supporting_statement(
                     resume_text,
                     job,
                     profile,
                     supplemental_facts=supplemental_facts,
-                    min_words=max(80, min(int(max_words), int(max_words * 0.6))),
+                    min_words=min_words,
                     max_words=max_words,
                 )
 
@@ -2867,7 +2871,7 @@ class _Handler(BaseHTTPRequestHandler):
 
                 wc = _word_count(statement)
                 if wc > max_words:
-                    from applypilot.llm import chat_json
+                    from applypilot.llm import structured_json
 
                     sys = (
                         "You rewrite UK supporting statements. Keep the meaning, keep it truthful, "
@@ -2877,29 +2881,46 @@ class _Handler(BaseHTTPRequestHandler):
                     user_msg = (
                         f"WORD LIMIT: {max_words}\n\n"
                         f"JOB TEXT:\n{job_text[:8000]}\n\n"
+                        f"CANDIDATE RESUME:\n{resume_text[:8000]}\n\n"
+                        f"SUPPLEMENTAL FACTS:\n{supplemental_facts[:4000]}\n\n"
                         f"ORIGINAL STATEMENT:\n{statement}\n\n"
                         'Return JSON only: {"statement":"..."}'
                     )
-                    out = chat_json(
+                    obj = structured_json(
                         [{"role": "system", "content": sys}, {"role": "user", "content": user_msg}],
-                        max_tokens=1800,
+                        max_tokens=max(1800, min(5000, int(max_words * 1.5))),
                         temperature=0.0,
+                        required_keys=("statement",),
+                        task_name="statement word-limit tightening",
+                        repair_attempts=1,
                     )
-                    try:
-                        obj = json.loads((out or "").strip())
-                        if isinstance(obj, dict) and str(obj.get("statement") or "").strip():
-                            statement2 = str(obj.get("statement") or "").strip()
-                            statement = _trim_text_to_word_limit(statement2, max_words)
-                            wc = _word_count(statement)
-                    except Exception:
-                        pass
+                    statement2 = str(obj.get("statement") or "").strip()
+                    if statement2:
+                        statement = _trim_text_to_word_limit(statement2, max_words)
+                        wc = _word_count(statement)
 
                 if wc > max_words:
                     statement = _trim_text_to_word_limit(statement, max_words)
                     wc = _word_count(statement)
 
+                quality = evaluate_statement_quality(
+                    statement,
+                    resume_text,
+                    job,
+                    supplemental_facts,
+                    min_words=min_words,
+                    max_words=max_words,
+                )
+
                 self._send_json(
-                    200, {"ok": True, "statement": statement, "word_count": int(wc), "max_words": int(max_words)}
+                    200,
+                    {
+                        "ok": True,
+                        "statement": statement,
+                        "word_count": int(wc),
+                        "max_words": int(max_words),
+                        "quality": quality,
+                    },
                 )
             except SystemExit as e:
                 self._send_json(409, {"ok": False, "error": "tier_blocked", "detail": str(e)})

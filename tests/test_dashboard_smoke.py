@@ -1,8 +1,5 @@
-import json
 import tempfile
 from pathlib import Path
-
-import pytest
 
 from applypilot.database import close_connection, get_connection, init_db
 from applypilot.view import generate_dashboard
@@ -104,6 +101,8 @@ def test_generate_dashboard_writes_html_and_contains_panels() -> None:
             assert "apiJobMatchClear" in html
             assert "match-history-search" in html
             assert "matchApplyHistoryFilter" in html
+            assert 'id="studio-quality"' in html
+            assert "_studioRenderQuality" in html
             assert "matchRenameVariant" in html
             assert "matchDuplicateVariant" in html
             assert "matchPinVariant" in html

@@ -11,7 +11,6 @@ Generates a self-contained HTML dashboard with:
 from __future__ import annotations
 
 import json
-import os
 import re
 import webbrowser
 from datetime import datetime, timezone
@@ -20,7 +19,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from applypilot.config import APP_DIR, DB_PATH
+from applypilot.config import APP_DIR
 from applypilot.database import ensure_columns, get_connection
 
 console = Console()
@@ -182,9 +181,7 @@ def generate_dashboard(
     applied = conn.execute(
         "SELECT COUNT(*) FROM jobs WHERE apply_status = 'applied' OR applied_at IS NOT NULL"
     ).fetchone()[0]
-    prepared = conn.execute("SELECT COUNT(*) FROM jobs WHERE apply_status = 'prepared'").fetchone()[0]
     failed = conn.execute("SELECT COUNT(*) FROM jobs WHERE apply_status = 'failed'").fetchone()[0]
-    skipped = conn.execute("SELECT COUNT(*) FROM jobs WHERE apply_status = 'skipped'").fetchone()[0]
     blocked = conn.execute(
         "SELECT COUNT(*) FROM jobs WHERE apply_status = 'skipped' AND apply_error = 'user_deleted'"
     ).fetchone()[0]
@@ -310,7 +307,6 @@ def generate_dashboard(
 
     # Job cards grouped by score
     job_sections = ""
-    jobs_compact: list[dict[str, object]] = []
     jobs_compact_json = "[]"
     current_score = None
     score_card_index = 0
@@ -411,8 +407,6 @@ def generate_dashboard(
         tailor_status = str(j["tailor_status"] or "").strip().lower()
         cover_status = str(j["cover_letter_status"] or "").strip().lower()
         full_desc_raw = str(j["full_description"] or "")
-        preview_source = str(j["description"] or "") or full_desc_raw
-        desc_preview_text = re.sub(r"\s+", " ", preview_source).strip()[:300]
         search_blob = " ".join(
             [
                 title_raw,
@@ -462,7 +456,6 @@ def generate_dashboard(
             try:
                 resp_map = json.loads(raw_resp_map_json)
                 if isinstance(resp_map, list):
-                    resp_rows: list[str] = []
                     for item in resp_map[:5]:
                         if not isinstance(item, dict):
                             continue
@@ -1991,6 +1984,7 @@ def generate_dashboard(
             </div>
 
             <textarea id="studio-output" class="full-desc studio-output" placeholder="Generated statement appears here..."></textarea>
+            <div id="studio-quality" class="job-desc" style="margin-top:0.45rem;white-space:pre-line">Quality checks appear after generation.</div>
           </div>
         </div>
       </section>
@@ -4860,6 +4854,29 @@ function _studioSetCount(wc, max) {{
   else el.textContent = String(wc) + ' words';
 }}
 
+function _studioRenderQuality(quality) {{
+  const el = document.getElementById('studio-quality');
+  if (!el) return;
+  if (!quality || typeof quality !== 'object') {{
+    el.textContent = 'Quality checks unavailable.';
+    return;
+  }}
+  const status = String(quality.status || 'review').toUpperCase();
+  const criteria = quality.criteria || {{}};
+  const essential = criteria.essential || {{}};
+  const desirable = criteria.desirable || {{}};
+  const hard = Array.isArray(quality.hard_failures) ? quality.hard_failures : [];
+  const warnings = Array.isArray(quality.warnings) ? quality.warnings : [];
+  const lines = [
+    'Statement quality: ' + status,
+    'Essential criteria: ' + String(essential.covered || 0) + '/' + String(essential.total || 0),
+    'Desirable criteria: ' + String(desirable.covered || 0) + '/' + String(desirable.total || 0),
+  ];
+  if (hard.length) lines.push('Hard failures: ' + hard.join('; '));
+  if (warnings.length) lines.push('Review: ' + warnings.join('; '));
+  el.textContent = lines.join(String.fromCharCode(10));
+}}
+
 function _matchSetStatus(msg) {{
   const el = document.getElementById('match-status');
   if (el) el.textContent = msg;
@@ -5434,13 +5451,16 @@ async function studioGenerate(btn) {{
   if (!job) {{ _studioSetStatus('Paste the job description/person spec first.'); return; }}
 
   _studioSetStatus('Generating...');
+  _studioRenderQuality(null);
   try {{
     const res = await _apiJson('/api/statement/generate', {{ resume_text: resume, job_text: job, title: title, org: org, supplemental_facts: facts, max_words: maxWords }});
     if (!res || !res.ok) throw new Error((res && (res.detail || res.error)) || 'generate_failed');
     const out = document.getElementById('studio-output');
     if (out) out.value = String(res.statement || '').trim();
     _studioSetCount(parseInt(res.word_count || 0, 10) || 0, parseInt(res.max_words || 0, 10) || maxWords);
-    _studioSetStatus('Done.');
+    _studioRenderQuality(res.quality || null);
+    const qualityStatus = String(((res.quality || {{}}).status || 'review')).toLowerCase();
+    _studioSetStatus(qualityStatus === 'pass' ? 'Ready.' : (qualityStatus === 'fail' ? 'Quality gate failed.' : 'Review quality flags.'));
   }} catch (e) {{
     _studioSetStatus('Failed: ' + (e && e.message ? e.message : String(e)));
   }}

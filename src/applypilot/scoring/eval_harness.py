@@ -1,4 +1,4 @@
-"""Deterministic regression checks for scoring and tailoring logic."""
+"""Deterministic regression checks for scoring, tailoring, and NHS statements."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from applypilot.scoring.scorer import _parse_score_response
+from applypilot.scoring.supporting_statement import evaluate_statement_quality
 from applypilot.scoring.tailor_strategy import (
     build_fact_library,
     build_jd_targets,
@@ -20,6 +21,7 @@ from applypilot.scoring.tailor_strategy import (
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _GOLDEN_DIR = _REPO_ROOT / "ops" / "evals" / "golden"
+_STATEMENT_GOLDEN_PATH = _GOLDEN_DIR / "nhs_statement_case.json"
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -161,6 +163,53 @@ def _load_parser_cases() -> list[dict[str, Any]]:
 def _load_tailor_fixture() -> dict[str, Any]:
     data = _load_json(_GOLDEN_DIR / "tailor_strategy_cases.json")
     return data if data else _default_tailor_fixture()
+
+
+def run_statement_quality_eval() -> dict[str, Any]:
+    """Run deterministic NHS statement quality checks against a golden case."""
+    case = _load_json(_STATEMENT_GOLDEN_PATH) or {}
+    job = _as_dict(case.get("job"))
+    resume_text = str(case.get("resume_text") or "")
+    supplemental_facts = str(case.get("supplemental_facts") or "")
+    bad = evaluate_statement_quality(
+        str(case.get("bad_statement") or ""),
+        resume_text,
+        job,
+        supplemental_facts,
+    )
+    good = evaluate_statement_quality(
+        str(case.get("good_statement") or ""),
+        resume_text,
+        job,
+        supplemental_facts,
+    )
+
+    bad_expected = (
+        bad.get("status") == "fail"
+        and bool(bad.get("hard_failures"))
+        and bool(bad.get("unsupported_claims"))
+    )
+    good_expected = good.get("status") != "fail" and not bool(good.get("hard_failures"))
+    checks = [
+        {
+            "name": "nhs_bad_statement_rejected",
+            "passed": bad_expected,
+            "details": list(bad.get("hard_failures") or []),
+        },
+        {
+            "name": "nhs_good_statement_has_no_hard_failures",
+            "passed": good_expected,
+            "details": list(good.get("warnings") or []),
+        },
+    ]
+    return {
+        "passed": all(bool(check.get("passed")) for check in checks),
+        "checks": checks,
+        "bad_status": bad.get("status"),
+        "good_status": good.get("status"),
+        "bad_hard_failures": bad.get("hard_failures") or [],
+        "good_hard_failures": good.get("hard_failures") or [],
+    }
 
 
 def run_regression_eval(*, strict: bool = True) -> dict[str, Any]:
@@ -308,6 +357,20 @@ def run_regression_eval(*, strict: bool = True) -> dict[str, Any]:
         }
     )
 
+    statement_eval = run_statement_quality_eval()
+    checks.append(
+        {
+            "name": "nhs_statement_quality_harness",
+            "passed": bool(statement_eval.get("passed")),
+            "details": [
+                f"bad_status={statement_eval.get('bad_status')}",
+                f"good_status={statement_eval.get('good_status')}",
+                *[str(x) for x in (statement_eval.get("bad_hard_failures") or [])],
+                *[str(x) for x in (statement_eval.get("good_hard_failures") or [])],
+            ],
+        }
+    )
+
     passed = all(bool(c.get("passed")) for c in checks)
     report = {
         "passed": passed,
@@ -318,6 +381,7 @@ def run_regression_eval(*, strict: bool = True) -> dict[str, Any]:
         "fixture_sources": {
             "parser": str(_GOLDEN_DIR / "score_parser_cases.json"),
             "tailor": str(_GOLDEN_DIR / "tailor_strategy_cases.json"),
+            "statement": str(_STATEMENT_GOLDEN_PATH),
         },
     }
 
