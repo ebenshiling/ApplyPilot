@@ -1,0 +1,13 @@
+{
+  "implementation_id": "20261009-opportunity-insights-browser",
+  "title": "Exportable opportunity activity and usable question-aware assisted browser",
+  "owner": "ai-agent",
+  "steps": [
+    "Add durable compact opportunity identities and structured stage/change events, including direct CLI/database changes and retired records",
+    "Expand Insights with activity filters, stage/outcome breakdowns, candidate-recorded events and complete CSV/JSON analysis exports",
+    "Remove repeated full manual-page inspection and blocking screenshot capture from interactive browser input; measure processing/frame latency",
+    "Detect selected/unnamed/iframe/contenteditable fields and nearby question guidance; draft evidence-grounded answers asynchronously and insert only into a validated target",
+    "Prompt for reminder dates and download calendar files with inline errors",
+    "Verify persistence/export integrity, stale target rejection, truthful drafts and browser responsiveness; deploy only when active work is idle"
+  ]
+}

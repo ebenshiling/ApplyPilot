@@ -1,0 +1,35 @@
+{
+  "implementation_id": "20261007-ai-settings-polish",
+  "status": "completed",
+  "phase": "deployed",
+  "owner": "ai-agent",
+  "updated_at": "2026-10-07",
+  "verification": {
+    "result": "passed",
+    "command": "python scripts/agent_verify.py",
+    "browser_enabled": true,
+    "pytest": "419 passed in 869.98 seconds",
+    "ai_regression": "7/7 passed",
+    "ai_formal": "13/13 passed",
+    "focused": "5 browser tests passed: zero main-page credential inputs; provider-specific on-demand replacement; Escape/close/success cleanup; connection-only payloads preserving pending model/budget changes; preferences payload omits credentials; server inheritance; inline save failures; light/dark 375/768/1440 responsive layouts; existing assistant integration",
+    "javascript": "node --check passed",
+    "visual_review": "Desktop dark preferences, mobile light preferences and dark private connection dialog reviewed; fixture screenshots retained in this implementation folder",
+    "live_inference": "None; no production credential changes"
+  },
+  "deployment": {
+    "container": "applypilot-dashboard",
+    "build": "docker compose -f docker-compose.yml build --quiet applypilot passed",
+    "recreation": "docker compose -f docker-compose.yml up -d --no-build --force-recreate applypilot passed",
+    "health": {"ok": true, "multi_user": true},
+    "updated_assets_verified": true,
+    "old_inline_credential_fields_removed": true,
+    "protected_input_hashes_unchanged": 13,
+    "jobs_before_after": [21, 21],
+    "documents_before_after": [4, 4],
+    "messages_before_after": [118, 118]
+  },
+  "fmea": "All five documented mitigations implemented and verified by browser regressions; production inputs preserved.",
+  "snapshot_note": "Git metadata is unavailable from Windows on the UNC checkout; snapshot dirty=false is not proof of a clean working tree.",
+  "pre_state": "ops/implementations/20261007-ai-settings-polish/pre_state.json",
+  "post_state": "ops/implementations/20261007-ai-settings-polish/post_state.json"
+}

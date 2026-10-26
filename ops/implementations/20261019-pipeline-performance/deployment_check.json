@@ -1,0 +1,16 @@
+{
+  "deployed_url": "http://localhost:8765/workspace",
+  "nz_enabled": true,
+  "live_execution_enabled": true,
+  "nz_discovery_panel": true,
+  "nz_preparation_panel": true,
+  "country_switch": "passed",
+  "nz_survives_polling": true,
+  "uk_record_count_preserved": 98,
+  "browser_errors": 0,
+  "pipeline_controls_visible_seconds": 0.8426,
+  "pipeline_catalog_requests": 1,
+  "pipeline_progress_requests": 2,
+  "pipeline_unsaved_controls_preserved": true,
+  "real_applications_submitted_by_check": 0
+}

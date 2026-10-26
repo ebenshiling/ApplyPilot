@@ -1,0 +1,9 @@
+{
+  "implementation_id":"20261019-pipeline-performance",
+  "goal":"Reduce deployed Pipeline page latency without changing eligibility, country ownership or execution checks.",
+  "baseline":{"pipeline_api_seconds":[9.2426,9.8891],"overview_seconds":[0.754,0.6702],"nz_discovery_seconds":[0.6903,0.6847],"nz_preparation_seconds":[0.8811,0.6902],"profile_search_parses":728,"profile_environment_loads":2696,"profile_score_fingerprints":263},
+  "steps":["Profile authenticated deployed API reads without logging candidate content","Reuse configuration/profile/AI inputs and repeated decisions inside a single read-model calculation only","Add lightweight Pipeline progress polling that excludes discovery planning and document-preview work","Prevent obsolete cross-country/page responses and overlapping preview requests from repainting current controls","Verify fresh inputs on the next request, mutation isolation and country/workspace isolation; compare deployed latency and run required verification"],
+  "additional_measured_bottleneck":"Parallel page reads rerun existing schema/legacy-import routines and contend for SQLite write locks. Remember readiness by file identity/schema_version without caching rows or changing migrations.",
+  "data_policy":"No schema changes, candidate edits, application starts, provider calls or source requests. Read-model reuse does not apply to write/execution/approval paths.",
+  "rollback":"Retain current Docker image and source-only backup; data-volume restoration is not needed for this change."
+}

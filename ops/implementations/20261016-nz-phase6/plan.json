@@ -1,0 +1,9 @@
+{
+  "implementation_id":"20261016-nz-phase6",
+  "authorization":"Continuation through remaining approved phases; user selected synthetic fixtures for missing candidate inputs",
+  "baseline":"Verified Phase 5, 771 passed and 59 skipped; original checkout untouched",
+  "scope":"P6.1-P6.9 common fresh human submit authority, owned executor boundary, replay/crash protection and honest unsupported-site handoff",
+  "steps":["Extend existing browser-session records with immutable review/approval context using explicit-column writers","Bind review to actor/session/boot, exact target, current approved documents, country/rights/facts/policy and complete field/consent state","Issue bounded five-minute random single-use approval and CAS-consume durable intent before owned actuation","Keep every real unvalidated ATS and legacy raw actuator contained; supported fixture adapter is in-process and cannot network","Exercise actor/country/session mismatch, edits, expiry/replay/concurrency, uncontrolled action attempts and crash/receipt uncertainty","Run required verification and document actual adapter/permission boundaries"],
+  "live_adapter_coverage":"none: no permitted live ATS authority/semantics validated; every real site remains manual handoff",
+  "excluded":["Universal arbitrary-site safety claims","Real employer submission or browser automation","Production release","Configurable bypass of approval or legacy containment"]
+}

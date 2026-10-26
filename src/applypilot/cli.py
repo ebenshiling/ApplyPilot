@@ -104,6 +104,8 @@ def run(
     ),
     stream: bool = typer.Option(False, "--stream", help="Run stages concurrently (streaming mode)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview stages without executing."),
+    country: Optional[str] = typer.Option(None, "--country", help="Explicit operation country: GB or NZ."),
+    campaign: Optional[str] = typer.Option(None, "--campaign", help="Saved campaign identifier; NZ accepts discovery only."),
 ) -> None:
     """Run pipeline stages: discover, enrich, score, tailor, statement, cover, pdf."""
     _bootstrap()
@@ -137,6 +139,8 @@ def run(
         dry_run=dry_run,
         stream=stream,
         workers=workers,
+        country_code=country,
+        campaign_id=campaign,
     )
 
     if result.get("errors"):
@@ -246,6 +250,13 @@ def apply(
         return
 
     # --- Full apply mode ---
+
+    from applypilot.apply.safety import require_live_execution, SubmissionContained
+    try:
+        require_live_execution()
+    except SubmissionContained as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+        raise typer.Exit(code=3)
 
     effective_limit = limit if limit is not None else (0 if continuous else 1)
 
@@ -716,6 +727,7 @@ def workspace_export_cmd(
         help="Include tailored_resumes and cover_letters directories.",
     ),
     include_logs: bool = typer.Option(False, "--include-logs", help="Include logs/ directory."),
+    include_evidence: bool = typer.Option(False,"--include-evidence",help="Explicitly include retained employer evidence and browser receipt artifacts."),
 ) -> None:
     """Create a portable workspace archive for moving to another computer."""
     from datetime import datetime
@@ -735,6 +747,7 @@ def workspace_export_cmd(
             include_db=include_db,
             include_generated=include_generated,
             include_logs=include_logs,
+            include_evidence=include_evidence,
         )
     except Exception as e:
         console.print(f"[red]Workspace export failed:[/red] {e}")

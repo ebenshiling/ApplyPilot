@@ -1,0 +1,37 @@
+{
+  "implementation_id": "20261005-assistant-response-recovery",
+  "status": "completed",
+  "owner": "ai-agent",
+  "phase": "deployed",
+  "updated_at": "2026-10-06",
+  "verification": {
+    "result": "passed",
+    "command": "python scripts/agent_verify.py",
+    "browser_enabled": true,
+    "pytest": "415 passed in 818.13 seconds",
+    "ai_regression": "7/7 checks passed",
+    "ai_formal": "13/13 cases passed",
+    "javascript": "node --check passed for workspace.js and studios.js",
+    "focused": "13 assistant recovery regressions passed, including provider timeout isolation, sanitized HTTP failures, empty cache, browser retry/timeout/cancel/stale-response and credential inheritance/isolation",
+    "live_inference": "not performed; provider calls mocked in regression fixtures"
+  },
+  "deployment": {
+    "service": "applypilot",
+    "container": "applypilot-dashboard",
+    "build": "docker compose -f docker-compose.yml build applypilot passed",
+    "recreation": "docker compose -f docker-compose.yml up -d --no-build --force-recreate applypilot passed",
+    "health": {"ok": true, "multi_user": true},
+    "assistant_assets_verified": true,
+    "protected_document_input_hashes_unchanged": 13,
+    "jobs_before_after": [21, 21],
+    "documents_before_after": [4, 4],
+    "messages_observed_before_after": [112, 113],
+    "credential_action": "None. Existing workspace .env Gemini override remains active and differs from service key; user can explicitly choose service inheritance or replacement in Settings.",
+    "forms_route": "openai / gpt-6-luna / reasoning none"
+  },
+  "research": "docs/ASSISTANT_AND_ASSISTED_APPLY.md includes official OpenAI, DeepSeek and Claude pricing and integration differences. Google source fetch timed out; no unverified current Google prices quoted.",
+  "follow_ups": [{"owner": "project-owner", "phase": "visible assisted-browser integration", "detail": "Current Docker has no display or authenticated remote browser review handoff. Existing prepare mode is best-effort DOM fill; provider switch alone does not resolve this."}],
+  "snapshot_note": "Windows Git cannot identify the UNC checkout; snapshot null HEAD/branch and false dirty are unavailable Git metadata, not proof of a clean working tree.",
+  "pre_state": "ops/implementations/20261005-assistant-response-recovery/pre_state.json",
+  "post_state": "ops/implementations/20261005-assistant-response-recovery/post_state.json"
+}

@@ -1,0 +1,17 @@
+{
+  "implementation_id": "20261004-pipeline-audit",
+  "title": "Pipeline reliability, configurable discovery, and resume-routing audit",
+  "owner": "ai-agent",
+  "scope": ["audit", "documentation", "offline diagnostics"],
+  "steps": [
+    "Inspect orchestration, effective eligibility, dashboard controls, source registries, and resume routing.",
+    "Reproduce high-impact findings with isolated databases, temporary files, and mocked services.",
+    "Document evidence, currently supported configuration workflows, and a prioritized improvement roadmap.",
+    "Run the repository verification gate and capture post-state."
+  ],
+  "constraints": [
+    "Read production search configuration only; do not change user searches, resumes, databases, or deployed settings.",
+    "Use no paid AI inference or live discovery during audit verification.",
+    "Keep findings distinguishable from proposed fixes; avoid claiming implemented improvements."
+  ]
+}

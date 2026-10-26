@@ -1,0 +1,8 @@
+{
+  "implementation_id":"20261016-nz-phase5",
+  "authorization":"User requested remaining phases and explicitly chose synthetic fixtures for candidate inputs",
+  "baseline":"Verified Phase 4 shared factual authority in the isolated feature worktree",
+  "scope":["P5.1 NZ technical-only scoring and separate practical/immigration context","P5.2 explicit country-scoped preparation and packet requirements","P5.3 exact current document approval distinct from submission approval","P5.4 country-scoped tracking, reminders and history","P5.5-P5.6 existing request/usage reservations, idempotency and bounded retries","P5.7 dependency-scoped compatibility fingerprints","P5.8 portable country/evidence/claim records without revived approval capabilities"],
+  "steps":["Wire explicit NZ preparation capability only for reconciled masters and permitted source use, retaining legacy queue exclusion","Reuse existing writers/packet/tracking routes through bounded NZ services and common factual proofs","Add idempotent request leases and request/country accounting without a new queue or cost platform","Extend scoped document approval, fingerprints and safe workspace transfer/cleanup","Verify concurrent operations, unknown rights/source restrictions, UK compatibility and migration/restore; run required checks"],
+  "excluded":["Real candidate import/certification","Real source activation or provider calls","Relaxing Phase 1 live-actuator containment before Phase 6 authority","Production deployment or release"]
+}

@@ -1,0 +1,43 @@
+{
+  "implementation_id": "20261002-application-command-center",
+  "title": "ApplyPilot application command center and reliable CV Studio",
+  "status": "core_release_completed",
+  "owner": "ai-agent",
+  "created_at": "2026-10-02",
+  "updated_at": "2026-10-02",
+  "guide": "docs/COMMAND_CENTER.md",
+  "phases": [
+    {"name": "planning", "status": "completed"},
+    {"name": "baseline_and_contracts", "status": "completed", "notes": "Pre-state captured; additive cc_* schema and workspace-scoped API adapters; legacy workflows retained."},
+    {"name": "frontend_workbench", "status": "core_completed", "notes": "Responsive workspace, themes, CV editor/preview, application records, inbox, insights, and themed embedded legacy pipeline/settings."},
+    {"name": "reliable_cv_updates", "status": "core_completed", "notes": "Replacement/deletion semantics, structured facts, fingerprints, existing-job regeneration, immutable CV versions, memberships/CPD, and PDF pagination improvements."},
+    {"name": "application_records", "status": "core_completed", "notes": "Execution events, hiring outcomes, notes, references, evidence, priorities, archive/restore, scoped blocking and legacy unblock, duplicate suggestions, listing checks, and bulk pick/regenerate."},
+    {"name": "live_execution", "status": "core_completed", "notes": "Authenticated SSE/replay/polling, LLM form events and checkpoint controls, uncertain submission guards, uniquely scoped stopped-attempt release; Claude Code browser tool events and heartbeat instrumentation."},
+    {"name": "ai_assistance", "status": "core_completed", "notes": "Native Anthropic client and wizard/tier readiness, grounded assistant tasks, revision-aware caching, transactional daily request budgets, measured token usage, verified screening answers."},
+    {"name": "hiring_and_email", "status": "core_completed", "notes": "Hiring states, message evidence review/deduplication, Gmail/Outlook OAuth PKCE, encrypted tokens, refresh/sync/disconnect, background synchronization, reminders and ICS export."},
+    {"name": "scheduling_and_analytics", "status": "core_completed", "notes": "Durable scheduled preparation/submission, restart review, bounded daily work, preference/listing checks, queue priority, exclusions, response/source metrics, and CSV export."}
+  ],
+  "verification": {
+    "planning_files": "passed_json_and_reference_validation",
+    "runtime_checks": "passed",
+    "commands": ["APPLYPILOT_RUN_PLAYWRIGHT=1 python scripts/agent_verify.py", "node --check src/applypilot/web/workspace.js", "ruff check new command-center Python modules --select F", "git diff --check -- intended tracked files"],
+    "full_gate": "233 tests passed with Playwright enabled; 7 AI regression checks and 13 formal evaluation cases passed; compileall passed",
+    "browser_checks": "Desktop/tablet/mobile width and full-width editors, certification add/delete, embedded settings, multi-page PDF section extraction, and classic multi-user clickthrough",
+    "additional_checks": "JavaScript syntax and Python F-rule lint passed",
+    "live_integrations": "Not run against real AI billing, mailbox accounts, or employer submissions; mocked provider/OAuth contracts and temporary-workspace HTTP/browser checks used."
+  },
+  "pre_state": "ops/implementations/20261002-application-command-center/pre_state.json",
+  "post_state": "ops/implementations/20261002-application-command-center/post_state.json",
+  "baseline_note": "Pre-state was captured by Windows Python; its Git fields were unavailable because of UNC ownership checks. WSL git status confirmed the existing search-config edits, .env:Zone.Identifier and '=' before runtime changes. These existing user changes were not edited.",
+  "setup_dependencies": [
+    "Rebuild/restart the existing Docker deployment to serve the new code and dependencies",
+    "Configure the chosen AI API provider for live assistant/tailoring requests",
+    "Register Gmail/Outlook OAuth applications and authorize each mailbox for live synchronization"
+  ],
+  "follow_ups": [
+    {"phase": "2", "owner": "CV Studio", "status": "pending", "task": "Richer version diff, configurable section ordering/page-length preferences, and document-history workspace transfer portability"},
+    {"phase": "5", "owner": "AI integration", "status": "pending", "task": "Configurable dollar-cost estimates and live reviewer comparisons; task-specific routing delivered by implementation 20261002-task-ai-routing"},
+    {"phase": "6", "owner": "communications", "status": "pending", "task": "Opt-in high-confidence automatic updates, historical email backfills, and additional notification channels; reviewed AI classification/date extraction delivered by 20261002-smart-evidence-inbox"},
+    {"phase": "7", "owner": "analytics/preferences", "status": "pending", "task": "Salary/sponsorship preference rules, block-reason preference suggestions, date/cohort analytics, and resume-version outcome associations"}
+  ]
+}

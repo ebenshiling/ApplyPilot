@@ -1,0 +1,24 @@
+{
+  "implementation_id":"20261005-nhs-evidence-guidance",
+  "status":"completed",
+  "owner":"ai-agent",
+  "phases":[
+    {"name":"official-source research","status":"completed","notes":"NHSBSA applicant page and supporting-evidence PDF (August 2026) extracted; NHS Constitution, UHB application portal, Leeds digital careers, Student/Skilled Worker/Health and Care Worker guidance checked."},
+    {"name":"navigation and preview","status":"completed","notes":"Persistent accessible collapse/expand with compact desktop rail and mobile hiding; live debounced current-control preview with stale-response protection and stage-specific discovery counts."},
+    {"name":"both writing Studios","status":"completed","notes":"Complete person specification, employer values/instructions/AI rule, selected field/priority, character limits, reviewed direct/transferable/gap examples and source types, optional STAR fields and confirmed-evidence separation. Exact credential names and negative-evidence checks improved."},
+    {"name":"walkthrough","status":"completed","notes":"docs/NHS_APPLICATION_WORKFLOW.md plus in-page quickstart/planner explanations cover Pipeline, Statement, Cover, model inputs, fine-tuning decisions and international-student targeting."},
+    {"name":"verification and deployment","status":"completed","notes":"397 tests, compile, 7 regression checks and 13 formal cases passed; updated image built and running container code updated/restarted through Docker directly with unchanged mounts/environment."}
+  ],
+  "verification":{
+    "result":"passed",
+    "tests":"397 passed with Playwright enabled in 507.55 seconds",
+    "commands":["APPLYPILOT_RUN_PLAYWRIGHT=1 python scripts/agent_verify.py","ruff check changed writer/planner modules and new tests --select F","docker compose build applypilot","docker stop/cp/start deployment preserving existing container configuration","production deployment_check.py --phase before/after; GET /health and /assets/nhs-planner.js"],
+    "production":{"health":"HTTP 200, ok=true, multi_user=true","planner_asset":"HTTP 200","counts_preserved":{"jobs":14,"cc_documents":4,"cc_messages":99},"protected_inputs":"All 13 profile/search/default/variant hashes matched immediately before and after deployment","writing_routes":"Existing gpt-6-luna / low / 2048 headroom retained"},
+    "paid_inference":"None; all model tests mocked",
+    "deployment_note":"WSL exec/Git runner timed out while Docker and UNC files remained available. New image built using host Docker; code and implementation files copied to the existing stopped container, then restarted, retaining exact Linux bind mounts and environment. No WSL shutdown or user configuration rewrite.",
+    "git_check_note":"Scoped Git whitespace check unavailable through stalled WSL; Windows Git could not identify the WSL repo. Compilation, lint, full gate and production smoke passed."
+  },
+  "guidance_limits":["No universal NHS AI-use rule established; employer instructions control the workflow.","5,000 characters is the NHSBSA illustrated evidence-box limit, not every employer's limit.","Planner checks and automated validation are not NHS panel scores or exhaustive factual verification.","No visa eligibility or sponsorship is inferred from an NHS employer name; official rules and vacancy confirmation are separate."],
+  "pre_state":"ops/implementations/20261005-nhs-evidence-guidance/pre_state.json",
+  "post_state":"ops/implementations/20261005-nhs-evidence-guidance/post_state.json"
+}

@@ -1,0 +1,6 @@
+{
+  "implementation_id":"20261009-global-search-visual-insights",
+  "title":"Country/state/city-aware discovery and explanatory visual Insights",
+  "owner":"ai-agent",
+  "steps":["Audit saved search roundtrip, country routing and legacy location filters", "Add structured locations and per-target provider countries while preserving legacy searches and advanced metadata", "Make preview show effective locations, board support and source geography", "Build responsive interactive Insights charts with accurate unique-record counts, temporal activity and explanatory drill-downs", "Verify mixed-country routing, resume/priority roundtrip, chart counts/empty states/accessibility and preserved exports", "Deploy together with verified direct-source recovery when production work is idle"]
+}

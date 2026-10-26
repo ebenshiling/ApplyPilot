@@ -1,0 +1,11 @@
+{
+  "change_id": "20261007-assisted-browser",
+  "scope": ["application submission", "authenticated dashboard", "browser sessions"],
+  "failure_modes": [
+    {"mode":"Submission without current approval","cause":"Ambiguous next button or stale review","effect":"Unreviewed employer application","severity":10,"detection":"Synthetic multi-page and stale approval tests","mitigation":"Exact navigation allowlist, default final-action guard, page-bound single-use approval"},
+    {"mode":"Cross-workspace browser access","cause":"Shared session registry or profile data","effect":"Personal data exposure","severity":10,"detection":"Ownership tests","mitigation":"Resolved workspace ownership checks on every endpoint; isolated ephemeral Chromium contexts; no exposed CDP/VNC port"},
+    {"mode":"False confirmation or duplicate submit","cause":"Existing success text or timeout after click","effect":"Incorrect record or duplicate application","severity":9,"detection":"Confirmation and timeout tests","mitigation":"Reject pre-existing confirmation; one final attempt; persist submitting before click and uncertain on interruption; capture reference and evidence"},
+    {"mode":"Invented answers or wrong upload","cause":"Untrusted page instructions and ambiguous file fields","effect":"Incorrect application evidence","severity":9,"detection":"Planner and upload tests","mitigation":"Only saved values/verified answers/reviewed statement; snapshot approved files; pause on ambiguous fields; preserve candidate edits"},
+    {"mode":"Orphaned worker","cause":"Browser failure or service restart","effect":"Locked application or leaked browser","severity":7,"detection":"Lifecycle tests","mitigation":"Idle expiry, stop cleanup, durable session status and conservative restart recovery"}
+  ]
+}

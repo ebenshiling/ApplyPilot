@@ -1,0 +1,12 @@
+{
+  "implementation_id":"20261009-browser-interaction-latency",
+  "title":"Measured low-latency mouse navigation and form interaction",
+  "owner":"ai-agent",
+  "steps":[
+    "Measure click-to-execution and click-to-visible-frame latency on a realistic isolated form, including multiple iframes and slow field reads",
+    "Remove blocking focus/audit/control waits from the interactive input path while preserving FIFO barriers and action acknowledgement",
+    "Optimize image delivery, mouse semantics and browser event pumping; expose useful end-to-end performance measurements",
+    "Verify click, drag, double-click, scroll, text entry, navigation, stale-page protections and final approval; compare baseline/updated measurements",
+    "Run required verification and deploy when production work is idle"
+  ]
+}

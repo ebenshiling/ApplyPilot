@@ -1,0 +1,24 @@
+{
+  "implementation_id":"20261019-nz-search-first",
+  "status":"completed_deployed",
+  "phase":"search_first_journey_verified_in_current_app",
+  "root_cause":{"automatic_runs_started":0,"ready_selected_sources":0,"disabled_button_cursor":"wait","report":"before_check.json"},
+  "delivered":["Role/location search without employer/CV/campaign/source setup","Explicit SEEK/Indeed/LinkedIn external search-result links","Search → Review jobs → Prepare → Apply navigation","URL/title-only vacancy save with optional employer/details","Collapsed preparation, employer checks and advanced import settings","Owned run status, stop, terminal results and finite polling without automatic restarts"],
+  "verification":[
+    {"suite":"Focused search/native-status/browser cases plus existing capture workflow","result":"23 passed","seconds":114.76},
+    {"command":"python scripts/agent_verify.py","result":"full run: 841 passed, 62 skipped; one legacy employer-panel test needed its new optional-section opening step","seconds":725.44,"production_code_changed_after_full_run":false},
+    {"command":"python scripts/agent_verify.py with PYTEST_ADDOPTS=--last-failed --last-failed-no-failures=none","result":"passed: corrected legacy employer UI test 1/1; all full-run failures resolved","compile":"passed","strict_ai":"7/7","formal_dataset":"13/13","combined_verified_cases":842},
+    {"suite":"Browser run lifecycle","result":"passed","cases":["double click starts only once","completed state stops polling","active status pauses after 30 checks","three transport errors stop polling","no run starts from status reads"]},
+    {"suite":"Node syntax checks","result":"passed","files":["nz-search.js","nz-discovery.js","workspace.js"]},
+    {"command":"docker compose build --quiet applypilot then docker compose up -d --no-build applypilot","result":"passed"},
+    {"suite":"Authenticated deployed Chromium search-first smoke and visual review","result":"passed","report":"deployment_check.json","search_http_status":200,"board_links":3,"automatic_start_requests":0,"employer_required":false,"nz_jobs_unchanged":0,"uk_records_preserved":98,"configuration_unchanged":true,"javascript_errors":0}
+  ],
+  "scope":"External board links open search pages in the candidate's own browser; no board scraping or imported vacancy results are claimed. Existing permitted direct/Workday imports remain under Advanced.",
+  "candidate_data_modified":false,
+  "verification_sessions":"temporary sessions revoked",
+  "live_applications_submitted":false,
+  "schema_migrations_added":false,
+  "backup":"backup.json",
+  "handoff":"docs/NZ_WORKSPACE.md",
+  "commit_push":"not requested or performed"
+}

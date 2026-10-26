@@ -1,0 +1,27 @@
+{
+  "captured_at": "2026-10-16T13:51:56.675541+00:00",
+  "python": {
+    "version": "3.11.9",
+    "executable": "\\\\wsl.localhost\\Ubuntu\\home\\swazy364\\code\\ApplyPilot\\.ci311\\Scripts\\python.exe"
+  },
+  "git": {
+    "head": null,
+    "branch": null,
+    "dirty": false
+  },
+  "git_probe_note": "Windows Git could not resolve the Linux-linked worktree. The null fields and dirty=false above are not a trustworthy Git baseline. Native WSL Git verified checkpoint 18f8888 on feat/nz-phase1-country-foundation; see plan.json and the implementation handoff.",
+  "repo": {
+    "root": "C:\\Users\\swazy\\AppData\\Local\\Temp\\opencode\\applypilot-nz-phase1"
+  },
+  "key_files": {
+    "pyproject.toml": true,
+    "README.md": true,
+    "src/applypilot/view.py": true,
+    "src/applypilot/dashboard_server.py": true,
+    "tests": true
+  },
+  "env": {
+    "APPLYPILOT_DIR": "C:\\Users\\swazy\\AppData\\Local\\Temp\\opencode\\applypilot-nz-phase1-test-data",
+    "APPLYPILOT_SEARCHES_PATH": null
+  }
+}

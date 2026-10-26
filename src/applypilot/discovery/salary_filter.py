@@ -160,3 +160,92 @@ def salary_text_ok(text: str | None, pref: dict[str, Any] | None) -> bool:
     low = _annualize(nums[0], interval)
     high = _annualize(nums[1], interval) if len(nums) > 1 else low
     return _bounds_overlap(low, high, pref)
+
+
+def normalize_nz_salary(text, fields=None, convention=None):
+    """Keep evidence and units; a bare dollar sign is not universally NZD."""
+    from decimal import Decimal, InvalidOperation
+    fields = fields or {}
+    raw = str(text or "")[:3000]
+    lower = raw.casefold()
+    def amount(value):
+        try:
+            value = str(value).strip().lower().replace(",", "")
+            number = Decimal(value.rstrip("k")) * (1000 if value.endswith("k") else 1)
+            return float(number) if number.is_finite() and 0 < number <= 1e12 else None
+        except (InvalidOperation, ValueError, TypeError):
+            return None
+    currencies = (("NZD", r"\bnzd\b|nz\s*\$"), ("AUD", r"\baud\b|au\s*\$"),
+                  ("USD", r"\busd\b|us\s*\$"), ("GBP", r"\bgbp\b|£"), ("EUR", r"\beur\b|€"))
+    mentioned = [code for code, pattern in currencies if re.search(pattern, lower)]
+    currency = str(fields.get("currency") or "").upper()
+    currency = currency if currency in {code for code, _ in currencies} else None
+    basis = "provider" if currency else "explicit_text" if len(mentioned) == 1 else "unknown"
+    currency = currency or (mentioned[0] if len(mentioned) == 1 else None)
+    if not currency and "$" in raw and not mentioned and convention:
+        currency, basis = convention.get("currency"), "source_convention"
+    interval_text = str(fields.get("interval") or "").lower()
+    aliases = {"yearly": "year", "annually": "year", "annual": "year", "monthly": "month", "weekly": "week", "daily": "day", "hourly": "hour"}
+    interval = aliases.get(interval_text, interval_text if interval_text in _INTERVAL_MULTIPLIERS else None)
+    if not interval:
+        for name, pattern in (("hour", r"per hour|/\s*(?:hr|hour)\b|hourly"), ("day", r"per day|/\s*day\b|daily"),
+                              ("week", r"per week|/\s*week\b|weekly"), ("month", r"per month|/\s*month\b|monthly"),
+                              ("year", r"per annum|p\.?a\.?\b|per year|/\s*(?:yr|year)\b|annual|yearly")):
+            if re.search(pattern, lower):
+                interval = name
+                break
+    low, high = amount(fields.get("min_amount")), amount(fields.get("max_amount"))
+    if low is None and high is None:
+        principal = re.split(r"\+|\binclud(?:es|ing)\b|\bkiwisaver\b|\bhours?\b", raw, maxsplit=1, flags=re.I)[0]
+        tokens = list(re.finditer(r"\d[\d,]*(?:\.\d+)?\s*[kK]?", principal))
+        if tokens:
+            low = amount(tokens[0].group(0).replace(" ", ""))
+            if len(tokens) > 1 and re.fullmatch(r"\s*(?:-|–|—|to)\s*(?:(?:NZD|NZ\$|AUD|USD|GBP|EUR|\$|£|€)\s*)?", principal[tokens[0].end():tokens[1].start()], re.I):
+                high = amount(tokens[1].group(0).replace(" ", ""))
+                if "k" in tokens[1].group(0).lower() and "k" not in tokens[0].group(0).lower() and low is not None and low < 1000:
+                    low *= 1000
+    if low is None:
+        low = high
+    high = high if high is not None else low
+    if low is not None and high is not None and low > high:
+        low, high = high, low
+    compensation_basis = next((key for key in ("package", "net", "gross", "base") if re.search(r"\b" + key + r"\b", lower)), "unknown")
+    kiwi = "excluded" if re.search(r"(?:excl|excluding|without|plus|\+)\s*(?:employer\s+)?kiwisaver", lower) else "included" if re.search(r"(?:incl|includes|including).*kiwisaver", lower) else "unknown"
+    conflict = bool(fields.get("currency") and mentioned and mentioned != [currency])
+    status = "parsed" if low is not None and currency and interval and len(mentioned) <= 1 and not conflict else "unknown"
+    hours = fields.get("hours_per_week")
+    if not hours:
+        match = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)\s*(?:per\s*week|/\s*week|weekly)", lower)
+        hours = amount(match.group(1)) if match else None
+    return {"raw": raw, "min": low, "max": high, "currency": currency, "currency_basis": basis,
+            "currency_evidence": convention.get("evidence") if basis == "source_convention" else None,
+            "interval": interval, "basis": compensation_basis, "kiwisaver": kiwi, "parse_status": status,
+            "stated_hours_per_week": hours, "annualisation_basis": None}
+
+
+def nz_salary_ok(salary, preference=None):
+    """Reject only a known comparable range. No default FX or 2080-hour rule."""
+    if not preference or salary.get("parse_status") != "parsed":
+        return True
+    if salary.get("currency") != str(preference.get("currency") or preference.get("salary_currency") or "NZD").upper():
+        return True
+    target_basis = preference.get("basis", "unknown")
+    if target_basis == "unknown" or salary.get("basis", "unknown") != target_basis:
+        return True
+    low, high = salary["min"], salary["max"]
+    period = preference.get("interval", "year")
+    if salary.get("interval") != period:
+        conversion = preference.get("annualisation") or {}
+        factor = conversion.get("factor")
+        if period != "year" or conversion.get("confirmed") is not True or isinstance(factor, bool) or not isinstance(factor, (int, float)) or not 0 < factor <= 10000 or not str(conversion.get("evidence") or "").strip():
+            return True
+        low, high = low * factor, high * factor
+        salary["annualisation_basis"] = {"factor": factor, "evidence": str(conversion["evidence"])[:1000], "source": "user-confirmed comparison assumption"}
+    try:
+        minimum = float(preference.get("min", preference.get("salary_range_min"))) if preference.get("min", preference.get("salary_range_min")) is not None else None
+        maximum = float(preference.get("max", preference.get("salary_range_max"))) if preference.get("max", preference.get("salary_range_max")) is not None else None
+        if (minimum is not None and not 0 <= minimum <= 1e12) or (maximum is not None and not 0 <= maximum <= 1e12):
+            return True
+    except (ValueError, TypeError):
+        return True
+    return _bounds_overlap(low, high, {"min": minimum, "max": maximum})

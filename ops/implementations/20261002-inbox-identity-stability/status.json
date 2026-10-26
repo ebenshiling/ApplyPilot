@@ -1,0 +1,22 @@
+{
+  "implementation_id": "20261002-inbox-identity-stability",
+  "status": "completed",
+  "owner": "ai-agent",
+  "phases": [
+    {"name": "diagnosis", "status": "completed", "notes": "Pairs 1/751 and 5/755 have equal complete display text after removing newly appended link URLs. One original is accepted; its new copy is review. Receipt and rejection remain separate emails."},
+    {"name": "identity_and_reconciliation", "status": "completed", "notes": "Additive canonical pointers and identity aliases, exact unique legacy/native display comparison, authoritative decision preservation and retained audit copies; distinct deliveries/outcomes/conflicting decisions remain separate."},
+    {"name": "polling_and_pagination", "status": "completed", "notes": "Unchanged inbox/mailbox responses preserve DOM nodes, expanded source state and page position; offsets clamp after removal; explicit page count and normal disabled-button cursor."},
+    {"name": "verification_and_deployment", "status": "completed", "notes": "Full agent gate passed 324 tests with Playwright, compilation, 7 AI regression checks and 13 formal cases; scoped lint and JS syntax passed. Docker rebuilt/recreated and live Gmail sync verified the recorded rejection did not resurface."}
+  ],
+  "verification": {
+    "result": "passed",
+    "tests": "324 passed",
+    "commands": ["APPLYPILOT_RUN_PLAYWRIGHT=1 python scripts/agent_verify.py", "ruff check identity/inbox/mail modules and tests --select F", "node --check src/applypilot/web/workspace.js", "docker compose up -d --build --force-recreate applypilot", "GET /health and live Gmail sync identity/decision checks"],
+    "deployed_pairs": [{"duplicate_id": 751, "original_id": 1, "original_status": "accepted"}, {"duplicate_id": 755, "original_id": 5, "original_status": "review"}],
+    "retained_audit_copies": 11,
+    "live_sync_messages_processed": 50,
+    "paid_inference": "No AI inference used for verification"
+  },
+  "pre_state": "ops/implementations/20261002-inbox-identity-stability/pre_state.json",
+  "post_state": "ops/implementations/20261002-inbox-identity-stability/post_state.json"
+}

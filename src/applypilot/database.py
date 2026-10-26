@@ -16,6 +16,16 @@ from applypilot.config import DB_PATH
 # Thread-local connection storage — each thread gets its own connection
 # (required for SQLite thread safety with parallel workers)
 _local = threading.local()
+_schema_lock = threading.RLock()
+_ready_workspaces = {}
+
+
+def _file_identity(path):
+    try:
+        info = Path(path).stat()
+        return info.st_dev, info.st_ino
+    except OSError:
+        return None
 
 
 def get_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
@@ -48,6 +58,9 @@ def get_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA busy_timeout=10000")
     conn.row_factory = sqlite3.Row
     _local.connections[path] = conn
+    if not hasattr(_local, "connection_identities"):
+        _local.connection_identities = {}
+    _local.connection_identities[path] = _file_identity(path)
     return conn
 
 
@@ -58,6 +71,32 @@ def close_connection(db_path: Path | str | None = None) -> None:
         conn = _local.connections.pop(path, None)
         if conn is not None:
             conn.close()
+        if hasattr(_local, "connection_identities"):
+            _local.connection_identities.pop(path, None)
+
+
+def workspace_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
+    """Open an initialized workspace without rerunning DDL on every HTTP read.
+
+    Only schema readiness is remembered, never rows or candidate/approval data.
+    Replaced files and changed SQLite schema versions trigger initialization.
+    Explicit init_db calls retain their original migration behavior.
+    """
+    path = str(db_path or DB_PATH)
+    key = str(Path(path).resolve())
+    # Opening the first connections also sets WAL mode: serialize that step,
+    # not just the later migrations, so simultaneous cold requests cannot race.
+    with _schema_lock:
+        identity = _file_identity(path)
+        if identity is None:
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+        if getattr(_local, "connection_identities", {}).get(path) not in (None, identity):
+            close_connection(path)
+        conn = get_connection(path)
+        stamp = (_file_identity(path), conn.execute("PRAGMA schema_version").fetchone()[0])
+        if _ready_workspaces.get(key) == stamp:
+            return conn
+        return init_db(path)
 
 
 def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
@@ -177,6 +216,24 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     # Run migrations for any columns added after initial schema
     ensure_columns(conn)
 
+    from applypilot.country_context import init_schema as init_country_schema
+    init_country_schema(conn)
+    from applypilot.apply.authority import init_schema as init_authority_schema
+    init_authority_schema(conn)
+    from applypilot.nz_evidence import init_schema as init_nz_evidence_schema
+    init_nz_evidence_schema(conn)
+
+    from applypilot.command_center import init_schema
+    from applypilot.pipeline_store import init_schema as init_pipeline_schema
+    init_pipeline_schema(conn)
+    from applypilot.cv_library import init_schema as init_cv_schema
+    init_cv_schema(conn)
+    from applypilot.writing_studio import init_schema as init_writing_schema
+    init_writing_schema(conn)
+
+    init_schema(conn)
+
+    _ready_workspaces[str(Path(path).resolve())] = (_file_identity(path), conn.execute("PRAGMA schema_version").fetchone()[0])
     return conn
 
 
@@ -292,6 +349,18 @@ def is_url_blocked(
     if not base:
         return False
 
+    if conn is None:
+        conn = get_connection()
+    from applypilot.command_center import blocked
+
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name='cc_retired_jobs'").fetchone():
+        if conn.execute("SELECT 1 FROM cc_retired_jobs WHERE job_url=? OR canonical_url=?", (str(url or ""), base)).fetchone():
+            return True
+
+    company_row = conn.execute("SELECT company FROM jobs WHERE url=?", (url,)).fetchone()
+    if blocked(conn, str(url or ""), company_row[0] if company_row else None):
+        return True
+
     if blocked_prefixes is not None:
         b = base.lower()
         for p in blocked_prefixes:
@@ -315,11 +384,14 @@ def block_job_by_id(job_id: int, reason: str = "user_deleted") -> int:
     """Archive a job (mark skipped) and block its URLs."""
     conn = get_connection()
     row = conn.execute(
-        "SELECT url, application_url FROM jobs WHERE rowid = ?",
+        "SELECT url, application_url, country_code FROM jobs WHERE rowid = ?",
         (job_id,),
     ).fetchone()
     if not row:
         return 0
+
+    from applypilot.country_context import check_job, workspace_for_connection
+    check_job(dict(row), workspace_for_connection(conn), preparation=True)
 
     conn.execute("BEGIN IMMEDIATE")
     try:
@@ -347,6 +419,10 @@ def block_job_by_id(job_id: int, reason: str = "user_deleted") -> int:
 # This is the single source of truth. Adding a column here is all that's needed
 # for it to appear in both new databases and migrated ones.
 _ALL_COLUMNS: dict[str, str] = {
+    "vacancy_metadata": "TEXT",
+    "employer_id": "TEXT",
+    "immigration_assessment": "TEXT",
+    "country_code": "TEXT CHECK(country_code IS NULL OR country_code IN ('GB','NZ'))",
     # Discovery
     "url": "TEXT PRIMARY KEY",
     "title": "TEXT",
@@ -376,9 +452,28 @@ _ALL_COLUMNS: dict[str, str] = {
     "score_confidence": "REAL",
     "score_reasoning": "TEXT",
     "scored_at": "TEXT",
+    "score_status": "TEXT",
+    "score_attempts": "INTEGER DEFAULT 0",
+    "score_error": "TEXT",
+    "score_retry_at": "TEXT",
+    "score_fingerprint": "TEXT",
+    "score_provider": "TEXT",
+    "score_model": "TEXT",
+    "resume_route": "TEXT",
+    "resume_route_override": "TEXT",
+    "document_requirements": "TEXT",
+    "campaign_id": "TEXT",
+    "source_id": "TEXT",
+    "source_provenance": "TEXT",
+    "pdf_status": "TEXT",
+    "pdf_error": "TEXT",
+    "pdf_attempts": "INTEGER DEFAULT 0",
     # Tailoring
     "tailored_resume_path": "TEXT",
     "tailored_at": "TEXT",
+    "tailor_input_hash": "TEXT",
+    "tailor_provider": "TEXT",
+    "tailor_model": "TEXT",
     "tailor_attempts": "INTEGER DEFAULT 0",
     "tailor_status": "TEXT",
     "tailor_failure_detail": "TEXT",
@@ -388,10 +483,14 @@ _ALL_COLUMNS: dict[str, str] = {
     # Supporting statement
     "supporting_statement_path": "TEXT",
     "supporting_statement_at": "TEXT",
+    "statement_input_hash": "TEXT",
     "statement_attempts": "INTEGER DEFAULT 0",
+    "statement_status": "TEXT",
+    "statement_error": "TEXT",
     # Cover letter
     "cover_letter_path": "TEXT",
     "cover_letter_at": "TEXT",
+    "cover_input_hash": "TEXT",
     "cover_attempts": "INTEGER DEFAULT 0",
     "cover_letter_status": "TEXT",
     "cover_letter_failure_detail": "TEXT",
@@ -529,17 +628,22 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
 
     # "Ready to apply" means the job has application link (or at least a listing URL)
     # and the documents needed to apply.
-    stats["ready_to_apply"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs "
+    ready_rows = conn.execute(
+        "SELECT * FROM jobs "
         "WHERE tailored_resume_path IS NOT NULL "
-        "AND cover_letter_path IS NOT NULL "
         "AND applied_at IS NULL "
         "AND COALESCE(NULLIF(application_url, ''), NULLIF(url, '')) IS NOT NULL"
-    ).fetchone()[0]
+    ).fetchall()
+    from applypilot.eligibility import packet
+    stats["ready_to_apply"] = sum(packet(conn, dict(row))["ready"] for row in ready_rows)
 
     return stats
 
 
+from applypilot.discovery_scope import storage_batch
+
+
+@storage_batch
 def store_jobs(conn: sqlite3.Connection, jobs: list[dict], site: str, strategy: str) -> tuple[int, int]:
     """Store discovered jobs, skipping duplicates by URL.
 
@@ -557,6 +661,9 @@ def store_jobs(conn: sqlite3.Connection, jobs: list[dict], site: str, strategy: 
     existing = 0
 
     for job in jobs:
+        from applypilot.discovery_scope import accepts_title,limit_reached,record_new
+        if limit_reached():break
+        if not accepts_title(job.get('title')):continue
         url = job.get("url")
         if not url:
             continue
@@ -578,9 +685,12 @@ def store_jobs(conn: sqlite3.Connection, jobs: list[dict], site: str, strategy: 
                     pass
             continue
         try:
-            conn.execute(
-                "INSERT INTO jobs (url, title, company, search_query, salary, description, location, site, strategy, discovered_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            from applypilot.country_context import ingestion_country
+            country = ingestion_country(job)
+            if limit_reached():continue
+            cursor=conn.execute(
+                "INSERT INTO jobs (url, title, company, search_query, salary, description, location, site, strategy, discovered_at, country_code) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     canonical or url,
                     job.get("title"),
@@ -592,8 +702,11 @@ def store_jobs(conn: sqlite3.Connection, jobs: list[dict], site: str, strategy: 
                     site,
                     strategy,
                     now,
+                    country,
                 ),
             )
+            if cursor.rowcount!=1:continue
+            record_new(conn,canonical or url)
             new += 1
         except sqlite3.IntegrityError:
             existing += 1
@@ -637,14 +750,21 @@ def get_jobs_by_stage(
         "tailored": "tailored_resume_path IS NOT NULL",
         "pending_apply": (
             "tailored_resume_path IS NOT NULL "
-            "AND cover_letter_path IS NOT NULL "
             "AND applied_at IS NULL "
             "AND COALESCE(NULLIF(application_url, ''), NULLIF(url, '')) IS NOT NULL"
         ),
         "applied": "applied_at IS NOT NULL",
+        "statement": "fit_score >= ? AND tailored_resume_path IS NOT NULL AND full_description IS NOT NULL AND (supporting_statement_path IS NULL OR supporting_statement_path='') AND COALESCE(statement_attempts,0)<5",
+        "cover": "fit_score >= ? AND tailored_resume_path IS NOT NULL AND full_description IS NOT NULL AND (cover_letter_path IS NULL OR cover_letter_path='') AND COALESCE(cover_attempts,0)<5",
+        "pending_pdf": "tailored_resume_path IS NOT NULL",
     }
 
     where = conditions.get(stage, "1=1")
+    columns_available = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
+    if stage == "pending_score" and "score_attempts" in columns_available:
+        where = "full_description IS NOT NULL AND (fit_score IS NULL OR (fit_score=0 AND score_reasoning LIKE '%LLM error:%')) AND COALESCE(score_attempts,0)<5 AND (score_retry_at IS NULL OR score_retry_at <= ?)"
+    if stage == "pending_pdf" and "pdf_attempts" in columns_available:
+        where += " AND COALESCE(pdf_attempts,0)<5"
 
     # If the user explicitly selected jobs, selection should override score
     # thresholds for downstream stages.
@@ -668,16 +788,23 @@ def get_jobs_by_stage(
         elif stage == "pending_apply":
             where = (
                 "tailored_resume_path IS NOT NULL "
-                "AND cover_letter_path IS NOT NULL "
                 "AND applied_at IS NULL "
                 "AND COALESCE(NULLIF(application_url, ''), NULLIF(url, '')) IS NOT NULL"
             )
+    if stage == "pending_tailor" and "tailor_input_hash" in columns_available:
+        where = where.replace("tailored_resume_path IS NULL", "(tailored_resume_path IS NULL OR COALESCE(tailor_input_hash,'')!=COALESCE(score_fingerprint,''))")
+    for document_stage, field in (("cover", "cover_letter_path"), ("statement", "supporting_statement_path")):
+        if stage == document_stage and f"{stage}_input_hash" in columns_available:
+            where = where.replace(f"{field} IS NULL", f"({field} IS NULL OR COALESCE({stage}_input_hash,'')!=COALESCE(tailor_input_hash,''))")
     params: list = []
 
     if "?" in where and min_score is not None:
         params.append(min_score)
     elif "?" in where:
-        params.append(7)  # default min_score
+        if stage != "pending_score":
+            params.append(7)  # default min_score
+    if stage == "pending_score" and "score_attempts" in columns_available:
+        params = [datetime.now(timezone.utc).isoformat()]
 
     if min_score is not None and "fit_score" not in where and stage in ("scored", "tailored", "applied"):
         where += " AND fit_score >= ?"
@@ -686,8 +813,18 @@ def get_jobs_by_stage(
     if selected_only:
         where += " AND apply_status = 'selected'"
 
+    if stage in {"pending_tailor", "pending_apply", "statement", "cover"} and conn.execute("SELECT 1 FROM sqlite_master WHERE name='cc_job_meta'").fetchone():
+        where += " AND NOT EXISTS (SELECT 1 FROM cc_job_meta m WHERE m.job_url=jobs.url AND m.visibility!='active')"
+
+    if "country_code" in columns_available:
+        from applypilot.country_context import current
+        where += " AND country_code='NZ'" if current() and current().country_code=="NZ" else " AND (country_code IS NULL OR country_code='GB')"
+    from applypilot.discovery_scope import processing_where
+    scoped=processing_where()
+    if scoped:where+=' AND '+scoped
     query = f"SELECT rowid AS job_id, * FROM jobs WHERE {where} ORDER BY fit_score DESC NULLS LAST, discovered_at DESC"
-    if limit > 0:
+    downstream = stage in {"pending_tailor", "pending_apply", "statement", "cover"}
+    if limit > 0 and not downstream:
         query += " LIMIT ?"
         params.append(limit)
 
@@ -696,5 +833,17 @@ def get_jobs_by_stage(
     # Convert sqlite3.Row objects to dicts
     if rows:
         columns = rows[0].keys()
-        return [dict(zip(columns, row)) for row in rows]
+        jobs = [dict(zip(columns, row)) for row in rows]
+        from applypilot.country_context import in_operation_queue
+        jobs = [job for job in jobs if in_operation_queue(job)]
+        if downstream:
+            from applypilot.command_center import blocked, preference_exclusions
+
+            jobs = [job for job in jobs if not blocked(conn, job["url"], job.get("company")) and not preference_exclusions(conn, job)]
+            if stage == "pending_apply":
+                from applypilot.eligibility import packet
+                jobs = [job for job in jobs if packet(conn, job)["ready"]]
+            if limit > 0:
+                jobs = jobs[:limit]
+        return jobs
     return []

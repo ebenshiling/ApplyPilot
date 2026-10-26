@@ -1,0 +1,13 @@
+{
+  "change_id":"20261009-direct-source-recovery",
+  "scope":["dashboard","discovery","workspace configuration"],
+  "failure_modes":[
+    {"mode":"Invalid search source accepted/tested","cause":"Different validation in save and preview","effect":"Homepage queried without role/location and unusable discovery","severity":7,"detection":"Indeed homepage and template tests","mitigation":"Common validation; explicit corrected-template action and inline field guidance"},
+    {"mode":"Misleading preview failure","cause":"HTTP/DNS/timeout exceptions handled as provider errors","effect":"Candidate cannot recover or thinks saving failed","severity":7,"detection":"HTTP 403/429/5xx and network tests","mitigation":"Categorized sanitized source errors; distinguish saved configuration from read-only preview result"},
+    {"mode":"Config loss or cross-workspace changes","cause":"Malformed YAML, stale stable IDs or whole-form redraw","effect":"Source edits lost or other sources overwritten","severity":9,"detection":"YAML preservation, duplicate/ID and UI tests","mitigation":"Validated mapping/list catalogs, atomic writes, stable IDs and retained input on failure"},
+    {"mode":"Preview writes jobs or fetches private redirect","cause":"Extraction coupled to persistence or URL validation bypass","effect":"Unexpected data/network access","severity":9,"detection":"No-write and private redirect tests","mitigation":"Read-only bounded extraction and existing public URL validation at every redirect"}
+  ],
+  "mitigation_status":"Implemented and verified in combined 588-test release with source-specific live 400/403 response checks",
+  "engineering_follow_ups":[],
+  "external_site_behavior":"Indeed blocks the HTTP-only preview with 403; reported accurately and does not prevent saving a valid source"
+}

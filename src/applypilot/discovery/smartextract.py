@@ -14,6 +14,7 @@ placeholders replaced from the user's search configuration.
 
 import json
 import logging
+from contextvars import copy_context
 import os
 import re
 import sqlite3
@@ -31,10 +32,12 @@ from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 
 from applypilot import config
+from applypilot.country_context import ingestion_country
 from applypilot.config import CONFIG_DIR
 from applypilot.database import get_stats, init_db, normalize_url
 from applypilot.discovery.salary_filter import load_salary_preference, salary_text_ok
 from applypilot.llm import get_client, structured_json
+from applypilot.ai_routing import routed_task
 
 log = logging.getLogger(__name__)
 
@@ -255,6 +258,10 @@ def _load_location_filter(search_cfg: dict | None = None):
     # Backward/forward compatible config:
     # - old: location_accept / location_reject_non_remote
     # - new: location.accept_patterns / location.reject_patterns
+    from applypilot.geography import filter_config
+    selected=filter_config(search_cfg)
+    if selected is not None:
+        return selected
     accept = search_cfg.get("location_accept", []) or []
     reject = search_cfg.get("location_reject_non_remote", []) or []
 
@@ -293,6 +300,9 @@ def _looks_like_uk_location(location: str | None) -> bool:
 
 def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> bool:
     """Check if a job location passes the user's location filter."""
+    from applypilot.geography import SelectedLocations
+    if isinstance(accept,SelectedLocations):
+        return accept.matches(location)
     if not location:
         return True
     loc = location.lower()
@@ -426,7 +436,8 @@ def _configured_locations(search_cfg: dict) -> list[str]:
     locations: list[str] = []
     for item in locations_cfg:
         if isinstance(item, dict):
-            value = _normalize_space(item.get("location"))
+            from applypilot.geography import normalize_location
+            value = _normalize_space(normalize_location(item,search_cfg).get("location"))
         else:
             value = _normalize_space(item)
         if value:
@@ -635,14 +646,13 @@ def _has_captcha_signal(html: str | None) -> bool:
 
 def load_sites() -> list[dict]:
     """Load scraping target sites from config/sites.yaml."""
-    path = CONFIG_DIR / "sites.yaml"
-    if not path.exists():
-        log.warning("sites.yaml not found at %s", path)
-        return []
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    return data.get("sites", [])
+    return config.load_sites_config().get("sites", [])
 
 
+from applypilot.discovery_scope import storage_batch,accepts_title,limit_reached,record_new
+
+
+@storage_batch
 def _store_jobs_filtered(
     conn: sqlite3.Connection,
     jobs: list[dict],
@@ -655,6 +665,13 @@ def _store_jobs_filtered(
     exclude_titles: list[str] | None = None,
 ) -> tuple[int, int]:
     """Store jobs with location filtering. Returns (new, existing)."""
+    from applypilot.discovery import nz, observations
+    if nz.active():
+        item = nz.require_source(site)
+        from applypilot.geography import SelectedLocations
+        matcher = SelectedLocations(nz.country.current().config)
+        keep = [j for j in jobs if matcher.matches(observations.location_text(j.get("location")), j.get("is_remote"))]
+        return observations.store(conn, keep, item, method="json_ld_no_ai", query=search_query, salary_preference=salary_pref)
     now = datetime.now(timezone.utc).isoformat()
     new = 0
     existing = 0
@@ -664,6 +681,8 @@ def _store_jobs_filtered(
     salary_filtered = 0
 
     for job in jobs:
+        if limit_reached():break
+        if not accepts_title(job.get('title')):continue
         url = job.get("url")
         if not url:
             continue
@@ -689,6 +708,8 @@ def _store_jobs_filtered(
             dup_url = find_existing_job_url(conn, canonical_url)
             if dup_url:
                 existing += 1
+                from applypilot.pipeline_store import tag_job
+                tag_job(conn, dup_url, site, search_query)
                 if search_query:
                     try:
                         conn.execute(
@@ -707,10 +728,12 @@ def _store_jobs_filtered(
             salary_filtered += 1
             continue
         try:
-            conn.execute(
-                "INSERT INTO jobs (url, title, search_query, salary, description, location, site, strategy, discovered_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            if limit_reached():continue
+            cursor=conn.execute(
+                "INSERT INTO jobs (company, url, title, search_query, salary, description, location, site, strategy, discovered_at, country_code) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
+                    job.get("company") or job.get("employer") or job.get("hiringOrganization", {}).get("name") if isinstance(job.get("hiringOrganization", {}), dict) else job.get("company"),
                     canonical_url,
                     job.get("title"),
                     search_query,
@@ -720,9 +743,14 @@ def _store_jobs_filtered(
                     site,
                     strategy,
                     now,
+                    ingestion_country(job),
                 ),
             )
+            if cursor.rowcount!=1:continue
+            record_new(conn,canonical_url)
             new += 1
+            from applypilot.pipeline_store import tag_job
+            tag_job(conn, canonical_url, site, search_query)
         except sqlite3.IntegrityError:
             existing += 1
             if search_query:
@@ -1027,6 +1055,7 @@ def _obvious_irrelevant_api_reason(resp: dict) -> str | None:
     return None
 
 
+@routed_task("extract")
 def judge_api_responses(api_responses: list[dict]) -> list[dict]:
     """Use the LLM to filter API responses, keeping only job-relevant ones."""
     if not api_responses:
@@ -1193,6 +1222,7 @@ Below is a lightweight intelligence briefing -- JSON-LD data, intercepted API re
 Pick the BEST strategy:
 
 1. "json_ld" -- ONLY if briefing shows JobPosting JSON-LD entries (it will say "usable!")
+Include the actual employer as an optional "company" extraction field when present; never substitute the source board for the employer.
 2. "api_response" -- ONLY if an intercepted API response has job-like fields (name, title, salary, description, location, slug)
 3. "css_selectors" -- when neither JSON-LD nor API data has job data
 
@@ -1323,6 +1353,7 @@ Your task:
 Return a JSON object:
 - "job_card": CSS selector matching each job card (MUST match ALL cards on the page)
 - "title": selector RELATIVE to the card for the job title
+- "company": optional selector RELATIVE to the card for the actual employer (not the job board)
 - "salary": selector relative to card for salary, or null
 - "description": selector relative to card for description snippet, or null
 - "location": selector relative to card for location, or null
@@ -1347,6 +1378,7 @@ PAGE HTML:
 # -- LLM helpers -------------------------------------------------------------
 
 
+@routed_task("extract")
 def ask_llm(prompt: str) -> tuple[str, float, dict]:
     """Send prompt to LLM. Returns (response_text, seconds_taken, metadata)."""
     client = get_client()
@@ -1510,7 +1542,7 @@ def _extract_jobs_with_selectors(
     jobs: list[dict] = []
     for card in cards:
         job: dict = {}
-        for field in ["title", "salary", "description", "location", "url"]:
+        for field in ["title", "salary", "description", "location", "url"] + (["company"] if selectors.get("company") else []):
             sel = selectors.get(field)
             if not sel or sel == "null":
                 job[field] = None
@@ -1613,6 +1645,9 @@ def execute_json_ld(intel: dict, plan: dict) -> list[dict]:
                 job[field] = None
                 continue
             job[field] = resolve_json_path(entry, path)
+        employer = entry.get("hiringOrganization")
+        if isinstance(employer, dict) and employer.get("name"):
+            job["company"] = employer["name"]
         jobs.append(job)
     return jobs
 
@@ -1643,7 +1678,7 @@ def execute_api_response(intel: dict, plan: dict) -> list[dict]:
         if not isinstance(item, dict):
             continue
         job: dict = {}
-        for field in ["title", "salary", "description", "location", "url"]:
+        for field in ["title", "salary", "description", "location", "url"] + (["company"] if ext.get("company") else []):
             path = ext.get(field)
             if not path or path == "null":
                 job[field] = None
@@ -1653,6 +1688,7 @@ def execute_api_response(intel: dict, plan: dict) -> list[dict]:
     return jobs
 
 
+@routed_task("extract")
 def execute_css_selectors(intel: dict, site_name: str | None = None) -> tuple[dict, list[dict]]:
     """Phase 2: Send full cleaned page HTML to LLM for card detection + selector generation.
     Returns (selectors, jobs)."""
@@ -1751,8 +1787,12 @@ def _summarize_site_result(name: str, strategy: str, plan: dict, jobs: list[dict
 # -- Main per-site extraction ------------------------------------------------
 
 
+@routed_task("extract")
 def _run_one_site(name: str, url: str) -> dict:
     """Run full smart extraction pipeline on one site URL."""
+    from applypilot.discovery import nz
+    if nz.active():
+        return nz.direct_target(name, url)
     log.info("=" * 60)
     log.info("%s: %s", name, url)
 
@@ -1925,6 +1965,10 @@ def build_scrape_targets(
         sites = load_sites()
     if search_cfg is None:
         search_cfg = config.load_search_config()
+
+    if not search_cfg.get('_geography_expanded') and (search_cfg.get('geography_enabled') or any(isinstance(l,dict) and any(k in l for k in ('country','state','city')) for l in search_cfg.get('locations',[]) or [])):
+        from applypilot.geography import smart_targets
+        return smart_targets(sites,search_cfg,build_scrape_targets)
 
     queries_cfg = search_cfg.get("queries", [])
     queries = [_normalize_space(q.get("query")) for q in queries_cfg if _normalize_space(q.get("query"))]
@@ -2163,7 +2207,8 @@ def _run_all(
     Sequential by default. When workers > 1, scrapes multiple sites in parallel
     using ThreadPoolExecutor. DB storage is still serialized after each result.
     """
-    conn = init_db()
+    from applypilot.discovery_scope import policy,run_connection
+    conn = run_connection() if policy() else init_db()
     pre_stats = get_stats(conn)
     log.info(
         "Database: %d jobs already stored, %d pending detail scrape", pre_stats["total"], pre_stats["pending_detail"]
@@ -2175,6 +2220,7 @@ def _run_all(
 
     def _process_result(r: dict, target: dict) -> None:
         nonlocal total_new, total_existing
+        new = existing = 0
         jobs = r.get("jobs", [])
         if jobs:
             new, existing = _store_jobs_filtered(
@@ -2191,11 +2237,13 @@ def _run_all(
             total_new += new
             total_existing += existing
             log.info("DB: +%d new, %d already existed", new, existing)
+        from applypilot.pipeline_store import record_discovery
+        record_discovery(conn, target, r, new, existing)
 
     if workers > 1 and len(targets) > 1:
         # Parallel mode
         with ThreadPoolExecutor(max_workers=min(workers, len(targets))) as pool:
-            future_to_target = {pool.submit(_run_one_site, target["name"], target["url"]): target for target in targets}
+            future_to_target = {pool.submit(copy_context().run, _run_one_site, target["name"], target["url"]): target for target in targets}
             for future in as_completed(future_to_target):
                 target = future_to_target[future]
                 r = future.result()
@@ -2204,6 +2252,7 @@ def _run_all(
     else:
         # Sequential mode (default)
         for i, target in enumerate(targets):
+            if limit_reached():break
             label = target["name"]
             details = [str(v) for v in (target.get("query"), target.get("location")) if str(v or "").strip()]
             if details:
@@ -2226,7 +2275,8 @@ def _run_all(
     passed = sum(1 for r in results if r["status"] == "PASS")
     log.info("%d/%d PASS", passed, len(results))
 
-    return {"total_new": total_new, "total_existing": total_existing, "passed": passed, "total": len(results)}
+    return {"total_new": total_new, "total_existing": total_existing, "passed": passed, "total": len(results),
+            "errors": sum(r.get("status") not in {"PASS", "PARTIAL"} for r in results)}
 
 
 # -- Public entry point ------------------------------------------------------
@@ -2253,6 +2303,15 @@ def run_smart_extract(
         return {"total_new": 0, "total_existing": 0, "passed": 0, "total": 0}
 
     search_cfg = config.load_search_config()
+    from applypilot.discovery import nz
+    if nz.active():
+        return nz.run_provider("direct")
+    if sites and any("NZ" in s.get("countries", []) for s in sites):
+        raise ValueError("NZ sources require an explicit NZ campaign operation")
+    from applypilot.country_context import guard_discovery
+    guard_discovery(search_cfg)
+    if search_cfg.get("smart_sources_disabled"):
+        return {"total_new": 0, "total_existing": 0, "passed": 0, "total": 0, "status": "skipped"}
     accept_locs, reject_locs = _load_location_filter(search_cfg)
     try:
         salary_pref = load_salary_preference(config.load_profile())
@@ -2325,14 +2384,16 @@ def run_smart_extract(
         ]
 
     targets = _dedupe_site_query_location_twins(targets)
+    scoped_available=list(targets)
 
     # Optional: cap number of targets (useful while tuning rate limits)
     try:
-        max_targets = int(str(os.environ.get("SMARTE_MAX_TARGETS", "0")).strip() or "0")
+        max_targets = int(search_cfg.get("smart_target_budget", os.environ.get("SMARTE_MAX_TARGETS", "0")) or "0")
     except Exception:
         max_targets = 0
     try:
-        target_offset = int(str(os.environ.get("SMARTE_TARGET_OFFSET", "0")).strip() or "0")
+        from applypilot.pipeline_store import target_offset as saved_offset
+        target_offset = int(search_cfg.get("smart_target_offset", os.environ.get("SMARTE_TARGET_OFFSET", saved_offset(config.APP_DIR, {t["name"] for t in targets}))) or 0)
     except Exception:
         target_offset = 0
     if max_targets > 0 and len(targets) > max_targets:
@@ -2341,6 +2402,11 @@ def run_smart_extract(
             log.info("Rotating capped targets by %d (SMARTE_TARGET_OFFSET)", target_offset)
         targets = _balanced_target_window(targets, max_targets=max_targets, offset=target_offset, search_cfg=search_cfg)
 
+    if search_cfg.get('_run_scope'):
+        from applypilot.discovery_scope import budget_active
+        if not budget_active():raise ValueError('Use the captured pipeline budget for scoped discovery')
+        keys={(t['name'],t['url'],t.get('query'),t.get('location')) for t in scoped_available}
+        targets=[t for t in search_cfg.get('_planned_direct_targets',[]) if (t['name'],t['url'],t.get('query'),t.get('location')) in keys]
     if not targets:
         log.warning("No scrape targets configured. Create config/sites.yaml and searches.yaml.")
         return {"total_new": 0, "total_existing": 0, "passed": 0, "total": 0}

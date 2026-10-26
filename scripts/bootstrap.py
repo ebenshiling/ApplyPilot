@@ -33,7 +33,7 @@ def main() -> int:
     parser.add_argument(
         "--skip-jobspy",
         action="store_true",
-        help="Skip optional JobSpy installation workaround packages.",
+        help="Skip optional JobSpy board-discovery installation.",
     )
     parser.add_argument(
         "--with-playwright-browsers",
@@ -56,21 +56,8 @@ def main() -> int:
     _run([str(py), "-m", "pip", "install", "-e", "."], cwd=repo_root)
 
     if not args.skip_jobspy:
-        _run([str(py), "-m", "pip", "install", "--no-deps", "python-jobspy"], cwd=repo_root)
-        _run(
-            [
-                str(py),
-                "-m",
-                "pip",
-                "install",
-                "pydantic",
-                "tls-client",
-                "requests",
-                "markdownify",
-                "regex",
-            ],
-            cwd=repo_root,
-        )
+        _run([str(py), "-m", "pip", "install", "python-jobspy==1.2.0"], cwd=repo_root)
+        _run([str(py), "-c", "from jobspy import scrape_jobs; assert callable(scrape_jobs)"], cwd=repo_root)
 
     if args.with_playwright_browsers:
         _run([str(py), "-m", "playwright", "install", "chromium"], cwd=repo_root)

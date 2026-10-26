@@ -1,0 +1,10 @@
+{
+  "change_id":"20261016-nz-phase6",
+  "failure_modes":[
+    {"mode":"Submit occurs without fresh human approval","cause":"Legacy flags, raw browser tools, forged actor/session or client manifest","effect":"Unapproved external application","severity":10,"detection":"Zero-transaction fixture counters for all unapproved/unregistered paths","mitigation":"Existing live actuators remain nonconfigurably contained; only owned registered fixture executor can consume authority"},
+    {"mode":"Reviewed payload changes or approval replays","cause":"Unbound files/questions/target or racing workers","effect":"Wrong or duplicate application","severity":10,"detection":"Byte/country/rights/field/consent edits, expiry/replay and simultaneous-consume fixtures","mitigation":"Exact current manifest, actor/session/boot binding, short expiry and durable atomic CAS consume"},
+    {"mode":"Crash/lost receipt is called prepared and retried","cause":"No durable intent or outcome ambiguity ignored","effect":"Duplicate submission","severity":10,"detection":"Before/after-dispatch crash and missing receipt fixtures","mitigation":"Persist submitting intent first; consumed interrupted attempt remains uncertain until explicit reconciliation; no automatic replay"},
+    {"mode":"Synthetic test coverage advertised as live ATS support","cause":"Approval controls confused with arbitrary-site network mediation","effect":"False safety/coverage claim","severity":10,"detection":"Real-target negative tests and explicit readiness register","mitigation":"No live adapter activated; synthetic adapter cannot network; unsupported real sites use manual handoff and retain live containment"},
+    {"mode":"Migration/import revives authority or breaks positional writers","cause":"Added browser fields and copied approval JSON","effect":"Bypass/replay or legacy failure","severity":10,"detection":"Migration rerun, explicit-column writes, restart and restore tests","mitigation":"Additive schema, boot/session invalidation, imported authority revocation and uncertain recovery"}
+  ]
+}

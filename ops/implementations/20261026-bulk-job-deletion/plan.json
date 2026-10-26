@@ -1,0 +1,7 @@
+{
+  "implementation_id":"20261026-bulk-job-deletion",
+  "goal":"Return to Jobs after close/delete and add clear multi-select/bulk job deletion.",
+  "steps":["Remove forced History navigation after lifecycle actions","Add select-all-shown, clear selection, selected counts and Delete selected controls for UK/NZ saved job lists","Use one bulk confirmation and the existing fresh per-record preview/delete APIs; show progress and allow stopping remaining work","Keep partial completion truthful and retain failed/unprocessed selections; preserve existing history, owned-file cleanup and active/uncertain protections","Run unit/browser/regression verification, retain previous deployed image/source, deploy, and check controls without deleting live user records"],
+  "data_policy":"Feature authorization only: no real user job is deleted by verification. Existing per-record atomic retirement and retryable file cleanup remain unchanged; bulk completion can be partial and is reported as such.",
+  "rollback":"Previous Docker image/source; retain current live data volumes. No schema changes."
+}

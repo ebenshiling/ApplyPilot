@@ -231,8 +231,11 @@ _POSITIVE_PATTERNS: list[re.Pattern] = [
 ]
 
 
-def detect_sponsorship_from_text(text: str | None) -> tuple[str, str]:
+def detect_sponsorship_from_text(text: str | None, *, country_code: str | None = None) -> tuple[str, str]:
     """Return (Yes|No|Conditional|Unknown, evidence_snippet)."""
+    from applypilot.country_context import uk_sponsorship_allowed
+    if not uk_sponsorship_allowed({"country_code": country_code}):
+        return "Unknown", ""
     t = (text or "").strip()
     if not t:
         return "Unknown", ""
@@ -261,8 +264,11 @@ def detect_sponsorship_from_text(text: str | None) -> tuple[str, str]:
     return "Unknown", ""
 
 
-def match_licensed_sponsor(company: str | None, *, app_dir: Path | None = None) -> tuple[str, str, float, str]:
+def match_licensed_sponsor(company: str | None, *, app_dir: Path | None = None, country_code: str | None = None) -> tuple[str, str, float, str]:
     """Return (Yes|No|Unknown, match_name, confidence, source_label)."""
+    from applypilot.country_context import uk_sponsorship_allowed
+    if not uk_sponsorship_allowed({"country_code": country_code}):
+        return "Unknown", "", 0.0, ""
     raw = str(company or "").strip()
     if not raw:
         return "Unknown", "", 0.0, ""
@@ -294,9 +300,13 @@ def annotate_sponsorship(
     company: str | None,
     text: str | None,
     app_dir: Path | None = None,
+    country_code: str | None = None,
 ) -> SponsorshipSignals:
-    policy, evidence = detect_sponsorship_from_text(text)
-    licensed, match_name, conf, src = match_licensed_sponsor(company, app_dir=app_dir)
+    from applypilot.country_context import uk_sponsorship_allowed
+    if not uk_sponsorship_allowed({"country_code": country_code}):
+        return SponsorshipSignals("Unknown", "", "Unknown", "", 0.0, "")
+    policy, evidence = detect_sponsorship_from_text(text, country_code="GB")
+    licensed, match_name, conf, src = match_licensed_sponsor(company, app_dir=app_dir, country_code="GB")
     return SponsorshipSignals(
         sponsorship_explicit=policy,
         sponsorship_evidence=evidence,

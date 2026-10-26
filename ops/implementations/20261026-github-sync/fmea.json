@@ -1,0 +1,10 @@
+{
+  "change_id":"20261026-github-sync",
+  "scope":["git_publication"],
+  "failure_modes":[
+    {"mode":"Private data or credentials published","cause":"Broad stage of local artifacts","effect":"Secret/user-data exposure","severity":10,"detection":"Candidate/staged file inventory and content-pattern scan","mitigation":"Respect existing secret/data ignores; exclude journals, connector keys, encrypted settings and Zone.Identifier metadata; scan without printing values"},
+    {"mode":"Other local project work omitted","cause":"Stage only agent-authored files","effect":"Incomplete remote app","severity":8,"detection":"Complete status and staged name review","mitigation":"Include project changes across all authors, tests/docs/ops and launch media"},
+    {"mode":"Remote history overwritten or wrong branch pushed","cause":"Force push or implicit target","effect":"Lost remote work","severity":10,"detection":"Fetch, tracking and divergence check","mitigation":"Explicit main:main push; no force, reset, config changes or hook bypass"},
+    {"mode":"Push rejected for oversized artifacts","cause":"Launch media in normal Git","effect":"Incomplete publication","severity":6,"detection":"Per-file size audit","mitigation":"All reviewed files are below GitHub's 100 MiB limit; preserve complete requested media work"}
+  ]
+}

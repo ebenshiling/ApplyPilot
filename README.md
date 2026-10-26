@@ -2,6 +2,39 @@
 
 # ApplyPilot
 
+## United Kingdom and New Zealand workspaces
+
+Open **http://localhost:8765/workspace**, then use **Country workspace → New Zealand**
+above the page heading. The Docker deployment enables NZ alongside the UK workspace.
+NZ includes campaigns, vacancy capture, employer/recruitment evidence, CV sources,
+document preparation, applications and outcome tracking.
+
+**Start with a job title and NZ location → Find jobs.** Open a board's search results,
+save a vacancy's URL/title, then prepare and apply using the numbered steps. Employer
+details are optional when saving and are not needed to search. Automated direct/Workday
+imports and source configuration are under **Advanced**.
+
+**Apply with agent** is available for UK and NZ records. It opens the employer form,
+uses your reviewed packet, supports manual takeover and pauses for final submission
+approval. The existing CLI engines and schedules are also available. Development-only
+blanket execution locks have been removed; factual-document, country ownership,
+source-readiness and duplicate/uncertain-submission checks remain operational.
+
+See [NZ workspace guide](docs/NZ_WORKSPACE.md) for setup, release verification,
+deployment controls and rollback. Phase 1–7 handoffs describe the earlier isolated
+development stages; their blanket release holds are superseded by this integration.
+
+The [Pipeline performance notes](docs/PIPELINE_PERFORMANCE.md) cover the lighter
+polling and request-local read optimizations. Hard-refresh an already-open tab after updating.
+
+**Pipeline → Review & run** previews edited roles, locations, sources and limits.
+Discovery defaults to 50 matching new jobs and processes that search's new jobs,
+excluding the saved backlog. See [bounded discovery scope](docs/DISCOVERY_SCOPE.md).
+
+**Jobs → Select all shown / select cards → Delete selected** removes multiple job
+records in one confirmed operation, with progress and a result summary. Individual
+and bulk lifecycle actions return to Jobs. See [job lifecycle](docs/JOB_LIFECYCLE.md).
+
 **Applied to 1,000 jobs in 2 days. Fully autonomous. Open source.**
 
 [![PyPI version](https://img.shields.io/pypi/v/applypilot?color=blue)](https://pypi.org/project/applypilot/)
@@ -19,14 +52,43 @@ https://github.com/user-attachments/assets/7ee3417f-43d4-4245-9952-35df1e77f2df
 
 ## What It Does
 
-ApplyPilot is a 6-stage autonomous job application pipeline. It discovers jobs across 5+ boards, scores them against your resume with AI, tailors your resume per job, writes cover letters, and **submits applications for you**. It navigates forms, uploads documents, answers screening questions, all hands-free.
+### Application command center
+
+The served dashboard opens the redesigned application workspace at **`/workspace`**. The root URL and old dashboard URLs redirect here; classic workspace rendering is disabled. It provides CV Studio with editable qualifications and professional facts, versioned CV regeneration and PDF previews, application timelines, separate hiring outcomes, block/archive controls, reminders, scheduling, AI assistance, and optional Gmail/Outlook evidence connectors.
+
+See [Command center guide](docs/COMMAND_CENTER.md) for usage and provider configuration, and [Upgrade roadmap](docs/UPGRADE_PLAN.md) for the phased plan and remaining refinements.
+
+The [opportunity activity and browser guide](docs/OPPORTUNITY_INSIGHTS_AND_BROWSER.md) covers the Insights ledger, complete CSV/JSON analysis downloads including deleted history, manual activity recording, streamed browser controls and evidence-backed answers for selected application fields.
+
+See [Pipeline audit and configuration guide](docs/PIPELINE_AUDIT.md) for multi-role searches, automatic resume routing, custom-source registration, and prioritized pipeline improvements.
+
+The native [Pipeline workspace](docs/PIPELINE_WORKSPACE.md) adds campaigns, effective run previews, lossless search editing, resume decisions, workspace-owned source catalogs, structured recovery, application packets, and measured usage/outcome insights.
+
+See [global locations and visual Insights](docs/GLOBAL_LOCATIONS_AND_VISUAL_INSIGHTS.md) for country/state/city searches, per-location board routing, explicit geographic filtering and interactive analytical charts. [Direct-source recovery](docs/DIRECT_SOURCE_RECOVERY.md) covers search templates and actionable extraction-preview errors.
+
+The [professional studios guide](docs/STUDIOS.md) covers multi-CV uploads, editable source revisions, native Profile/Portfolio tools, UI-managed encrypted AI settings, and versioned Cover/Statement Studios with previews, validation and downloads.
+
+See the [NHS application walkthrough](docs/NHS_APPLICATION_WORKFLOW.md) for official-source supporting-evidence guidance, reviewed criteria/examples, word versus character limits, and how to use both writing Studios. Workspace navigation can be collapsed with the menu button; its preference is retained in the browser.
+
+See [Discovery/provider recovery](docs/DISCOVERY_TROUBLESHOOTING.md) for missing JobSpy dependencies, provider billing/access responses, extraction fallbacks, and UI retry actions.
+
+Use **Apply with agent** in a workspace job record for a [visible semi-assisted application browser](docs/ASSISTED_BROWSER.md): watch the shared session, take over for login or missing answers, approve final submission, and save confirmation evidence. It works with the existing Docker Chromium installation.
+
+An optional [Decisions observer trial](docs/DECISIONS_OBSERVER.md) in **Settings → AI preferences** compares Luna page classifications with the browser baseline, runs a nine-case synthetic benchmark, and reports latency and usage while preserving the existing application controls.
+
+Use **Close / delete record** to record closed adverts, unmet requirements, preparation failures or hiring outcomes. [History & storage](docs/JOB_LIFECYCLE.md) retains compact timelines and references while removing exclusively owned generated files, with cleanup retries and database compaction.
+
+See [Assistant recovery and assisted-apply comparison](docs/ASSISTANT_AND_ASSISTED_APPLY.md) for inline assistant retry/cancel controls, credential origins and service-key inheritance, legacy CLI browser-review limitations, and official OpenAI/DeepSeek/Claude API pricing.
+
+Task-specific AI routing supports separate scoring, writing, reviewer, extraction, form, and assistant models through `LLM_<TASK>_PROVIDER` / `LLM_<TASK>_MODEL`. The effective configuration is visible in Settings and Insights; unconfigured tasks inherit the existing global provider/model.
+
+ApplyPilot has a seven-stage preparation pipeline and a separate application-submission workflow. It discovers jobs across 5+ boards, scores them against your resume with AI, tailors your resume per job, prepares required statements and cover letters, and renders PDFs. Application automation then navigates forms, uploads documents, answers screening questions, and submits through the separate apply workflow.
 
 Three commands. That's it.
 
 ```bash
 pip install applypilot
-pip install --no-deps python-jobspy    # separate install (broken numpy pin in metadata)
-pip install pydantic tls-client requests markdownify regex  # jobspy runtime deps skipped by --no-deps
+pip install python-jobspy==1.2.0       # board discovery, including its curl_cffi runtime dependency
 applypilot init          # one-time setup: resume, profile, preferences, API keys
 applypilot run           # discover > enrich > score > tailor > cover letters
 applypilot run -w 4      # same but parallel (4 threads for discovery/enrichment)
@@ -64,12 +126,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run-docker.ps1 -Rebuild
 ### Full Pipeline (recommended)
 **Requires:** Python 3.11+, Node.js (for npx), Gemini API key (free), Claude Code CLI, Chrome
 
-Runs all 6 stages, from job discovery to autonomous application submission. This is the full power of ApplyPilot.
+Runs seven preparation stages, followed by the separate application-submission workflow.
 
 ### Discovery + Tailoring Only
 **Requires:** Python 3.11+, Gemini API key (free)
 
-Runs stages 1-5: discovers jobs, scores them, tailors your resume, generates cover letters. You submit applications manually with the AI-prepared materials.
+Runs the preparation pipeline: discovers jobs, enriches and scores them, tailors your resume, prepares required statements and covers, and renders PDFs. You submit applications manually with the AI-prepared materials.
 
 ---
 
@@ -81,8 +143,10 @@ Runs stages 1-5: discovers jobs, scores them, tailors your resume, generates cov
 | **2. Enrich** | Fetches full job descriptions via JSON-LD, CSS selectors, or AI-powered extraction |
 | **3. Score** | AI rates every job 1-10 based on your resume and preferences. Only high-fit jobs proceed |
 | **4. Tailor** | AI rewrites your resume per job: reorganizes, emphasizes relevant experience, adds keywords. Never fabricates |
-| **5. Cover Letter** | AI generates a targeted cover letter per job |
-| **6. Auto-Apply** | Claude Code navigates application forms, fills fields, uploads documents, answers questions, and submits |
+| **5. Statement** | Generates supporting statements when required or explicitly requested |
+| **6. Cover Letter** | Generates targeted cover letters according to packet requirements |
+| **7. PDF** | Renders missing or stale required documents |
+| **Separate: Auto-Apply** | Navigates application forms, fills fields, uploads documents, answers questions, and submits |
 
 Each stage is independent. Run them all or pick what you need.
 
@@ -119,7 +183,7 @@ Each stage is independent. Run them all or pick what you need.
 |-----------|-------------|
 | CapSolver API key | Solves CAPTCHAs during auto-apply (hCaptcha, reCAPTCHA, Turnstile, FunCaptcha). Without it, CAPTCHA-blocked applications just fail gracefully |
 
-> **Note:** python-jobspy is installed separately with `--no-deps` because it pins an exact numpy version in its metadata that conflicts with pip's resolver. It works fine with modern numpy at runtime.
+> **Note:** current builds use `python-jobspy==1.2.0` with normal dependency installation and an import smoke check. Older `--no-deps` instructions can leave `curl_cffi` missing even when the JobSpy distribution is installed.
 
 ---
 

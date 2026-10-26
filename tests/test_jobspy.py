@@ -64,6 +64,7 @@ def test_normalize_search_cfg_derives_board_override_location_labels() -> None:
 
 def test_run_discovery_applies_board_overrides(monkeypatch) -> None:
     calls = []
+    monkeypatch.setattr(jobspy, "_load_scraper", lambda: object())
 
     monkeypatch.setattr(jobspy.config, "load_profile", lambda: {})
     monkeypatch.setattr(jobspy, "_full_crawl", lambda **kwargs: calls.append(kwargs) or {"new": 0, "existing": 0, "errors": 0, "db_total": 0, "queries": 1})

@@ -1,0 +1,53 @@
+{
+  "measurements": [
+    {
+      "endpoint": "/api/center?country_code=GB",
+      "seconds": [
+        0.0638,
+        0.0467
+      ],
+      "response_bytes": 2486130
+    },
+    {
+      "endpoint": "/api/center/pipeline?country_code=GB",
+      "seconds": [
+        0.4739,
+        0.5811
+      ],
+      "response_bytes": 82016
+    },
+    {
+      "endpoint": "/api/center/pipeline/progress?country_code=GB",
+      "seconds": [
+        0.232,
+        0.2269
+      ],
+      "response_bytes": 26718
+    },
+    {
+      "endpoint": "/api/pipeline/status",
+      "seconds": [
+        0.0085,
+        0.0087
+      ],
+      "response_bytes": 468
+    },
+    {
+      "endpoint": "/api/center/nz/discovery?country_code=NZ",
+      "seconds": [
+        0.0575,
+        0.0586
+      ],
+      "response_bytes": 5507
+    },
+    {
+      "endpoint": "/api/center/nz/preparation?country_code=NZ",
+      "seconds": [
+        0.0395,
+        0.041
+      ],
+      "response_bytes": 4200
+    }
+  ],
+  "profile": "         3566683 function calls (3217083 primitive calls) in 1.084 seconds\n\n   Ordered by: cumulative time\n   List reduced from 1753 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n      3/1    0.000    0.000    1.085    1.085 /app/src/applypilot/read_model.py:32(wrapped)\n        1    0.000    0.000    1.084    1.084 /app/src/applypilot/pipeline_workspace.py:223(state)\n        1    0.003    0.003    1.026    1.026 /app/src/applypilot/pipeline_workspace.py:121(preview)\n 1641/290    0.017    0.000    0.606    0.002 /app/src/applypilot/read_model.py:49(wrapped)\n        1    0.000    0.000    0.588    0.588 /app/src/applypilot/pipeline_workspace.py:178(<dictcomp>)\n        6    0.000    0.000    0.588    0.098 /app/src/applypilot/eligibility.py:81(candidates)\n        1    0.000    0.000    0.463    0.463 /app/src/applypilot/eligibility.py:89(<listcomp>)\n       88    0.000    0.000    0.463    0.005 /app/src/applypilot/role_routing.py:372(score_inputs_changed)\n       88    0.001    0.000    0.449    0.005 /app/src/applypilot/role_routing.py:338(score_fingerprint)\n320292/1684    0.165    0.000    0.314    0.000 /usr/local/lib/python3.11/copy.py:128(deepcopy)\n19142/1479    0.051    0.000    0.308    0.000 /usr/local/lib/python3.11/copy.py:227(_deepcopy_dict)\n      129    0.000    0.000    0.217    0.002 /app/src/applypilot/ai_routing.py:174(route_info)\n      129    0.002    0.000    0.216    0.002 /app/src/applypilot/ai_routing.py:108(resolve_route)\n     87/1    0.003    0.000    0.205    0.205 /app/src/applypilot/discovery/smartextract.py:1941(build_scrape_targets)\n        1    0.004    0.004    0.205    0.205 /app/src/applypilot/geography.py:164(smart_targets)\n      136    0.003    0.000    0.169    0.001 /app/src/applypilot/role_routing.py:200(route_resume_for_job)\n   658/10    0.001    0.000    0.164    0.016 <frozen importlib._bootstrap>:1165(_find_and_load)\n   196/10    0.001    0.000    0.164    0.016 <frozen importlib._bootstrap>:1120(_find_and_load_unlocked)\n   191/13    0.001    0.000    0.163    0.013 <frozen importlib._bootstrap>:666(_load_unlocked)\n   175/13    0.000    0.000    0.163    0.013 <frozen importlib._bootstrap_external>:934(exec_module)\n   480/23    0.000    0.000    0.160    0.007 <frozen importlib._bootstrap>:233(_call_with_frames_removed)\n   184/13    0.001    0.000    0.160    0.012 {built-in method builtins.exec}\n        1    0.000    0.000    0.145    0.145 /app/src/applypilot/discovery/smartextract.py:1(<module>)\n     1700    0.003    0.000    0.141    0.000 /app/src/applypilot/discovery/smartextract.py:599(_is_site_target_excluded)\n      645    0.002    0.000    0.141    0.000 /app/src/applypilot/ai_routing.py:79(_setting)\n     1700    0.003    0.000    0.126    0.000 /app/src/applypilot/discovery/smartextract.py:560(_matches_site_tier_location_pruning)\n10019/6036    0.013    0.000    0.121    0.000 /usr/local/lib/python3.11/copy.py:201(_deepcopy_list)\n     1700    0.032    0.000    0.112    0.000 /app/src/applypilot/discovery/smartextract.py:519(_query_tiers)\n     2246    0.003    0.000    0.099    0.000 /usr/local/lib/python3.11/pathlib.py:981(resolve)\n    58711    0.021    0.000    0.096    0.000 /app/src/applypilot/discovery/smartextract.py:333(_normalize_space)\n\n\n"
+}

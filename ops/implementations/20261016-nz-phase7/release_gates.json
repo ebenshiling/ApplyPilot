@@ -1,0 +1,17 @@
+{
+  "decision":"blocked_for_production_release",
+  "fixture_implementation_complete":true,
+  "offline_rehearsal_complete":true,
+  "nz_default_enabled":false,
+  "real_managed_adapters":[],
+  "real_source_acceptance_performed":false,
+  "actual_candidate_reconciliation_performed":false,
+  "owner_release_approval":false,
+  "deployed":false,
+  "missing":[
+    {"gate":"actual candidate masters/canonical evidence","owner":"candidate/product owner","state":"deferred_by_user_fixture_choice"},
+    {"gate":"source permission and live read-only reliability","owner":"operator/source rights holder","state":"unverified"},
+    {"gate":"real ATS permission/network/DOM acceptance","owner":"adapter engineer/operator","state":"unreleased_real_targets_manual_only"},
+    {"gate":"production migration/deployment/owner acceptance","owner":"product owner/operator","state":"not_authorized_or_performed"}
+  ]
+}

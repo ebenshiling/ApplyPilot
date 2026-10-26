@@ -1,0 +1,14 @@
+{
+  "change_id":"20261009-global-search-visual-insights",
+  "scope":["discovery","search configuration","dashboard","analytics"],
+  "failure_modes":[
+    {"mode":"Wrong country searched","cause":"One global country applied to mixed-country locations","effect":"Unrelated results and wasted discovery","severity":8,"detection":"Captured provider-request tests for multiple countries and aliases","mitigation":"Per-location country normalization and effective-routing preview; unsupported country/site combinations surfaced"},
+    {"mode":"Foreign results silently discarded","cause":"UK legacy accept/reject lists survive location edits","effect":"Empty global searches despite correct requests","severity":8,"detection":"Selected-location filter tests for countries, states, cities and remote scopes","mitigation":"Explicit selected-location filtering option; old custom pattern rules remain available and unchanged"},
+    {"mode":"Location/resume settings lost","cause":"UI rebuilds row dictionaries or campaign config drops new keys","effect":"Changed user search scope or CV mappings","severity":9,"detection":"Unedited metadata, campaign and priority/resume roundtrip tests","mitigation":"Preserve original row fields; additive structured editor, validation and revision-aware saves"},
+    {"mode":"Misleading charts","cause":"Counting duplicate events as opportunities, stale failures, unknown timestamps or zero-cost gaps","effect":"Incorrect candidate analysis","severity":8,"detection":"Synthetic known counts, retired histories, empty and sparse data tests","mitigation":"Unique URL-based cohorts, documented denominators and explicit unknown values; factual explanations and matching drill-downs"},
+    {"mode":"Charts obscure record access or break mobile","cause":"Non-accessible interactions or overflowing graphics","effect":"Insights difficult to use","severity":6,"detection":"Keyboard and narrow viewport browser checks","mitigation":"Semantic chart controls, textual values/legends, responsive SVG/CSS and preserved export/ledger paths"}
+  ],
+  "mitigation_status":"Implemented and verified by 588 passing tests, strict AI evaluations, visual desktop/mobile review and authenticated live checks",
+  "engineering_follow_ups":[],
+  "coverage_note":"Country/state/city fields accept free text; actual provider country coverage is surfaced rather than silently falling back to US. Unknown dates/scores/costs stay unknown."
+}

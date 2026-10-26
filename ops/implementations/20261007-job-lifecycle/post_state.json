@@ -1,0 +1,26 @@
+{
+  "captured_at": "2026-10-08T00:43:14.570912+00:00",
+  "python": {
+    "version": "3.11.9",
+    "executable": "\\\\wsl.localhost\\Ubuntu\\home\\swazy364\\code\\ApplyPilot\\.ci311\\Scripts\\python.exe"
+  },
+  "git": {
+    "head": null,
+    "branch": null,
+    "dirty": false
+  },
+  "repo": {
+    "root": "\\\\wsl.localhost\\Ubuntu\\home\\swazy364\\code\\ApplyPilot"
+  },
+  "key_files": {
+    "pyproject.toml": true,
+    "README.md": true,
+    "src/applypilot/view.py": true,
+    "src/applypilot/dashboard_server.py": true,
+    "tests": true
+  },
+  "env": {
+    "APPLYPILOT_DIR": null,
+    "APPLYPILOT_SEARCHES_PATH": null
+  }
+}

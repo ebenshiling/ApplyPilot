@@ -273,14 +273,15 @@ def _setup_ai_features() -> None:
         console.print("[dim]Discovery-only mode. You can configure AI later with [bold]applypilot init[/bold].[/dim]")
         return
 
-    console.print("Supported providers: [bold]Gemini[/bold] (recommended, free tier), OpenAI, local (Ollama/llama.cpp)")
+    console.print("Supported providers: [bold]Gemini[/bold], OpenAI, Anthropic Claude, local (Ollama/llama.cpp)")
     provider = Prompt.ask(
         "Provider",
-        choices=["gemini", "openai", "local"],
+        choices=["gemini", "openai", "anthropic", "local"],
         default="gemini",
     )
 
     env_lines = ["# ApplyPilot configuration", ""]
+    env_lines.append(f"LLM_PROVIDER={provider}")
 
     if provider == "gemini":
         api_key = Prompt.ask("Gemini API key (from aistudio.google.com)")
@@ -291,6 +292,11 @@ def _setup_ai_features() -> None:
         api_key = Prompt.ask("OpenAI API key")
         model = Prompt.ask("Model", default="gpt-4o-mini")
         env_lines.append(f"OPENAI_API_KEY={api_key}")
+        env_lines.append(f"LLM_MODEL={model}")
+    elif provider == "anthropic":
+        api_key = Prompt.ask("Anthropic API key", password=True)
+        model = Prompt.ask("Model", default="claude-sonnet-4-6")
+        env_lines.append(f"ANTHROPIC_API_KEY={api_key}")
         env_lines.append(f"LLM_MODEL={model}")
     elif provider == "local":
         url = Prompt.ask("Local LLM endpoint URL", default="http://localhost:8080/v1")

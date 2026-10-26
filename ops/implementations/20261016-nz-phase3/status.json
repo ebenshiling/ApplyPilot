@@ -1,0 +1,12 @@
+{
+  "implementation_id":"20261016-nz-phase3",
+  "status":"completed",
+  "phase":"verified_manual_employer_evidence",
+  "verification":[{"command":"python scripts/agent_verify.py","result":"passed","compile":"passed","pytest_passed":712,"pytest_skipped":59,"pytest_seconds":306.34,"strict_ai_checks":"7/7","formal_dataset":"13/13","country_ui":"local-only Chromium enabled; no official requests"},{"command":"node --check src/applypilot/web/nz-evidence.js","result":"passed"},{"command":"git diff --check","result":"passed"}],
+  "production_data_access":false,
+  "official_network_access":false,
+  "remaining_phases_authorized":true,
+  "handoff":"docs/NZ_PHASE3_HANDOFF.md",
+  "candidate_evidence":"Synthetic fixtures only; no actual candidate CVs or official employer checks imported",
+  "next":"Phase 4 canonical claims, CV routing and country document finalisation; actual candidate masters/evidence still required"
+}

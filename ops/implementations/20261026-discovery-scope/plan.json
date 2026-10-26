@@ -1,0 +1,9 @@
+{
+  "implementation_id":"20261026-discovery-scope",
+  "goal":"Stop unwanted discovery/scoring and make edited search scope explicit, bounded and previewed before launch.",
+  "cancellation":"The reported run had already exited with code 1. Docker process inspection showed only the dashboard, no discovery/scoring worker.",
+  "baseline":{"saved_jobs":1954,"workday_jobs":1836,"unscored_described_jobs":1862,"roles":3,"locations":9,"results_per_site":35,"provider_target_budgets":[20,20,20],"has_total_new_job_cap":false,"has_processing_run_scope":false},
+  "steps":["Use a shared effective-config builder for draft edits, live preview and captured worker settings","Add explicit provider choices, matching-title collection, per-search results and a global new-job cap","Tag only newly inserted jobs using reserved run membership in existing cc_campaign_jobs; default downstream work to those jobs, not the backlog","Show roles/locations/sources, bounded work, excluded backlog, saved matching examples and draft changes; review the exact plan before starting","Verify caps across providers/concurrency, new-only processing and stale-plan rejection with synthetic sources; deploy without restarting live discovery"],
+  "data_policy":"No automatic deletion of the 1,954 existing records. No live discovery/provider or model calls during verification. Legacy CLI behavior remains unless an explicit captured run scope is used.",
+  "rollback":"Retain previous image/source and preserve data volumes. Reuse existing campaign-membership table; no destructive migration."
+}

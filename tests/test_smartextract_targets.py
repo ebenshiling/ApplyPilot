@@ -2402,6 +2402,8 @@ def test_obvious_irrelevant_api_reason_flags_cookie_endpoints() -> None:
 
 
 def test_run_all_threads_salary_pref_to_storage(monkeypatch) -> None:
+    import applypilot.pipeline_store as store
+    monkeypatch.setattr(store, "record_discovery", lambda *a, **kw: None)
     captured: dict = {}
 
     monkeypatch.setattr(smartextract, "init_db", lambda: object())
@@ -2446,10 +2448,12 @@ def test_run_all_threads_salary_pref_to_storage(monkeypatch) -> None:
     )
 
     assert captured["salary_pref"] == salary_pref
-    assert result == {"total_new": 1, "total_existing": 0, "passed": 1, "total": 1}
+    assert result == {"total_new": 1, "total_existing": 0, "passed": 1, "total": 1, "errors": 0}
 
 
 def test_run_all_threads_exclude_titles_to_storage(monkeypatch) -> None:
+    import applypilot.pipeline_store as store
+    monkeypatch.setattr(store, "record_discovery", lambda *a, **kw: None)
     captured: dict = {}
 
     monkeypatch.setattr(smartextract, "init_db", lambda: object())
@@ -2494,4 +2498,4 @@ def test_run_all_threads_exclude_titles_to_storage(monkeypatch) -> None:
     )
 
     assert captured["exclude_titles"] == exclude_titles
-    assert result == {"total_new": 1, "total_existing": 0, "passed": 1, "total": 1}
+    assert result == {"total_new": 1, "total_existing": 0, "passed": 1, "total": 1, "errors": 0}

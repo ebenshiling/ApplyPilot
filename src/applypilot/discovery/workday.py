@@ -9,6 +9,7 @@ hardcoded. Supports sequential search + detail fetching with proxy.
 
 import json
 import logging
+from contextvars import copy_context
 import re
 import sqlite3
 import time
@@ -17,10 +18,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 
-import yaml
 
 from applypilot import config
-from applypilot.config import CONFIG_DIR
+from applypilot.country_context import ingestion_country
 from applypilot.database import find_existing_job_url, get_connection, init_db, normalize_url
 
 log = logging.getLogger(__name__)
@@ -31,12 +31,8 @@ log = logging.getLogger(__name__)
 
 def load_employers() -> dict:
     """Load Workday employer registry from config/employers.yaml."""
-    path = CONFIG_DIR / "employers.yaml"
-    if not path.exists():
-        log.warning("employers.yaml not found at %s", path)
-        return {}
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    return data.get("employers", {})
+    from applypilot.source_registry import employers
+    return employers(config.APP_DIR)
 
 
 # -- Location filtering from search config -----------------------------------
@@ -47,6 +43,10 @@ def _load_location_filter(search_cfg: dict | None = None):
     if search_cfg is None:
         search_cfg = config.load_search_config()
 
+    from applypilot.geography import filter_config
+    selected=filter_config(search_cfg)
+    if selected is not None:
+        return selected
     accept = search_cfg.get("location_accept", [])
     reject = search_cfg.get("location_reject_non_remote", [])
 
@@ -66,6 +66,9 @@ def _load_location_filter(search_cfg: dict | None = None):
 
 def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> bool:
     """Check if a job location passes the user's location filter."""
+    from applypilot.geography import SelectedLocations
+    if isinstance(accept,SelectedLocations):
+        return accept.matches(location)
     if not location:
         return True
 
@@ -175,6 +178,10 @@ def _urlopen(req, timeout=30):
 
 def workday_search(employer: dict, search_text: str, limit: int = 20, offset: int = 0) -> dict:
     """Search jobs via Workday CXS API. Returns JSON with total + jobPostings."""
+    from applypilot.discovery import nz
+    if nz.active() or "NZ" in employer.get("countries", []):
+        item = nz.require_source(employer.get("id") or employer["name"], method="workday_cxs")
+        return nz.workday_payload(item, query=search_text, limit=limit, offset=offset)
     url = f"{employer['base_url']}/wday/cxs/{employer['tenant']}/{employer['site_id']}/jobs"
     payload = json.dumps(
         {
@@ -196,6 +203,12 @@ def workday_search(employer: dict, search_text: str, limit: int = 20, offset: in
 
 def workday_detail(employer: dict, external_path: str) -> dict:
     """Fetch full job detail via Workday CXS API."""
+    from applypilot.discovery import nz
+    if nz.active() or "NZ" in employer.get("countries", []):
+        item = nz.require_source(employer.get("id") or employer["name"], method="workday_cxs")
+        if not isinstance(external_path, str) or not external_path.startswith("/job/") or "?" in external_path or ".." in external_path:
+            raise ValueError("Expected a Workday job-detail path")
+        return nz.workday_payload(item, path=external_path)
     url = f"{employer['base_url']}/wday/cxs/{employer['tenant']}/{employer['site_id']}{external_path}"
 
     req = urllib.request.Request(url)
@@ -207,6 +220,9 @@ def workday_detail(employer: dict, external_path: str) -> dict:
 
 
 # -- Search + paginate -------------------------------------------------------
+
+
+from applypilot.discovery_scope import storage_batch,accepts_title,limit_reached,record_new,policy
 
 
 def search_employer(
@@ -225,9 +241,14 @@ def search_employer(
     offset = 0
     page_size = 20
     max_pages = 25  # Cap at 500 results
+    settings=policy()
+    if settings:
+        page_size=min(20,settings['results_per_search'])
+        max_pages=(settings['results_per_search']+page_size-1)//page_size
     total = None
 
     while True:
+        if limit_reached():break
         try:
             data = workday_search(employer, search_text, limit=page_size, offset=offset)
         except Exception as e:
@@ -239,10 +260,12 @@ def search_employer(
             log.info("%s: %d total results", employer["name"], total)
 
         postings = data.get("jobPostings", [])
+        if settings:postings=postings[:max(0,settings['results_per_search']-offset)]
         if not postings:
             break
 
         for j in postings:
+            if not accepts_title(j.get('title')):continue
             loc = j.get("locationsText", "")
             if location_filter and accept_locs is not None and reject_locs is not None:
                 if not _location_ok(loc, accept_locs, reject_locs):
@@ -289,6 +312,10 @@ def _fetch_one_detail(employer: dict, job: dict) -> dict:
         job["job_req_id"] = info.get("jobReqId", "")
         job["time_type"] = info.get("timeType", "")
         job["remote_type"] = info.get("remoteType", "")
+        job["date_posted"] = info.get("startDate")
+        job["valid_through"] = info.get("endDate")
+        job["advertised_country"] = info.get("country", {}).get("descriptor") if isinstance(info.get("country"), dict) else info.get("country")
+        job["salary"] = info.get("salary")
 
     except Exception as e:
         job["full_description"] = ""
@@ -325,6 +352,7 @@ def fetch_details(employer: dict, jobs: list[dict]) -> list[dict]:
 # -- DB storage --------------------------------------------------------------
 
 
+@storage_batch
 def store_results(
     conn: sqlite3.Connection,
     jobs: list[dict],
@@ -333,11 +361,25 @@ def store_results(
     search_query: str | None = None,
 ) -> tuple[int, int]:
     """Store corporate jobs in DB. Returns (new, existing)."""
+    from applypilot.discovery import nz, observations
+    if nz.active():
+        new = existing = 0
+        for key in dict.fromkeys(j.get("employer_key") for j in jobs):
+            item = nz.require_source(key, method="workday_cxs")
+            batch = [dict(j, url=item["base_url"].rstrip("/") + "/" + item["site_id"] + j.get("external_path", "")) for j in jobs if j.get("employer_key") == key]
+            context = nz.country.current()
+            pref = context.preferences.get("search_preferences", {}).get("compensation") or context.config.get("compensation")
+            added, duplicates = observations.store(conn, batch, item, method="workday_api", query=search_query, salary_preference=pref)
+            new += added
+            existing += duplicates
+        return new, existing
     now = datetime.now(timezone.utc).isoformat()
     new = 0
     existing = 0
 
     for job in jobs:
+        if limit_reached():break
+        if not accepts_title(job.get('title')):continue
         url = job.get("apply_url", "")
         if not url:
             emp = employers.get(job.get("employer_key", ""), {})
@@ -361,6 +403,8 @@ def store_results(
         dup_url = find_existing_job_url(conn, canonical_url)
         if dup_url:
             existing += 1
+            from applypilot.pipeline_store import tag_job
+            tag_job(conn, dup_url, "Workday", search_query)
             if search_query:
                 try:
                     conn.execute(
@@ -377,15 +421,17 @@ def store_results(
         detail_scraped_at = now if full_description else None
         detail_error = job.get("detail_error")
 
-        site = job.get("employer_name", "Corporate")
+        site = "Workday"
         strategy = "workday_api"
 
         try:
-            conn.execute(
-                "INSERT INTO jobs (url, title, search_query, salary, description, location, site, strategy, "
-                "discovered_at, full_description, application_url, detail_scraped_at, detail_error) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            if limit_reached():continue
+            cursor=conn.execute(
+                "INSERT INTO jobs (company, url, title, search_query, salary, description, location, site, strategy, "
+                "discovered_at, full_description, application_url, detail_scraped_at, detail_error, country_code) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
+                    job.get("employer_name"),
                     canonical_url,
                     job.get("title"),
                     (search_query or None),
@@ -399,9 +445,14 @@ def store_results(
                     canonical_url,
                     detail_scraped_at,
                     detail_error,
+                    ingestion_country(job),
                 ),
             )
+            if cursor.rowcount!=1:continue
+            record_new(conn,canonical_url)
             new += 1
+            from applypilot.pipeline_store import tag_job
+            tag_job(conn, canonical_url, "Workday", search_query)
         except sqlite3.IntegrityError:
             existing += 1
             if search_query:
@@ -427,6 +478,7 @@ def _process_one(
 ) -> dict:
     """Search one employer, fetch details, store results."""
     emp = employers[employer_key]
+    if limit_reached():return {'employer':emp['name'],'query':search_text,'found':0,'new':0,'existing':0}
 
     try:
         jobs = search_employer(
@@ -449,7 +501,8 @@ def _process_one(
     except Exception as e:
         log.error("%s: ERROR fetching details for '%s': %s", emp["name"], search_text, e)
 
-    conn = get_connection()
+    from applypilot.discovery_scope import run_connection
+    conn = run_connection() if policy() else get_connection()
     new, existing = store_results(conn, jobs, employers, search_query=search_text)
     log.info("%s: %d new, %d already in DB", emp["name"], new, existing)
 
@@ -483,7 +536,10 @@ def scrape_employers(
         reject_locs = []
 
     # Ensure DB schema
-    init_db()
+    if policy():
+        from applypilot.discovery_scope import run_connection
+        run_connection()
+    else:init_db()
 
     total_new = 0
     total_existing = 0
@@ -499,7 +555,7 @@ def scrape_employers(
         with ThreadPoolExecutor(max_workers=min(workers, len(valid_keys))) as pool:
             futures = {
                 pool.submit(
-                    _process_one,
+                    copy_context().run, _process_one,
                     key,
                     employers,
                     search_text,
@@ -567,7 +623,7 @@ def scrape_employers(
         "[%s] Done: %d found, %d new, %d dupes in %.0fs", search_text, total_found, total_new, total_existing, elapsed
     )
 
-    return {"found": total_found, "new": total_new, "existing": total_existing}
+    return {"found": total_found, "new": total_new, "existing": total_existing, "errors": errors}
 
 
 # -- Public entry point ------------------------------------------------------
@@ -587,6 +643,9 @@ def run_workday_discovery(employers: dict | None = None, workers: int = 1) -> di
     Returns:
         Dict with stats: found, new, existing, queries.
     """
+    from applypilot.discovery import nz
+    if nz.active():
+        return nz.run_provider("workday")
     if employers is None:
         employers = load_employers()
 
@@ -595,11 +654,27 @@ def run_workday_discovery(employers: dict | None = None, workers: int = 1) -> di
         return {"found": 0, "new": 0, "existing": 0, "queries": 0}
 
     search_cfg = config.load_search_config()
+    from applypilot.country_context import guard_discovery
+    guard_discovery(search_cfg)
+    if search_cfg.get('_run_scope'):
+        from applypilot.discovery_scope import budget_active,run_connection
+        if not budget_active():raise ValueError('Use the captured pipeline budget for scoped discovery')
+        accept,reject=_load_location_filter(search_cfg)
+        combined={'found':0,'new':0,'existing':0,'queries':0,'errors':0}
+        for target in search_cfg.get('_planned_workday_searches',[]):
+            if limit_reached():break
+            if target['key'] not in employers:continue
+            result=scrape_employers(target['query'],{target['key']:employers[target['key']]},location_filter=search_cfg.get('workday_location_filter',True),accept_locs=accept,reject_locs=reject,workers=1)
+            for key in ('found','new','existing','errors'):combined[key]+=result.get(key,0)
+            combined['queries']+=1
+        from applypilot.pipeline_store import source_health
+        source_health(run_connection(),'Workday',{'status':'ok','found':combined['found'],'errors':combined['errors'],'targets':combined['queries']},combined['new'],combined['existing'])
+        return combined
     queries_cfg = search_cfg.get("queries", [])
     accept_locs, reject_locs = _load_location_filter(search_cfg)
 
     # Default to tier 1-2 queries for workday scraping
-    max_tier = search_cfg.get("workday_max_tier", 2)
+    max_tier = search_cfg.get("workday_max_tier", 3)
     queries = [q["query"] for q in queries_cfg if q.get("tier", 99) <= max_tier]
 
     if not queries:
@@ -621,12 +696,28 @@ def run_workday_discovery(employers: dict | None = None, workers: int = 1) -> di
     grand_new = 0
     grand_existing = 0
     grand_found = 0
+    grand_errors = 0
+    spent = 0
+    budget = int(search_cfg.get("workday_target_budget", 0) or 0)
+    from applypilot.pipeline_store import target_offset, source_health
+    cursor = target_offset(config.APP_DIR, ["Workday"])
+    if budget:
+        query_start = cursor % len(queries)
+        queries = (queries[query_start:] + queries[:query_start])[:budget]
+        employer_start = (cursor // max(1, len(queries))) % len(employers)
+        items = list(employers.items())
+        employers = dict(items[employer_start:] + items[:employer_start])
 
     for i, query in enumerate(queries, 1):
+        if limit_reached() or (budget and spent>=budget):break
+        remaining = budget - spent
+        take = min(len(employers), max(1, remaining // (len(queries)-i+1))) if budget else len(employers)
+        active_employers = dict(list(employers.items())[:take])
+        spent += len(active_employers)
         log.info('Query %d/%d: "%s"', i, len(queries), query)
         result = scrape_employers(
             search_text=query,
-            employers=employers,
+            employers=active_employers,
             location_filter=location_filter,
             accept_locs=accept_locs,
             reject_locs=reject_locs,
@@ -635,6 +726,7 @@ def run_workday_discovery(employers: dict | None = None, workers: int = 1) -> di
         grand_new += result["new"]
         grand_existing += result["existing"]
         grand_found += result["found"]
+        grand_errors += result.get("errors", 0)
 
     log.info(
         "Workday crawl done: %d found, %d new, %d existing across %d queries x %d employers",
@@ -645,9 +737,11 @@ def run_workday_discovery(employers: dict | None = None, workers: int = 1) -> di
         len(employers),
     )
 
+    source_health(get_connection(), "Workday", {"status": "ok", "found": grand_found, "errors": grand_errors, "targets": spent}, grand_new, grand_existing)
     return {
         "found": grand_found,
         "new": grand_new,
         "existing": grand_existing,
         "queries": len(queries),
+        "errors": grand_errors,
     }

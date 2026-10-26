@@ -1,0 +1,35 @@
+{
+  "change_id": "20261004-pipeline-audit",
+  "scope": ["audit", "documentation", "offline diagnostics"],
+  "failure_modes": [
+    {
+      "mode": "Audit probe modifies a live workspace or calls an external service",
+      "cause": "Production defaults accidentally used by imported pipeline modules",
+      "effect": "Changed user data or unintended discovery/inference cost",
+      "severity": 8,
+      "occurrence": 2,
+      "detection": "Review diagnostic patches and explicit mocked dependencies",
+      "mitigation": "Create an isolated temporary workspace before imports, use in-memory databases, and mock all invoked stage/network/AI services."
+    },
+    {
+      "mode": "Guide overstates custom-site or automatic resume capabilities",
+      "cause": "Confusing allow-list entries with source registration or saved variants with routing",
+      "effect": "Empty discovery, wrong resume, or erased advanced configuration",
+      "severity": 7,
+      "occurrence": 4,
+      "detection": "Trace registry loading, save behavior, and route fallbacks; reproduce with fixtures",
+      "mitigation": "Document supported operations and source-registration limitations explicitly; provide additive YAML examples and traceable evidence."
+    },
+    {
+      "mode": "Existing runtime defects remain after the audit",
+      "cause": "Audit scope produces a roadmap rather than applying behavior changes",
+      "effect": "Streaming hangs, misleading statuses, or unnecessary document generation",
+      "severity": 8,
+      "occurrence": 5,
+      "detection": "Bounded isolated reproductions and anchored findings",
+      "mitigation": "Track prioritized fixes with acceptance criteria in the audit document.",
+      "owner": "maintainer/ai-agent",
+      "follow_up_phase": "Pipeline reliability implementation (Phase 1 in docs/PIPELINE_AUDIT.md)"
+    }
+  ]
+}

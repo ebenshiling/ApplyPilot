@@ -1,0 +1,13 @@
+{
+  "implementation_id":"20261016-nz-phase7",
+  "status":"completed_offline_rehearsal_production_release_blocked",
+  "phase":"verified_fixture_invariants_and_explicit_release_decision",
+  "production_data_access":false,
+  "live_source_acceptance":"not performed; permission/reliability unavailable",
+  "live_adapter_coverage":"none; real targets manual only",
+  "verification":[{"command":"python scripts/agent_verify.py","result":"passed","compile":"passed","pytest_passed":802,"pytest_skipped":59,"pytest_seconds":335.48,"strict_ai_checks":"7/7","formal_dataset":"13/13","country_ui":"local-only Chromium enabled; external requests blocked"},{"command":"git diff --check","result":"passed"},{"suite":"original critical file blob comparison","result":"six files match authorised baseline 18f888806ca30665f6b0aff008b341681538a9ee"}],
+  "release_approved":false,
+  "handoff":"docs/NZ_RELEASE_READINESS.md",
+  "gate_matrix":"ops/implementations/20261016-nz-phase7/release_gates.json",
+  "commit_push_deployment":"not requested or performed"
+}

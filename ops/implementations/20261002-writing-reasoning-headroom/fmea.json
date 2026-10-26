@@ -1,0 +1,11 @@
+{
+  "change_id": "20261002-writing-reasoning-headroom",
+  "status": "mitigations_verified",
+  "verification": "349-test gate passed, including writing effort/cap request contracts, none/nonwriting/legacy behavior, invalid allowances, maximum total limit and pool/cache identity changes; deployed configuration and health verified.",
+  "scope": ["tailoring", "statements", "cover letters", "AI client"],
+  "failure_modes": [
+    {"mode": "Reasoning consumes document output limit", "cause": "Existing small limit includes both kinds of tokens", "effect": "Truncated JSON/document and repeated generation", "severity": 8, "detection": "Per-writing-task request budget tests", "mitigation": "Bounded effort-based headroom and continued rejection of truncated replies", "owner": "AI client", "follow_up_phase": "implementation"},
+    {"mode": "Unbounded cost increase or unrelated tasks changed", "cause": "Applying headroom globally or allowing invalid override", "effect": "Unexpected spend", "severity": 7, "detection": "None/nonwriting/legacy-provider/range tests", "mitigation": "Only Luna writing tasks, allowance capped at 16384 and total at model maximum", "owner": "routing", "follow_up_phase": "implementation"},
+    {"mode": "Caches hide changed budget/effort", "cause": "Identity omits headroom", "effect": "Old output reused during trial", "severity": 5, "detection": "Pool/statement cache identity tests", "mitigation": "Headroom included in route and client identity", "owner": "generation", "follow_up_phase": "implementation"}
+  ]
+}

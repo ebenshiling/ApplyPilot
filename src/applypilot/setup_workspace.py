@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from applypilot.config import load_sites_config
+from applypilot.read_model import reuse_read
 
 
 _ALLOWED_ROLE_PACKS = {
@@ -66,7 +67,13 @@ def _validate_project_entry_list(name: str, value: Any, *, max_items: int = 40) 
             raise ValueError(f"{name}[{idx}].header is required")
         subtitle = _clean_str(item.get("subtitle", ""), max_len=300)
         bullets = _validate_string_list(f"{name}[{idx}].bullets", item.get("bullets"), max_items=12, item_max_len=500)
-        out.append({"header": header, "subtitle": subtitle, "bullets": bullets})
+        entry = {"header": header, "subtitle": subtitle, "bullets": bullets}
+        for optional in ("id", "url", "github", "family", "technologies"):
+            if optional in item:
+                entry[optional] = _clean_str(item[optional], max_len=400)
+        if "include" in item:
+            entry["include"] = item["include"] is not False
+        out.append(entry)
     return out
 
 
@@ -87,6 +94,7 @@ def _validate_profile_patch(patch: dict[str, Any]) -> dict[str, Any]:
         "resume_validation",
         "tailoring",
         "eeo_voluntary",
+        "canonical_facts",
     }
 
     unknown = [k for k in patch.keys() if k not in allowed_top]
@@ -94,6 +102,9 @@ def _validate_profile_patch(patch: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"unknown profile fields: {', '.join(sorted(unknown)[:8])}")
 
     out = dict(patch)
+    if "canonical_facts" in out:
+        from applypilot.canonical import validate
+        out["canonical_facts"] = validate(out["canonical_facts"])
 
     personal = out.get("personal")
     if personal is not None:
@@ -150,8 +161,22 @@ def _validate_profile_patch(patch: dict[str, Any]) -> dict[str, Any]:
             kk = _clean_str(k, max_len=80)
             if not kk:
                 continue
-            if kk in {"projects", "data_projects", "support_projects", "application_support_projects"}:
+            if kk in {"projects", "data_projects", "support_projects", "application_support_projects", "professional_experience"}:
                 rs[kk] = _validate_project_entry_list(f"resume_sections.{kk}", v)
+            elif kk == "credentials":
+                if not isinstance(v, list) or len(v) > 120:
+                    raise ValueError("credentials must be a list of at most 120 entries")
+                credentials = []
+                for item in v:
+                    if not isinstance(item, dict) or not str(item.get("name") or "").strip():
+                        raise ValueError("Each credential requires a name")
+                    status = item.get("status", "earned")
+                    if status not in {"earned", "in_progress", "expired"}:
+                        raise ValueError("Credential status must be earned, in_progress, or expired")
+                    entry = {k: _clean_str(item.get(k, ""), max_len=400) for k in ("name", "issuer", "awarded", "expires", "link", "family")}
+                    entry.update(status=status, include=item.get("include", True) is not False)
+                    credentials.append(entry)
+                rs[kk] = credentials
             else:
                 rs[kk] = _validate_string_list(f"resume_sections.{kk}", v, max_items=120, item_max_len=400)
         out["resume_sections"] = rs
@@ -219,9 +244,31 @@ def _validate_profile_patch(patch: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _validate_searches_dict(data: dict[str, Any]) -> None:
+def _validate_searches_dict(data: dict[str, Any], app_dir: Path | None = None) -> None:
     if not isinstance(data, dict):
         raise ValueError("searches.yaml must parse to an object")
+
+    from applypilot.country_context import normalize_country
+    if "country_code" in data:
+        normalize_country(data["country_code"], optional=False)
+    if "nz_workflow_enabled" in data and not isinstance(data["nz_workflow_enabled"], bool):
+        raise ValueError("nz_workflow_enabled must be true/false")
+    if 'discovery_defaults' in data:
+        from applypilot.discovery_scope import validate_policy
+        options=data['discovery_defaults']
+        policy_keys={'max_new_jobs','results_per_search','title_match','processing_scope'}
+        budgets={'board_search_budget','smart_target_budget','workday_target_budget'}
+        providers={'job_boards','direct','workday'}
+        if not isinstance(options,dict) or set(options)-(policy_keys|budgets|providers):raise ValueError('Invalid discovery defaults')
+        validate_policy({k:v for k,v in options.items() if k in policy_keys})
+        if any(not isinstance(options[k],bool) for k in providers if k in options):raise ValueError('Discovery provider defaults must be true/false')
+        if any(isinstance(options[k],bool) or not isinstance(options[k],int) or not 1<=options[k]<=100 for k in budgets if k in options):raise ValueError('Discovery search budgets must be 1–100')
+    campaigns = data.get("campaigns", [])
+    if not isinstance(campaigns, list) or any(not isinstance(c, dict) for c in campaigns):
+        raise ValueError("campaigns must be a list of objects")
+    for campaign in campaigns:
+        if "country_code" in campaign:
+            normalize_country(campaign["country_code"], optional=False)
 
     if "queries" not in data or not isinstance(data.get("queries"), list) or not data.get("queries"):
         raise ValueError("queries must be a non-empty list")
@@ -252,6 +299,8 @@ def _validate_searches_dict(data: dict[str, Any]) -> None:
             if "remote" in l and not isinstance(l.get("remote"), bool):
                 raise ValueError(f"locations[{i}].remote must be true/false")
 
+    from applypilot.geography import validate_locations
+    validate_locations(data)
     for key in ("exclude_titles", "skip_titles"):
         if key in data:
             _validate_string_list(key, data.get(key), max_items=400, item_max_len=120)
@@ -273,7 +322,7 @@ def _validate_searches_dict(data: dict[str, Any]) -> None:
     smart = data.get("smart_sites")
     if smart is not None:
         vals = _validate_string_list("smart_sites", smart, max_items=120, item_max_len=120)
-        cfg = load_sites_config() or {}
+        cfg = load_sites_config(app_dir) or {}
         known = {
             str(e.get("name") or "").strip().lower()
             for e in (cfg.get("sites") or [])
@@ -315,7 +364,7 @@ def _validate_searches_dict(data: dict[str, Any]) -> None:
             if v < 1 or v > 720:
                 raise ValueError("defaults.hours_old must be in 1..720")
 
-    if "country" in data and not re.match(r"^[A-Za-z][A-Za-z\s\-]{0,63}$", _clean_str(data.get("country"), max_len=64)):
+    if "country" in data and (not isinstance(data['country'],str) or not data['country'].strip() or len(data['country'])>80 or any(ord(c)<32 for c in data['country'])):
         raise ValueError("country must be a short text value")
 
 
@@ -375,6 +424,7 @@ def searches_path(app_dir: Path) -> Path:
     return Path(app_dir) / "searches.yaml"
 
 
+@reuse_read
 def read_profile(app_dir: Path) -> dict[str, Any]:
     p = profile_path(app_dir)
     if not p.exists():
@@ -409,6 +459,9 @@ def write_profile(app_dir: Path, patch: dict[str, Any]) -> dict[str, Any]:
         pass
 
     _atomic_write_text(profile_path(app_dir), json.dumps(merged, indent=2, ensure_ascii=False) + "\n")
+    from applypilot.command_center import record_profile_revision
+
+    record_profile_revision(Path(app_dir))
     return merged
 
 
@@ -431,7 +484,17 @@ def write_resume_text(app_dir: Path, text: str) -> None:
         raise ValueError("resume text is empty")
     if not t.endswith("\n"):
         t += "\n"
-    _atomic_write_text(resume_txt_path(app_dir), t)
+    from applypilot.database import init_db
+    from applypilot.cv_library import revision
+    conn = init_db(Path(app_dir)/"applypilot.db")
+    old = resume_txt_path(app_dir)
+    if old.exists():
+        revision(conn, "default", old.read_text(encoding="utf-8"))
+    _atomic_write_text(old, t)
+    revision(conn, "default", t)
+    from applypilot.command_center import record_profile_revision
+
+    record_profile_revision(Path(app_dir))
 
 
 def list_resume_variants(app_dir: Path) -> list[dict[str, Any]]:
@@ -474,7 +537,17 @@ def write_resume_variant(app_dir: Path, key: str, text: str) -> None:
         t += "\n"
     ensure_app_dir(Path(app_dir))
     resume_variants_dir(app_dir).mkdir(parents=True, exist_ok=True)
-    _atomic_write_text(resume_variant_path(app_dir, k), t)
+    from applypilot.database import init_db
+    from applypilot.cv_library import revision
+    conn = init_db(Path(app_dir)/"applypilot.db")
+    old = resume_variant_path(app_dir, k)
+    if old.exists():
+        revision(conn, k, old.read_text(encoding="utf-8"))
+    _atomic_write_text(old, t)
+    revision(conn, k, t)
+    from applypilot.command_center import record_profile_revision
+
+    record_profile_revision(Path(app_dir))
 
 
 def rename_resume_variant(app_dir: Path, old_key: str, new_key: str) -> dict[str, Any]:
@@ -563,6 +636,7 @@ def read_searches_yaml(app_dir: Path) -> tuple[str, bool]:
     return read_text(searches_path(app_dir))
 
 
+@reuse_read
 def read_searches_dict(app_dir: Path) -> dict[str, Any]:
     """Parse searches.yaml into a dict (best-effort)."""
     p = searches_path(app_dir)
@@ -592,7 +666,19 @@ def write_searches_yaml(app_dir: Path, text: str) -> None:
     except Exception as e:
         raise ValueError(f"invalid YAML: {e}")
 
-    _validate_searches_dict(parsed if isinstance(parsed, dict) else {})
+    _validate_searches_dict(parsed if isinstance(parsed, dict) else {}, Path(app_dir))
+
+    routing = parsed.get("resume_routing") or {}
+    if routing:
+        from applypilot.role_routing import _resolve_variant_path
+        if not isinstance(routing.get("variants"), dict) or not isinstance(routing.get("families"), list):
+            raise ValueError("Resume routing needs variants and families")
+        for key, raw in routing["variants"].items():
+            if not _resolve_variant_path(str(raw or key), Path(app_dir)):
+                raise ValueError(f"Resume variant is unavailable: {key}")
+        for family in routing["families"] + routing.get("context_families", []):
+            if family.get("variant") not in routing["variants"] or not isinstance(family.get("keywords"), list):
+                raise ValueError("Each resume family needs a registered variant and keyword list")
 
     _atomic_write_text(searches_path(app_dir), t)
 

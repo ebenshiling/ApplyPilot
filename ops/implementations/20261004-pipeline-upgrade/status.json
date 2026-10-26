@@ -1,0 +1,26 @@
+{
+  "implementation_id": "20261004-pipeline-upgrade",
+  "status": "completed",
+  "owner": "ai-agent",
+  "phases": [
+    {"name":"reliability","status":"completed","notes":"Shared queues, PDF freshness, active producers, bounded no-progress, retryable scoring, incremental document commits, scope/threshold consistency and structured results."},
+    {"name":"configuration_and_sources","status":"completed","notes":"Lossless edits/diffs/revision checks, inferred and explicit resume mappings, fingerprints, workspace direct/Workday registries, read-only extraction tests, employer preservation and rotating budgets."},
+    {"name":"native_pipeline_and_insights","status":"completed","notes":"Campaigns, workflow cards, preview, stage progress, problems/retries, application packets, second-opinion cache/budget, measured tokens/prices and submission cohorts."},
+    {"name":"native_professional_studios","status":"completed","notes":"Multi-format multi-CV imports, originals/revisions/actions/PDFs, native Profile/Portfolio, scoped encrypted AI settings, source proposals, reusable evidence, writing drafts/validation/versioning/preview/download/publication."},
+    {"name":"verification_and_deployment","status":"completed","notes":"387 tests with Playwright, compilation, 7 AI regression checks and 13 formal cases passed. Docker rebuilt/recreated; production health/assets/routing/protected-input hashes and counts verified."}
+  ],
+  "verification": {
+    "result":"passed",
+    "tests":"387 passed with Playwright enabled in 463.55 seconds",
+    "ai_regression_checks":7,
+    "formal_cases":13,
+    "commands":["APPLYPILOT_RUN_PLAYWRIGHT=1 python scripts/agent_verify.py","ruff check changed/new modules and tests --select F","git diff --check scoped to intended tracked paths","docker compose up -d --build --force-recreate applypilot","docker exec applypilot-dashboard python /app/ops/implementations/20261004-pipeline-upgrade/deployment_check.py --workspace /data/multi/workspaces/kobby18 --phase after"],
+    "visual_review":"Desktop/mobile Playwright captures under screenshots; hidden controls corrected and live draft preview verified through the frame DOM.",
+    "production":{"health":"ok","assets":"HTTP 200","counts_preserved":{"jobs":14,"cc_documents":3,"cc_messages":95},"protected_inputs":"All 13 pre-deployment hashes matched after deployment: searches, profile, default resume and ten variants.","routing":{"Data Analyst":"data_analyst","Application Support Analyst":"application_support_analyst","IT Support Analyst":"it_support_analyst"},"writing":"Existing OpenAI gpt-6-luna / low reasoning / 2048 token headroom retained for tailor, statement and cover."},
+    "paid_inference":"None during verification",
+    "known_repository_check_note":"Unscoped git diff --check flags pre-existing CRLF/whitespace in the user's ten modified UK search presets; intended-file checks passed and those presets were preserved."
+  },
+  "constraints":["Live model quality and source reachability were not benchmarked by mocked tests.","Model pricing is user-configured and estimates reflect reported tokens, not billing reconciliation.","Image-only PDFs require a readable-text source.","UI backup export omits provider and connector encryption secrets."],
+  "pre_state":"ops/implementations/20261004-pipeline-upgrade/pre_state.json",
+  "post_state":"ops/implementations/20261004-pipeline-upgrade/post_state.json"
+}

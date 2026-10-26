@@ -1,0 +1,31 @@
+{
+  "implementation_id":"20261007-packet-pdf-readiness",
+  "status":"completed",
+  "phase":"deployed",
+  "owner":"ai-agent",
+  "updated_at":"2026-10-07",
+  "diagnosis":"Job 24 Hillingdon: CV PDF exists; published Cover and Statement Studio text files exist but their PDFs have not been rendered. Generic PDF rendering gate rejects the packet while UI incorrectly says all drafts are included/ready.",
+  "live_repair":{"job_id":24,"workspace":"kobby18","cover_pages":1,"statement_pages":3,"reviewed_text_hashes_unchanged":true,"packet_ready_after_repair":true,"submission_fields_unchanged":true},
+  "verification":{
+    "command":"python scripts/agent_verify.py",
+    "result":"passed",
+    "pytest":"475 passed, 1 skipped in 1158.41 seconds with browser verification enabled",
+    "new_tests":19,
+    "skipped":"Windows symlink privilege unavailable; equivalent Linux container symlink escape smoke passed",
+    "ai_regression":"7/7 passed",
+    "ai_formal":"13/13 passed",
+    "static":"ruff, compileall, node --check and scoped git diff --check passed",
+    "runtime":"Deployed richer packet adapter reports job 24 ready; CV, cover and statement PDFs verified as valid with 2, 1 and 3 pages respectively",
+    "coverage":"Missing/stale PDFs, atomic replacement, invalid output, future report timestamps, source changes, active/uncertain/submitted guards, outside-workspace paths, packet-version approval, previews and browser UI recovery",
+    "compatibility":"Case-sensitive reconcile-message compatibility issue found by existing tests and corrected"
+  },
+  "deployment":{
+    "build":"docker compose build --quiet applypilot passed",
+    "recreation":"docker compose up -d --no-build --force-recreate applypilot passed",
+    "active_browser_check":"No active browser jobs in the affected workspace before recreation",
+    "health":{"ok":true,"multi_user":true}
+  },
+  "pre_state":"ops/implementations/20261007-packet-pdf-readiness/pre_state.json",
+  "post_state":"ops/implementations/20261007-packet-pdf-readiness/post_state.json",
+  "snapshot_note":"Prior user changes preserved. No commits created."
+}

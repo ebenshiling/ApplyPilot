@@ -1,0 +1,6 @@
+{
+  "implementation_id":"20261009-direct-source-recovery",
+  "title":"Reliable direct-source validation, saving and actionable extraction previews",
+  "owner":"ai-agent",
+  "steps":["Reproduce the Indeed homepage search-template save/preview failures", "Share validation between save and preview and offer the correct Indeed search template", "Return categorized site/network preview errors and keep source-form feedback inline", "Test read-only previews, persistence, workspace isolation and real UI recovery", "Run required verification, deploy when idle and complete records"]
+}

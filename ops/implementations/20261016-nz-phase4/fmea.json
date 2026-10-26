@@ -1,0 +1,10 @@
+{
+  "change_id":"20261016-nz-phase4",
+  "failure_modes":[
+    {"mode":"Generated prose falsely marked factual","cause":"Citation existence or AI reviewer treated as semantic proof","effect":"Unsupported claims become final","severity":10,"detection":"Full-byte manifest and adversarial entity/number/skill/duration fixtures","mitigation":"Closed verified wording/computation set; new prose remains draft until evidence-linked human review; no LLM proof"},
+    {"mode":"UK source routing changes on NZ import","cause":"Existing import assigns root roles or rewrites nested references","effect":"Wrong CV or country terminology","severity":9,"detection":"UK byte/route baselines and nested rename/archive fixtures","mitigation":"Country/category metadata and campaign-only NZ assignments; no implicit UK fallback"},
+    {"mode":"Legacy/manual/export path bypasses final gate","cause":"Multiple independent publication/PDF/upload paths","effect":"Unsupported final application artifacts","severity":10,"detection":"Direct-helper and full-entry publication tests","mitigation":"Common final-byte authority, immutable manifests, draft retention and checked export/upload"},
+    {"mode":"Imported/edited facts automatically verified","cause":"Unstructured legacy profile or model output promotes claims","effect":"Fabricated canonical proof","severity":10,"detection":"Unverified import/edit invalidation and credential/period tests","mitigation":"Stable entity/fact IDs, explicit human reconciliation; source/original retention and current revisions"},
+    {"mode":"Real candidate documents accessed without inputs","cause":"Guessing file locations in private workspaces","effect":"Unintended private data access or import","severity":9,"detection":"Fixture-only development and input dependency record","mitigation":"Use synthetic fixtures until exact master/evidence paths are supplied"}
+  ]
+}

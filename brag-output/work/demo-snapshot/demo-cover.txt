@@ -1,0 +1,12 @@
+Dear Hiring Manager,
+
+I am applying for the Application Support Analyst role at Meridian Health. My experience at Northstar Digital combines application incident investigation, SQL diagnostics and clear communication with users and technical colleagues. I would bring a practical, evidence-led approach to keeping services reliable.
+
+In my current role, I investigate incidents through queries, application logs and reproducible steps. I document findings so that colleagues can understand what was checked and why a resolution was chosen. I also maintain service documentation and share troubleshooting notes with the team.
+
+My service reliability knowledge base project brought reviewed runbooks and recurring-issue diagnostics into one searchable collection. This work reflects my interest in making support knowledge accessible and reusable. I would apply the same care to your service documentation and incident handovers.
+
+I would welcome the opportunity to discuss the role and explain the examples behind my application. Thank you for considering my application.
+
+Kind regards,
+Alex Morgan

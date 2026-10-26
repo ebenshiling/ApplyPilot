@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from contextvars import copy_context
 import time
 from datetime import datetime
 import os
@@ -28,6 +29,8 @@ from rich.table import Table
 
 from applypilot.config import APP_DIR, ensure_dirs, load_env
 from applypilot.database import init_db, get_connection, get_stats
+from applypilot.country_context import pipeline_operation, current as current_country
+from applypilot.discovery_scope import bounded_discovery,limit_reached,initialize_selection
 
 log = logging.getLogger(__name__)
 console = Console()
@@ -43,6 +46,9 @@ def _append_metric(event: dict) -> None:
     try:
         payload = dict(event)
         payload.setdefault("ts", datetime.now().isoformat())
+        if payload.get("event") in {"stage_start", "stage_complete"} and payload.get("run_id"):
+            from applypilot.pipeline_store import stage
+            stage(get_connection(), payload["run_id"], payload["stage"], payload.get("status", "running"), payload)
         mp = _metrics_path()
         with mp.open("a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
@@ -97,25 +103,33 @@ _UPSTREAM: dict[str, str | None] = {
 # ---------------------------------------------------------------------------
 
 
+def _stage_result(value) -> dict:
+    result = dict(value) if isinstance(value, dict) else {"generated": int(value or 0)}
+    errors = int(result.get("errors", result.get("error", 0)) or 0) + int(result.get("failed", 0) or 0)
+    partial = int(result.get("partial", 0) or 0)
+    result.setdefault("status", "partial" if errors or partial else "ok")
+    return result
+
+
+@bounded_discovery
 def _run_discover(workers: int = 1) -> dict:
     """Stage: Job discovery - JobSpy, Workday, and smart-extract scrapers."""
     stats: dict = {"jobspy": None, "workday": None, "smartextract": None}
 
     def _skip(flag: str) -> bool:
         v = str(os.environ.get(flag, "") or "").strip().lower()
-        return v in ("1", "true", "yes", "y", "on")
+        return limit_reached() or v in ("1", "true", "yes", "y", "on")
 
     # JobSpy
     if _skip("DISCOVER_SKIP_JOBSPY"):
-        console.print("  [yellow]JobSpy skipped (DISCOVER_SKIP_JOBSPY=1)[/yellow]")
+        console.print("  [yellow]JobSpy skipped ("+('new-job limit reached' if limit_reached() else 'DISCOVER_SKIP_JOBSPY=1')+")[/yellow]")
         stats["jobspy"] = "skipped"
     else:
         console.print("  [cyan]JobSpy full crawl...[/cyan]")
         try:
             from applypilot.discovery.jobspy import run_discovery
 
-            run_discovery()
-            stats["jobspy"] = "ok"
+            stats["jobspy"] = _stage_result(run_discovery())
         except Exception as e:
             log.error("JobSpy crawl failed: %s", e)
             console.print(f"  [red]JobSpy error:[/red] {e}")
@@ -123,15 +137,14 @@ def _run_discover(workers: int = 1) -> dict:
 
     # Workday corporate scraper
     if _skip("DISCOVER_SKIP_WORKDAY"):
-        console.print("  [yellow]Workday skipped (DISCOVER_SKIP_WORKDAY=1)[/yellow]")
+        console.print("  [yellow]Workday skipped ("+('new-job limit reached' if limit_reached() else 'DISCOVER_SKIP_WORKDAY=1')+")[/yellow]")
         stats["workday"] = "skipped"
     else:
         console.print("  [cyan]Workday corporate scraper...[/cyan]")
         try:
             from applypilot.discovery.workday import run_workday_discovery
 
-            run_workday_discovery(workers=workers)
-            stats["workday"] = "ok"
+            stats["workday"] = _stage_result(run_workday_discovery(workers=workers))
         except Exception as e:
             log.error("Workday scraper failed: %s", e)
             console.print(f"  [red]Workday error:[/red] {e}")
@@ -139,21 +152,26 @@ def _run_discover(workers: int = 1) -> dict:
 
     # Smart extract
     if _skip("DISCOVER_SKIP_SMARTE"):
-        console.print("  [yellow]Smart extract skipped (DISCOVER_SKIP_SMARTE=1)[/yellow]")
+        console.print("  [yellow]Smart extract skipped ("+('new-job limit reached' if limit_reached() else 'DISCOVER_SKIP_SMARTE=1')+")[/yellow]")
         stats["smartextract"] = "skipped"
     else:
         console.print("  [cyan]Smart extract (AI-powered scraping)...[/cyan]")
         try:
             from applypilot.discovery.smartextract import run_smart_extract
 
-            run_smart_extract(workers=workers)
-            stats["smartextract"] = "ok"
+            stats["smartextract"] = _stage_result(run_smart_extract(workers=workers))
         except Exception as e:
             log.error("Smart extract failed: %s", e)
             console.print(f"  [red]Smart extract error:[/red] {e}")
             stats["smartextract"] = f"error: {e}"
 
-    return stats
+    errors = sum(int(v.get("errors", 0) or 0) if isinstance(v, dict) else int(str(v).startswith("error")) for v in stats.values())
+    if current_country() and current_country().country_code == "NZ":
+        from applypilot.discovery.nz import matrix
+        readiness = matrix(Path(current_country().workspace), current_country().config)
+        if not readiness["automatic_discovery_available"]:
+            return {"sources": stats, "errors": errors, "status": "partial", "mode": "manual", "automatic_coverage_gate": "blocked", "detail": "No selected permitted and validated NZ automatic sources; use manual capture"}
+    return {"sources": stats, "errors": errors, "status": "partial" if errors else "ok"}
 
 
 def _run_enrich(workers: int = 1) -> dict:
@@ -161,8 +179,7 @@ def _run_enrich(workers: int = 1) -> dict:
     try:
         from applypilot.enrichment.detail import run_enrichment
 
-        run_enrichment(workers=workers)
-        return {"status": "ok"}
+        return _stage_result(run_enrichment(workers=workers))
     except Exception as e:
         log.error("Enrichment failed: %s", e)
         return {"status": f"error: {e}"}
@@ -173,8 +190,7 @@ def _run_score() -> dict:
     try:
         from applypilot.scoring.scorer import run_scoring
 
-        run_scoring()
-        return {"status": "ok"}
+        return _stage_result(run_scoring())
     except Exception as e:
         log.error("Scoring failed: %s", e)
         return {"status": f"error: {e}"}
@@ -185,8 +201,7 @@ def _run_tailor(min_score: int = 7) -> dict:
     try:
         from applypilot.scoring.tailor import run_tailoring
 
-        run_tailoring(min_score=min_score)
-        return {"status": "ok"}
+        return _stage_result(run_tailoring(min_score=min_score))
     except Exception as e:
         log.error("Tailoring failed: %s", e)
         return {"status": f"error: {e}"}
@@ -197,8 +212,7 @@ def _run_cover(min_score: int = 7) -> dict:
     try:
         from applypilot.scoring.cover_letter import run_cover_letters
 
-        run_cover_letters(min_score=min_score)
-        return {"status": "ok"}
+        return _stage_result(run_cover_letters(min_score=min_score))
     except Exception as e:
         log.error("Cover letter generation failed: %s", e)
         return {"status": f"error: {e}"}
@@ -209,8 +223,7 @@ def _run_statement(min_score: int = 7) -> dict:
     try:
         from applypilot.scoring.supporting_statement import run_supporting_statements
 
-        run_supporting_statements(min_score=min_score)
-        return {"status": "ok"}
+        return _stage_result(run_supporting_statements(min_score=min_score))
     except Exception as e:
         log.error("Supporting statement generation failed: %s", e)
         return {"status": f"error: {e}"}
@@ -219,10 +232,9 @@ def _run_statement(min_score: int = 7) -> dict:
 def _run_pdf() -> dict:
     """Stage: PDF conversion - convert tailored resumes and cover letters to PDF."""
     try:
-        from applypilot.scoring.pdf import batch_convert
+        from applypilot.scoring.pdf import convert_pending
 
-        batch_convert()
-        return {"status": "ok"}
+        return _stage_result(convert_pending(get_connection()))
     except Exception as e:
         log.error("PDF conversion failed: %s", e)
         return {"status": f"error: {e}"}
@@ -278,6 +290,7 @@ class _StageTracker:
     def mark_done(self, stage: str, result: dict | None = None) -> None:
         with self._lock:
             self._results[stage] = result or {"status": "ok"}
+            self._results[stage]["finished_at"] = time.time()
         self._events[stage].set()
 
     def is_done(self, stage: str) -> bool:
@@ -323,57 +336,14 @@ _STREAM_POLL_INTERVAL = 10
 
 
 def _selected_only_enabled() -> bool:
-    for key in ("APPLYPILOT_SELECTED_ONLY", "APPLYPILOT_APPLY_SELECTED_ONLY"):
-        val = str(os.environ.get(key, "") or "").strip().lower()
-        if val in ("1", "true", "yes", "y", "on"):
-            return True
-    return False
+    from applypilot.eligibility import selected_only
+    return selected_only()
 
 
 def _count_pending(stage: str, min_score: int = 7) -> int:
     """Count pending work items for a stage."""
-    sql = _PENDING_SQL.get(stage)
-    if sql is None:
-        return 0
-
-    selected_only = _selected_only_enabled()
-    if selected_only and stage in ("tailor", "statement", "cover"):
-        # Selection should override score thresholds; count any selected jobs
-        # that are eligible for the stage.
-        if stage == "tailor":
-            sql = (
-                "SELECT COUNT(*) FROM jobs WHERE apply_status = 'selected' "
-                "AND full_description IS NOT NULL "
-                "AND tailored_resume_path IS NULL "
-                "AND COALESCE(tailor_attempts, 0) < 5"
-            )
-        elif stage == "statement":
-            sql = (
-                "SELECT COUNT(*) FROM jobs WHERE apply_status = 'selected' "
-                "AND tailored_resume_path IS NOT NULL "
-                "AND full_description IS NOT NULL "
-                "AND (supporting_statement_path IS NULL OR supporting_statement_path = '') "
-                "AND COALESCE(statement_attempts, 0) < 5"
-            )
-        elif stage == "cover":
-            sql = (
-                "SELECT COUNT(*) FROM jobs WHERE apply_status = 'selected' "
-                "AND tailored_resume_path IS NOT NULL "
-                "AND full_description IS NOT NULL "
-                "AND (cover_letter_path IS NULL OR cover_letter_path = '') "
-                "AND COALESCE(cover_attempts, 0) < 5"
-            )
-    elif selected_only and stage in ("tailor", "statement", "cover"):
-        sql += " AND apply_status = 'selected'"
-
-    params: list[object] = []
-    if "?" in sql:
-        params.append(min_score)
-
-    conn = get_connection()
-    if params:
-        return conn.execute(sql, tuple(params)).fetchone()[0]
-    return conn.execute(sql).fetchone()[0]
+    from applypilot.eligibility import candidates
+    return len(candidates(get_connection(), stage, min_score)) if stage != "discover" else 0
 
 
 def _run_stage_streaming(
@@ -382,6 +352,7 @@ def _run_stage_streaming(
     stop_event: threading.Event,
     min_score: int = 7,
     workers: int = 1,
+    producers: tuple[str, ...] | None = None,
 ) -> None:
     """Run a single stage in streaming mode: loop until upstream done + no work.
 
@@ -397,37 +368,60 @@ def _run_stage_streaming(
         kwargs["workers"] = workers
 
     upstream = _UPSTREAM[stage]
+    dependencies = producers if producers is not None else ((upstream,) if upstream else ())
+    started = time.time()
+    _append_metric({"event": "stage_start", "run_id": os.environ.get("APPLYPILOT_RUN_ID"), "stage": stage})
+    def finish(result):
+        tracker.mark_done(stage, {**result, "elapsed": time.time() - started})
+        _append_metric({"event": "stage_complete", "run_id": os.environ.get("APPLYPILOT_RUN_ID"), "stage": stage,
+                        "status": result.get("status", "ok"), "result": result, "elapsed_s": time.time() - started})
 
     if stage == "discover":
         # Discover runs once (its sub-scrapers already do their full crawl)
         try:
             result = runner(**kwargs)
-            tracker.mark_done(stage, result)
+            finish(result)
         except Exception as e:
             log.exception("Stage '%s' crashed", stage)
-            tracker.mark_done(stage, {"status": f"error: {e}"})
+            finish({"status": f"error: {e}"})
         return
 
     # For downstream stages: loop until upstream done + no pending work
     passes = 0
+    no_progress = 0
+    outcome = {"status": "ok", "errors": 0}
     while not stop_event.is_set():
         # Wait for upstream to start producing work (first pass only)
-        if passes == 0 and upstream and not tracker.is_done(upstream):
+        if passes == 0 and dependencies and not all(tracker.is_done(d) for d in dependencies):
             # Wait a bit for upstream to produce some work before first run
-            tracker.wait(upstream, timeout=_STREAM_POLL_INTERVAL)
+            stop_event.wait(timeout=_STREAM_POLL_INTERVAL)
 
         pending = _count_pending(stage, min_score)
 
         if pending > 0:
             try:
-                runner(**kwargs)
+                result = _stage_result(runner(**kwargs))
+                outcome["errors"] += int(result.get("errors", result.get("error", 0)) or 0) + int(result.get("failed", 0) or 0)
+                if result["status"] != "ok":
+                    outcome["status"] = result["status"]
+                outcome["last_result"] = result
                 passes += 1
             except Exception as e:
                 log.error("Stage '%s' error (pass %d): %s", stage, passes, e)
                 passes += 1
+                outcome["status"] = f"error: {e}"
+                outcome["errors"] += 1
+            remaining = _count_pending(stage, min_score)
+            no_progress = no_progress + 1 if remaining >= pending else 0
+            if no_progress >= 5:
+                outcome["status"] = "stalled"
+                outcome["pending"] = remaining
+                break
+            if remaining:
+                stop_event.wait(timeout=min(_STREAM_POLL_INTERVAL, 2 ** min(no_progress, 4)))
         else:
             # No work right now
-            upstream_done = upstream is None or tracker.is_done(upstream)
+            upstream_done = all(tracker.is_done(d) for d in dependencies)
             if upstream_done:
                 # No work and upstream is done — this stage is finished
                 break
@@ -435,7 +429,9 @@ def _run_stage_streaming(
             if stop_event.wait(timeout=_STREAM_POLL_INTERVAL):
                 break  # Stop requested
 
-    tracker.mark_done(stage, {"status": "ok", "passes": passes})
+    if stop_event.is_set():
+        outcome["status"] = "cancelled"
+    finish({**outcome, "passes": passes})
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +446,8 @@ def _run_sequential(ordered: list[str], min_score: int, workers: int = 1, run_id
     pipeline_start = time.time()
 
     for name in ordered:
+        result = {}
+        _append_metric({"event": "stage_start", "run_id": run_id, "stage": name})
         pre = _compact_stats(get_stats())
         meta = STAGE_META[name]
         console.print(f"\n{'=' * 70}")
@@ -462,7 +460,7 @@ def _run_sequential(ordered: list[str], min_score: int, workers: int = 1, run_id
 
         try:
             kwargs: dict = {}
-            if name in ("tailor", "cover"):
+            if name in ("tailor", "statement", "cover"):
                 kwargs["min_score"] = min_score
             if name in ("discover", "enrich"):
                 kwargs["workers"] = workers
@@ -485,7 +483,7 @@ def _run_sequential(ordered: list[str], min_score: int, workers: int = 1, run_id
             log.exception("Stage '%s' crashed", name)
             console.print(f"\n  [red]STAGE FAILED:[/red] {e}")
 
-        results.append({"stage": name, "status": status, "elapsed": elapsed})
+        results.append({"stage": name, "status": status, "elapsed": elapsed, "result": result})
         if status not in ("ok", "partial"):
             errors[name] = status
 
@@ -500,6 +498,7 @@ def _run_sequential(ordered: list[str], min_score: int, workers: int = 1, run_id
                 "elapsed_s": round(elapsed, 3),
                 "pre": pre,
                 "post": post,
+                "result": result,
             }
         )
 
@@ -515,7 +514,7 @@ def _run_streaming(ordered: list[str], min_score: int, workers: int = 1, run_id:
     stop_event = threading.Event()
     pipeline_start = time.time()
 
-    console.print(f"\n  [bold cyan]STREAMING MODE[/bold cyan] - stages run concurrently")
+    console.print("\n  [bold cyan]STREAMING MODE[/bold cyan] - stages run concurrently")
     console.print(f"  Poll interval: {_STREAM_POLL_INTERVAL}s\n")
 
     # Mark stages NOT in `ordered` as done so downstream doesn't wait for them
@@ -527,11 +526,11 @@ def _run_streaming(ordered: list[str], min_score: int, workers: int = 1, run_id:
     threads: dict[str, threading.Thread] = {}
     start_times: dict[str, float] = {}
 
-    for name in ordered:
+    for index, name in enumerate(ordered):
         start_times[name] = time.time()
         t = threading.Thread(
-            target=_run_stage_streaming,
-            args=(name, tracker, stop_event, min_score, workers),
+            target=copy_context().run,
+            args=(_run_stage_streaming, name, tracker, stop_event, min_score, workers, tuple(ordered[:index])),
             name=f"stage-{name}",
             daemon=True,
         )
@@ -560,10 +559,10 @@ def _run_streaming(ordered: list[str], min_score: int, workers: int = 1, run_id:
 
     for name in ordered:
         r = all_results.get(name, {"status": "unknown"})
-        elapsed = time.time() - start_times.get(name, pipeline_start)
+        elapsed = r.get("elapsed", r.get("finished_at", time.time()) - start_times.get(name, pipeline_start))
         status = r.get("status", "ok")
 
-        results.append({"stage": name, "status": status, "elapsed": elapsed})
+        results.append({"stage": name, "status": status, "elapsed": elapsed, "result": r})
         if status not in ("ok", "partial", "skipped"):
             errors[name] = status
         _append_metric(
@@ -575,18 +574,22 @@ def _run_streaming(ordered: list[str], min_score: int, workers: int = 1, run_id:
                 "status": status,
                 "elapsed_s": round(elapsed, 3),
                 "passes": int((r or {}).get("passes") or 0),
+                "result": r,
             }
         )
 
     return {"stages": results, "errors": errors, "elapsed": total_elapsed}
 
 
+@pipeline_operation
 def run_pipeline(
     stages: list[str] | None = None,
     min_score: int = 7,
     dry_run: bool = False,
     stream: bool = False,
     workers: int = 1,
+    country_code: str | None = None,
+    campaign_id: str | None = None,
 ) -> dict:
     """Run pipeline stages.
 
@@ -604,12 +607,22 @@ def run_pipeline(
     load_env()
     ensure_dirs()
     init_db()
-    run_id = datetime.now().strftime("%Y%m%d%H%M%S")
+    run_id = os.environ.get("APPLYPILOT_RUN_ID") or datetime.now().strftime("%Y%m%d%H%M%S")
+    os.environ["APPLYPILOT_RUN_ID"] = run_id
+    initialize_selection(get_connection(),run_id,current_country().config.get('_run_scope') if current_country() else None)
 
     # Resolve stages
     if stages is None:
         stages = ["all"]
     ordered = _resolve_stages(stages)
+    previous_force = os.environ.get("APPLYPILOT_FORCE_DOCUMENTS")
+    if ordered == ["statement"]:
+        os.environ["APPLYPILOT_FORCE_DOCUMENTS"] = "statement"
+    def restore_force():
+        if previous_force is None:
+            os.environ.pop("APPLYPILOT_FORCE_DOCUMENTS", None)
+        else:
+            os.environ["APPLYPILOT_FORCE_DOCUMENTS"] = previous_force
 
     # Banner
     mode = "streaming" if stream else "sequential"
@@ -640,20 +653,35 @@ def run_pipeline(
     )
 
     if dry_run:
+        from applypilot.pipeline_workspace import preview
+        work = preview(get_connection(), Path(APP_DIR), {"min_score": min_score, "selected_only": _selected_only_enabled()})
+        console.print(json.dumps({k: work[k] for k in ("board_searches", "smart_targets", "smart_window", "queue", "missing_inputs")}, indent=2))
         console.print(f"\n  [yellow]DRY RUN[/yellow] - would execute ({mode}):")
         for name in ordered:
             meta = STAGE_META[name]
             console.print(f"    {name:<12s}  {meta['desc']}")
-        console.print(f"\n  No changes made.")
-        return {"stages": [], "errors": {}, "elapsed": 0.0}
+        console.print("\n  No changes made.")
+        restore_force()
+        return {"stages": [], "errors": {}, "elapsed": 0.0, "preview": work}
 
     # Execute
+    from applypilot.pipeline_store import now as pipeline_now
+    conn = get_connection()
+    conn.execute("INSERT OR REPLACE INTO cc_pipeline_runs(run_id,started_at,status,config) VALUES(?,?,?,?)",
+                 (run_id, pipeline_now(), "running", json.dumps({"stages": ordered, "min_score": min_score, "workers": workers,
+                                                               "stream": stream, "selected_only": _selected_only_enabled(),
+                                                                "country_context": current_country().public(),"run_scope":current_country().config.get('_run_scope')})))
+    conn.commit()
     if stream:
         result = _run_streaming(ordered, min_score, workers=workers, run_id=run_id)
     else:
         result = _run_sequential(ordered, min_score, workers=workers, run_id=run_id)
+    state = "failed" if result["errors"] else "partial" if any(s["status"] == "partial" for s in result["stages"]) else "completed"
+    conn.execute("UPDATE cc_pipeline_runs SET status=?,ended_at=?,result=? WHERE run_id=?", (state, pipeline_now(), json.dumps(result), run_id))
+    conn.commit()
 
     # Summary table
+    restore_force()
     console.print(f"\n{'=' * 70}")
     summary = Table(title="Pipeline Summary", show_header=True, header_style="bold")
     summary.add_column("Stage", style="bold")
@@ -677,7 +705,7 @@ def run_pipeline(
 
     # Final DB stats
     final = get_stats()
-    console.print(f"\n  [bold]DB Final State:[/bold]")
+    console.print("\n  [bold]DB Final State:[/bold]")
     console.print(f"    Total jobs:     {final['total']}")
     console.print(f"    With desc:      {final['with_description']}")
     console.print(f"    Scored:         {final['scored']}")

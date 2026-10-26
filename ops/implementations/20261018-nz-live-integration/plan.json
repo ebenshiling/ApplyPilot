@@ -1,0 +1,13 @@
+{
+  "implementation_id": "20261018-nz-live-integration",
+  "authorization": "User requested updating the current Docker app and releasing NZ and real-site application functionality on 2026-10-18.",
+  "steps": [
+    "Compare feature worktree against the authorized existing-code checkpoint; preserve all subsequent original-checkout edits.",
+    "Back up affected source/configuration and stopped Docker data with restricted permissions; retain the previous image for rollback.",
+    "Integrate additive NZ functionality, enable its UI in the deployment, and replace development-only execution locks with the existing application workflows and an optional service emergency stop.",
+    "Preserve factual-document checks, jurisdiction ownership, explicit submission review, replay protection, and honest source readiness.",
+    "Verify with offline regression and local HTTP/browser application fixtures; rebuild and check the running Docker service without submitting any real applications."
+  ],
+  "data_policy": "No inferred candidate facts, no country backfill, no destructive migration, no automatic live discovery or application at deployment.",
+  "rollback": "Previous image plus restricted stopped-data/source archives; restore only with the service stopped."
+}

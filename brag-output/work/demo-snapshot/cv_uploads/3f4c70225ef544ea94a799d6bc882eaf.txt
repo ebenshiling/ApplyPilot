@@ -1,0 +1,32 @@
+Alex Morgan
+Data Analyst
+Manchester, United Kingdom | alex.morgan@example.com | +44 7700 900123
+
+SUMMARY
+Application support analyst with experience in incident resolution, SQL diagnostics, service documentation and clear stakeholder communication. Uses verified project evidence to explain practical work and professional development.
+
+CORE SKILLS
+Incident triage | SQL diagnostics | Service documentation | Stakeholder communication
+
+PROFESSIONAL EXPERIENCE
+Data Analyst at Northstar Digital
+2023–present | Manchester
+- Investigated application incidents using SQL queries, logs and reproducible steps.
+- Maintained service documentation and shared troubleshooting notes with colleagues.
+- Coordinated incident updates with users and technical teams.
+- Built a support knowledge base with reviewed troubleshooting procedures.
+
+PROJECTS
+Service reliability knowledge base
+2025 | SQL, Python, Markdown
+- Built a searchable collection of incident diagnostics and reviewed runbooks.
+- Documented recurring issues and clear resolution steps.
+
+TECHNICAL SKILLS
+Tools: SQL, Python, Power BI, Git, ServiceNow
+
+EDUCATION
+BSc Computing | Example University | 2022
+
+CERTIFICATIONS
+ITIL Foundation | Example Training | Earned

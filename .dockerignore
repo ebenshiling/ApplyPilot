@@ -14,3 +14,4 @@ __pycache__
 .env
 applypilot-transfer*.zip
 docker-data/
+.release-backups/

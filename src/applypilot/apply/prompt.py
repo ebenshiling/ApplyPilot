@@ -33,7 +33,7 @@ def _resolve_work_auth_strings(work_auth: dict) -> tuple[str, str]:
 
 def _currency_symbol(code: str) -> str:
     c = (code or "").strip().upper()
-    return {"USD": "$", "GBP": "\u00a3", "EUR": "\u20ac"}.get(c, "")
+    return {"USD": "$", "GBP": "\u00a3", "EUR": "\u20ac", "NZD": "NZ$"}.get(c, "")
 
 
 def _build_profile_summary(profile: dict) -> str:
@@ -194,16 +194,17 @@ def _build_screening_section(profile: dict) -> str:
     personal = profile["personal"]
     exp = profile.get("experience", {})
     city = personal.get("city", "their city")
-    years = exp.get("years_of_experience_total", "multiple")
+    years = exp.get("years_of_experience_total", "unverified/unspecified")
     target_role = (
         exp.get("target_role")
         or exp.get("current_job_title")
         or personal.get("current_job_title")
-        or "software engineer"
+        or "candidate with an unconfirmed target role"
     )
     work_auth = profile["work_authorization"]
 
     auth, _sponsor = _resolve_work_auth_strings(work_auth)
+    relocation=str((profile.get("availability") or {}).get("willing_to_relocate") or "not specified; ask the candidate")
 
     boundary = profile.get("skills_boundary", {})
     allowed: list[str] = []
@@ -214,15 +215,15 @@ def _build_screening_section(profile: dict) -> str:
 
     return f"""== SCREENING QUESTIONS (be strategic) ==
 Hard facts -> answer truthfully from the profile. No guessing. This includes:
-  - Location/relocation: lives in {city}, cannot relocate
+  - Residence recorded as {city}; relocation preference: {relocation}
   - Work authorization: {auth}
   - Citizenship, clearance, licenses, certifications: answer from profile only
   - Criminal/background: answer from profile only
 
-Skills and tools -> be confident but accurate. This candidate is a {target_role} with {years} years experience.
-If the tool is in the skills boundary ({allowed_str}), answer YES.
-If it's a close equivalent (e.g. MySQL vs PostgreSQL, Looker vs Power BI), answer YES.
-If it's not listed and not a close equivalent, answer NO or "learning" (do not claim experience).
+Skills and tools -> the supplied target is {target_role}; recorded experience total is {years}, not a verified tool-specific duration.
+The supplied skills boundary ({allowed_str}) is source text, not automatic verification.
+Answer YES only when current verified evidence supports the exact question.
+A related tool is not experience with the requested tool. Missing experience remains unknown for candidate clarification; do not invent a NO, a learning claim, or an equivalent-skill YES.
 
 Open-ended questions ("Why do you want this role?", "Tell us about yourself", "What interests you?") -> Write 2-3 sentences. Be specific to THIS job. Reference something from the job description. Connect it to a real achievement from the resume. No generic fluff. No "I am passionate about..." -- sound like a real person.
 
@@ -482,6 +483,10 @@ def build_prompt(job: dict, tailored_resume: str, cover_letter: str | None = Non
         Complete prompt string for the AI agent.
     """
     profile = config.load_profile()
+    if job.get("country_code") == "NZ":
+        from applypilot.apply.assisted_browser import application_data
+        from applypilot.database import get_connection
+        profile, _ = application_data(get_connection(), config.APP_DIR, job)
     search_config = config.load_search_config()
     personal = profile["personal"]
 

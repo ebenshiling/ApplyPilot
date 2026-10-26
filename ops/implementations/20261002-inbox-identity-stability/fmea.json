@@ -1,0 +1,12 @@
+{
+  "change_id": "20261002-inbox-identity-stability",
+  "status": "mitigations_verified",
+  "verification": "324-test gate includes decision preservation, no destructive cleanup, native/RFC identity aliases, distinct delivery/outcome/URL/time and ambiguous/conflicting cases, page-offset clamp and browser DOM/open-source stability. Deployment and real Gmail sync preserved the accepted original and duplicate audit links.",
+  "scope": ["inbox identities", "mail sync", "legacy migration", "polling", "pagination"],
+  "failure_modes": [
+    {"mode": "Recorded/dismissed mail resurfaces", "cause": "Parser changes digest and legacy imports lack native IDs", "effect": "Duplicate review or repeated hiring update", "severity": 9, "detection": "Legacy/native formatting and repeat-sync decision tests", "mitigation": "Identity aliases and canonical decisions with retained duplicate audit copies", "owner": "inbox persistence", "follow_up_phase": "identity_and_reconciliation"},
+    {"mode": "Distinct emails are merged", "cause": "Subject/thread or fuzzy-content matching", "effect": "Lost outcome or incorrect reminder", "severity": 10, "detection": "Distinct native IDs, receipts/rejections, different links/receipt times and ambiguous candidates", "mitigation": "Exact full display text, source identity, unique legacy pairing and no subject/thread-only merge", "owner": "identity", "follow_up_phase": "identity_and_reconciliation"},
+    {"mode": "Existing decisions/analysis are overwritten", "cause": "Destructive duplicate cleanup", "effect": "History lost", "severity": 9, "detection": "Accepted/dismissed/ignored/analysis preservation and conflicting decisions", "mitigation": "Additive pointers/aliases, authoritative canonical choice and preserved source records", "owner": "migration", "follow_up_phase": "identity_and_reconciliation"},
+    {"mode": "Page controls cycle/reset", "cause": "Polling rebuilds unchanged DOM or stale offset after removal", "effect": "Open messages/focus/page position lost", "severity": 6, "detection": "Browser node identity, expanded-source and offset-clamp tests", "mitigation": "Stable response signature, explicit open-state capture and valid returned offsets", "owner": "frontend", "follow_up_phase": "polling_and_pagination"}
+  ]
+}

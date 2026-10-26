@@ -1,0 +1,6 @@
+{
+  "implementation_id":"20261007-packet-pdf-readiness",
+  "title":"Recover missing packet PDFs and accurate assisted-apply readiness",
+  "owner":"ai-agent",
+  "steps":["Identify and render missing PDFs for the user's Hillingdon application without changing reviewed text", "Add workspace-owned packet readiness, preview/download and targeted PDF preparation endpoints", "Show missing/stale PDFs per document before application launch", "Test atomic rendering, source changes, workspace isolation and the recovery UI; verify and deploy"]
+}

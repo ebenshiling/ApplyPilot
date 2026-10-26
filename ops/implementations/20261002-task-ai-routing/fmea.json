@@ -1,0 +1,14 @@
+{
+  "change_id": "20261002-task-ai-routing",
+  "status": "mitigations_verified",
+  "verification": "Thread/barrier and nested-scope checks, route credential/default validation, original-message/model preservation, cache invalidation, actual scoring/review/form/assistant boundary tests, browser route table/model labels, Gemini header/fallback checks, full 283-test gate and deployment route/health checks passed.",
+  "scope": ["AI client", "pipeline", "assistant", "configuration"],
+  "failure_modes": [
+    {"mode": "Concurrent tasks use another task's model", "cause": "Shared mutable singleton or process environment overrides", "effect": "Incorrect outputs and unexpected billing", "severity": 9, "detection": "Thread/barrier, nested review, temporary model and exception-restoration tests", "mitigation": "ContextVars and immutable client configurations", "owner": "AI routing", "follow_up_phase": "implementation"},
+    {"mode": "Global OpenAI model sent to Gemini", "cause": "Provider override inherits an incompatible model", "effect": "Requests rejected", "severity": 8, "detection": "Provider-only and explicit-model route tests", "mitigation": "Provider-specific defaults when provider changes", "owner": "configuration", "follow_up_phase": "implementation"},
+    {"mode": "Missing route credentials silently fall back to paid provider", "cause": "Unvalidated failover", "effect": "Unexpected costs and hidden configuration failure", "severity": 8, "detection": "Missing-key tests and credential-free route diagnostics", "mitigation": "Explicit configuration errors; no automatic cross-provider failover", "owner": "AI routing", "follow_up_phase": "implementation"},
+    {"mode": "Caches mask new provider/model settings", "cause": "Statement or assistant caches omit route identity", "effect": "Old output appears during comparison", "severity": 6, "detection": "Cache key changes after route/model/effort updates", "mitigation": "Include effective route identity", "owner": "generation", "follow_up_phase": "implementation"},
+    {"mode": "One AI boundary is left on default provider", "cause": "Incomplete call-site wiring", "effect": "Routing works only in some workflows", "severity": 7, "detection": "Integration checks for scoring, writing, review, extraction, forms and assistant tasks", "mitigation": "Explicit scopes/decorators at AI boundaries and route table/logging", "owner": "pipeline", "follow_up_phase": "implementation"},
+    {"mode": "Secrets exposed in routing diagnostics", "cause": "Returning configuration tuples containing keys", "effect": "Credential disclosure", "severity": 10, "detection": "Serialization and repr tests with distinctive fake secrets", "mitigation": "Safe descriptions omit keys and URLs; dataclass key excluded from repr", "owner": "dashboard", "follow_up_phase": "implementation"}
+  ]
+}

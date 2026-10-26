@@ -1,0 +1,18 @@
+{
+  "implementation_id":"20261009-global-search-visual-insights",
+  "status":"completed",
+  "phase":"deployed",
+  "owner":"ai-agent",
+  "updated_at":"2026-10-09",
+  "diagnosis":"The quick location editor reconstructs rows and loses labels/advanced fields. JobSpy applies one workspace-wide country to every place, and preserved UK accept/reject filters can silently reject newly added foreign locations. Insights presents tabular totals and a ledger without explanatory charts; submitted-stage failure counts include stale execution states despite applied dates.",
+  "release_includes":"20261009-direct-source-recovery, deployed together after final combined verification",
+  "features":["Additive structured country/state/city and remote scopes beside the quick location list", "Preserved labels and advanced row data; per-place provider country aliases and capability preview", "Explicit selected-location filtering across JobSpy, direct extraction and Workday; legacy pattern conflicts surfaced", "Country-scoped direct sources and geographic template placeholders", "Twelve responsive interactive Insights visualizations with explanations, unknown values and cohort drill-downs", "Unique-record outcome metrics and retained deleted history; filtered exports preserved"],
+  "targeted_verification":"150 passed in 197.54 seconds across global search/visuals, direct-source recovery, Pipeline, opportunity history, JobSpy and extraction targets",
+  "visual_review":"Desktop and 390px mobile screenshots reviewed; chart keyboard controls and no horizontal overflow verified",
+  "guide":"docs/GLOBAL_LOCATIONS_AND_VISUAL_INSIGHTS.md",
+  "verification":{"command":"$env:APPLYPILOT_RUN_PLAYWRIGHT='1'; .\\.ci311\\Scripts\\python.exe scripts/agent_verify.py","pytest":"588 passed, 1 skipped in 1772.99 seconds","new_tests":13,"ai_regression":"7/7 passed","ai_formal":"13/13 passed","static":"Compileall, focused Ruff, JavaScript syntax and scoped diff checks passed","result":"passed"},
+  "deployment":{"build":"docker compose build --quiet applypilot passed","recreation":"docker compose up -d --no-build --force-recreate applypilot passed","image":"sha256:e83e46ff2c70d378f258f5a35d882316eba1e42fcae55f724058c41dc15bcd6b","health":{"ok":true,"multi_user":true},"active_work_before_recreation":0,"authenticated_checks":"Insights, Pipeline geography and new source/chart/editor assets returned 200; unauthenticated Insights returned 401","live_records":21,"live_events":423,"record_states":{"active":6,"archived":9,"deleted":6},"live_hiring":{"submitted":2,"responses":2,"interviews":0,"offers":0},"configured_locations":9,"legacy_pattern_conflicts":[],"provider_runtime":"Canada and US normalized request countries matched installed JobSpy Country identifiers","production_settings":"Saved searches hash unchanged during read-only verification; no new production source or job inserted","temporary_verification_session":"Created in-process and revoked in finally; token not logged"},
+  "pre_state":"ops/implementations/20261009-global-search-visual-insights/pre_state.json",
+  "post_state":"ops/implementations/20261009-global-search-visual-insights/post_state.json",
+  "snapshot_note":"Native WSL Git metadata; prior user changes preserved; no commits created."
+}

@@ -1,0 +1,6 @@
+{
+  "implementation_id":"20261007-decisions-observer",
+  "title":"Observation-only Decisions API pilot",
+  "owner":"ai-agent",
+  "steps":["Add a strict Luna Decisions client, redacted page observations and bounded usage reservations", "Observe browser checkpoints asynchronously without consuming predictions in browser actions", "Add workspace opt-in, synthetic benchmark, comparison/latency/usage reporting", "Verify failure, budget, isolation and approval behaviour; document and deploy"]
+}

@@ -14,8 +14,10 @@ import time
 from datetime import datetime, timezone
 
 from applypilot import config
+from applypilot.country_context import ingestion_country
 from applypilot.database import find_existing_job_url, get_connection, init_db, normalize_url
 from applypilot.discovery.salary_filter import jobspy_salary_ok, load_salary_preference
+from applypilot.discovery_scope import storage_batch,accepts_title,limit_reached,record_new
 
 log = logging.getLogger(__name__)
 
@@ -57,12 +59,24 @@ def parse_proxy(proxy_str: str) -> dict:
 # -- Retry wrapper -----------------------------------------------------------
 
 
-def _scrape_with_retry(kwargs: dict, max_retries: int = 2, backoff: float = 5.0):
-    """Call scrape_jobs with retry on transient failures."""
+def _load_scraper():
     try:
         from jobspy import scrape_jobs
+        return scrape_jobs
+    except ModuleNotFoundError as exc:
+        module = exc.name or "unknown"
+        if module == "jobspy":
+            message = "JobSpy is not installed; install python-jobspy==1.2.0 or skip board discovery"
+        else:
+            message = f"JobSpy is installed but cannot import required module '{module}'. Rebuild with full python-jobspy==1.2.0 dependencies"
+        raise RuntimeError(message) from exc
     except ImportError as exc:
-        raise RuntimeError("python-jobspy is required for JobSpy discovery") from exc
+        raise RuntimeError("JobSpy import failed due to incompatible dependencies; rebuild the discovery runtime") from exc
+
+
+def _scrape_with_retry(kwargs: dict, max_retries: int = 2, backoff: float = 5.0):
+    """Call scrape_jobs with retry on transient failures."""
+    scrape_jobs = _load_scraper()
 
     for attempt in range(max_retries + 1):
         try:
@@ -86,6 +100,10 @@ def _load_location_config(search_cfg: dict) -> tuple[list[str], list[str]]:
 
     Falls back to sensible defaults if not defined in the YAML.
     """
+    from applypilot.geography import filter_config
+    selected=filter_config(search_cfg)
+    if selected is not None:
+        return selected
     accept = search_cfg.get("location_accept", [])
     reject = search_cfg.get("location_reject_non_remote", [])
 
@@ -126,11 +144,12 @@ def _normalize_search_cfg(cfg: dict) -> dict:
     # Country mapping for JobSpy (country_indeed)
     country = defaults.get("country_indeed") or defaults.get("country") or out.get("country")
     if country and not defaults.get("country_indeed"):
-        defaults["country_indeed"] = str(country).strip().lower()
+        from applypilot.geography import market
+        defaults["country_indeed"] = market(country) or str(country).strip().lower()
     out["defaults"] = defaults
 
     # Location filter aliases
-    if not out.get("location_accept") or not out.get("location_reject_non_remote"):
+    if out.get('location_filter_mode')!='selected' and (not out.get("location_accept") or not out.get("location_reject_non_remote")):
         accept, reject = _load_location_config(out)
         if accept and not out.get("location_accept"):
             out["location_accept"] = accept
@@ -147,6 +166,9 @@ def _normalize_search_cfg(cfg: dict) -> dict:
                 normalized_locs.append(loc)
                 continue
             item = dict(loc)
+            if out.get('geography_enabled') or any(k in item for k in ('country','state','city')):
+                from applypilot.geography import normalize_location
+                item = normalize_location(item,out)
             label = item.get("label") or item.get("location")
             if label:
                 item["label"] = label
@@ -187,6 +209,9 @@ def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> 
     Remote jobs are always accepted. Non-remote jobs must match an accept
     pattern and not match a reject pattern.
     """
+    from applypilot.geography import SelectedLocations
+    if isinstance(accept,SelectedLocations):
+        return accept.matches(location)
     if not location:
         return True  # unknown location -- keep it, let scorer decide
 
@@ -214,6 +239,7 @@ def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> 
 # -- DB storage (JobSpy DataFrame -> SQLite) ---------------------------------
 
 
+@storage_batch
 def store_jobspy_results(
     conn: sqlite3.Connection,
     df,
@@ -222,11 +248,21 @@ def store_jobspy_results(
     search_query: str | None = None,
 ) -> tuple[int, int]:
     """Store JobSpy DataFrame results into the DB. Returns (new, existing)."""
+    from applypilot.discovery import nz, observations
+    if nz.active():
+        new = existing = 0
+        for name, group in df.groupby("site"):
+            item = nz.require_source(str(name), method="jobspy")
+            added, duplicates = observations.store(conn, group.to_dict("records"), item, method="jobspy", query=search_query)
+            new += added
+            existing += duplicates
+        return new, existing
     now = datetime.now(timezone.utc).isoformat()
     new = 0
     existing = 0
 
     for _, row in df.iterrows():
+        if limit_reached():break
         url = str(row.get("job_url", ""))
         if not url or url == "nan":
             continue
@@ -242,6 +278,7 @@ def store_jobspy_results(
             pass
 
         title = str(row.get("title", "")) if str(row.get("title", "")) != "nan" else None
+        if not accepts_title(title):continue
         company = str(row.get("company", "")) if str(row.get("company", "")) != "nan" else None
         location_str = str(row.get("location", "")) if str(row.get("location", "")) != "nan" else None
 
@@ -283,6 +320,8 @@ def store_jobspy_results(
         dup_url = find_existing_job_url(conn, canonical_url)
         if dup_url:
             existing += 1
+            from applypilot.pipeline_store import tag_job
+            tag_job(conn, dup_url, site_label, search_query)
             if search_query:
                 try:
                     conn.execute(
@@ -294,10 +333,11 @@ def store_jobspy_results(
             continue
 
         try:
-            conn.execute(
+            if limit_reached():continue
+            cursor=conn.execute(
                 "INSERT INTO jobs (url, title, company, search_query, salary, description, location, site, strategy, discovered_at, "
-                "full_description, application_url, detail_scraped_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "full_description, application_url, detail_scraped_at, country_code) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     canonical_url,
                     title,
@@ -312,9 +352,14 @@ def store_jobspy_results(
                     full_description,
                     apply_url,
                     detail_scraped_at,
+                    ingestion_country({}),
                 ),
             )
+            if cursor.rowcount!=1:continue
+            record_new(conn,canonical_url)
             new += 1
+            from applypilot.pipeline_store import tag_job
+            tag_job(conn, canonical_url, site_label, search_query)
         except sqlite3.IntegrityError:
             existing += 1
             if search_query:
@@ -348,7 +393,19 @@ def _run_one_search(
     salary_pref: dict | None = None,
 ) -> dict:
     """Run a single search query and store results in DB."""
+    from applypilot.discovery import nz
+    if nz.active():
+        raise ValueError("Use the bounded NZ campaign discovery entry point")
     s = search
+    from applypilot.geography import board_scope, market, SelectedLocations
+    from applypilot.country_context import guard_discovery
+    guard_discovery({"country": s.get("country") or defaults.get("country_indeed"), "locations": []})
+    selected_country=s.get('provider_country') or market(s.get('country')) or market(defaults.get('country_indeed')) or defaults.get('country_indeed','usa')
+    if s.get('country') and not market(s['country']):
+        selected_country='worldwide'
+    sites,skipped=board_scope(s,sites)
+    for skip in skipped:
+        log.info('Skipping %s: %s',skip['board'],skip['reason'])
     label = f'"{s["query"]}" in {s["location"]} {"(remote)" if s.get("remote") else ""}'
     if "tier" in s:
         label += f" [tier {s['tier']}]"
@@ -369,7 +426,7 @@ def _run_one_search(
             "results_wanted": results_per_site,
             "hours_old": hours_old,
             "description_format": "markdown",
-            "country_indeed": defaults.get("country_indeed", "usa"),
+            "country_indeed": selected_country,
             "verbose": 0,
         }
         if s.get("remote"):
@@ -394,6 +451,7 @@ def _run_one_search(
             "hours_old": hours_old,
             "description_format": "markdown",
             "verbose": 0,
+            "country_indeed": selected_country,
         }
         if s.get("remote"):
             gd_kwargs["is_remote"] = True
@@ -420,6 +478,10 @@ def _run_one_search(
         log.info("[%s] 0 results", label)
         return {"new": 0, "existing": 0, "errors": 0, "filtered": 0, "total": 0, "label": label}
 
+    from applypilot.discovery_scope import policy as current_policy
+    scoped_settings=current_policy()
+    if scoped_settings:df=df.iloc[:scoped_settings['results_per_search']]
+
     # Filter by excluded titles (before storing)
     excluded = 0
     if exclude_titles and "title" in df.columns:
@@ -435,7 +497,7 @@ def _run_one_search(
     before = len(df)
     df = df[
         df.apply(
-            lambda row: _location_ok(
+            lambda row: accept_locs.matches(str(row.get('location','')) if str(row.get('location',''))!='nan' else None, remote=str(row.get('is_remote','')).casefold() in {'true','1','yes'}) if isinstance(accept_locs,SelectedLocations) else _location_ok(
                 str(row.get("location", "")) if str(row.get("location", "")) != "nan" else None,
                 accept_locs,
                 reject_locs,
@@ -451,7 +513,8 @@ def _run_one_search(
         df = df[df.apply(lambda row: jobspy_salary_ok(row, salary_pref), axis=1)]
         salary_filtered = before_salary - len(df)
 
-    conn = get_connection()
+    from applypilot.discovery_scope import policy,run_connection
+    conn = run_connection() if policy() else get_connection()
     new, existing = store_jobspy_results(conn, df, s["query"], search_query=s.get("query"))
 
     msg = f"[{label}] {before} results -> {new} new, {existing} dupes"
@@ -487,6 +550,11 @@ def search_jobs(
     country_indeed: str = "usa",
 ) -> dict:
     """Run a single job search via JobSpy and store results in DB."""
+    from applypilot.country_context import guard_discovery
+    guard_discovery({"country": country_indeed, "locations": [{"location": location}]})
+    from applypilot.discovery import nz
+    if nz.active():
+        raise ValueError("Use the bounded NZ campaign discovery entry point")
     if sites is None:
         sites = ["indeed", "linkedin", "zip_recruiter"]
 
@@ -574,13 +642,17 @@ def _full_crawl(
         locs = [loc for loc in locs if loc.get("label") in locations]
 
     searches = []
+    from applypilot.geography import normalize_location
     for q in queries:
         for loc in locs:
+            place=normalize_location(loc,search_cfg) if 'provider_country' not in loc else loc
             searches.append(
                 {
                     "query": q["query"],
-                    "location": loc["location"],
-                    "remote": loc.get("remote", False),
+                    "location": place["location"],
+                    "remote": place.get("remote", False),
+                    "country":place.get('country'),"provider_country":place.get('provider_country'),
+                    "city":place.get('city'),"state":place.get('state'),
                     "tier": q.get("tier", 0),
                 }
             )
@@ -591,6 +663,15 @@ def _full_crawl(
     log.info("Sites: %s | Results/site: %d | Hours old: %d", ", ".join(sites), results_per_site, hours_old)
 
     # Ensure DB schema is ready
+    budget = int(search_cfg.get("board_search_budget", 0) or 0)
+    if budget > 0:
+        searches = [searches[q*len(locs)+l] for l in range(len(locs)) for q in range(len(queries))]
+    from applypilot.geography import board_scope
+    searches=[s for s in searches if board_scope(s,sites)[0]]
+    if budget > 0:
+        from applypilot.pipeline_store import target_offset
+        offset = int(search_cfg.get("board_search_offset", target_offset(config.APP_DIR, sites)) or 0) % max(1, len(searches))
+        searches = (searches[offset:] + searches[:offset])[:budget]
     init_db()
 
     total_new = 0
@@ -599,6 +680,7 @@ def _full_crawl(
     completed = 0
 
     for s in searches:
+        if limit_reached():break
         result = _run_one_search(
             s,
             sites,
@@ -640,6 +722,8 @@ def _full_crawl(
         db_total,
     )
 
+    from applypilot.pipeline_store import source_health
+    source_health(conn, sites[0] if len(sites) == 1 else "JobSpy", {"status": "ok", "errors": total_errors, "found": total_new+total_existing, "queries": len(searches)}, total_new, total_existing)
     return {
         "new": total_new,
         "existing": total_existing,
@@ -668,11 +752,37 @@ def run_discovery(cfg: dict | None = None) -> dict:
     if cfg is None:
         cfg = config.load_search_config()
 
+    from applypilot.discovery import nz
+    if nz.active():
+        return nz.run_provider("board")
+
     cfg = _normalize_search_cfg(cfg)
+    from applypilot.country_context import guard_discovery
+    guard_discovery(cfg)
+    if cfg.get('_run_scope'):
+        from applypilot.discovery_scope import budget_active,run_connection
+        if not budget_active():raise ValueError('Use the captured pipeline budget for scoped discovery')
+        try:salary_pref=load_salary_preference(config.load_profile())
+        except Exception:salary_pref=None
+        accept,reject=_load_location_config(cfg);defaults=cfg.get('defaults',{})
+        combined={'new':0,'existing':0,'errors':0,'queries':0,'db_total':0}
+        for target in cfg.get('_planned_board_searches',[]):
+            if limit_reached():break
+            settings=(cfg.get('board_overrides') or {}).get(target['board'],{})
+            result=_run_one_search(target,[target['board']],min(defaults['results_per_site'],int(settings.get('results_per_site') or defaults['results_per_site'])),
+                int(settings.get('hours_old') or defaults.get('hours_old',72)),parse_proxy(cfg['proxy']) if cfg.get('proxy') else None,
+                defaults,1,accept,reject,cfg.get('glassdoor_location_map',{}),exclude_titles=cfg.get('exclude_titles',[]),salary_pref=salary_pref)
+            for key in ('new','existing','errors'):combined[key]+=result.get(key,0)
+            combined['queries']+=1
+            from applypilot.pipeline_store import source_health
+            source_health(run_connection(),target['board'],{'status':'ok','found':result.get('total',0),'errors':result.get('errors',0),'targets':1},result['new'],result['existing'])
+        combined['db_total']=run_connection().execute('SELECT COUNT(*) FROM jobs').fetchone()[0]
+        return combined
 
     if not cfg:
         log.warning("No search configuration found. Run `applypilot init` to create one.")
         return {"new": 0, "existing": 0, "errors": 0, "db_total": 0, "queries": 0}
+    _load_scraper()  # fail once, before expanding board/query combinations
 
     proxy = cfg.get("proxy")
     sites = list(cfg.get("sites") or [])
@@ -700,9 +810,16 @@ def run_discovery(cfg: dict | None = None) -> dict:
         )
 
     combined = {"new": 0, "existing": 0, "errors": 0, "db_total": 0, "queries": 0}
-    for site in sites:
+    for board_index, site in enumerate(sites):
+        if limit_reached():break
+        total_budget = int(cfg.get("board_search_budget", 0) or 0)
+        if total_budget and combined["queries"] >= total_budget:
+            break
         override = board_overrides.get(str(site or "").strip().lower(), {})
         site_cfg = dict(cfg)
+        if total_budget:
+            remaining = total_budget - combined["queries"]
+            site_cfg["board_search_budget"] = max(1, remaining // (len(sites)-board_index))
         site_cfg["sites"] = [site]
         if "tiers" in override:
             site_cfg["tiers"] = override.get("tiers")

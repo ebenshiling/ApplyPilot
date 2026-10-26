@@ -1,0 +1,35 @@
+{
+  "implementation_id":"20261007-job-lifecycle",
+  "status":"completed",
+  "phase":"deployed",
+  "owner":"ai-agent",
+  "updated_at":"2026-10-07",
+  "features":["Explicit closure reasons and reversible archive", "Previewed removal of full job and exclusively owned generated artifacts", "Compact retained identity, references, outcomes and activity timeline", "Durable cleanup retries and optional SQLite compaction", "Deleted-URL suppression and job-number floor", "Shared/original-source protection"],
+  "verification":{
+    "command":"python scripts/agent_verify.py",
+    "result":"passed",
+    "pytest":"493 passed, 1 skipped in 1172.55 seconds with browser verification enabled",
+    "new_tests":18,
+    "targeted":"54 passed covering lifecycle, command center and pipeline reliability",
+    "ai_regression":"7/7 passed",
+    "ai_formal":"13/13 passed",
+    "static":"ruff, compileall, node --check and scoped diff --check passed",
+    "linux_smoke":"Source-CV symlink reference protected during synthetic deletion in an isolated temporary workspace",
+    "runtime":"Authenticated History API, preview of existing job artifacts and empty retired history verified"
+  },
+  "deployment":{
+    "standard_build":"Two Docker Hub anonymous-token TLS handshake timeouts",
+    "fallback":"Built a local source overlay from the previously verified cached applypilot-applypilot image using a temporary Dockerfile and DOCKER_BUILDKIT=0; no new dependencies or permanent Docker configuration changes",
+    "cached_base":"sha256:fff141983f94306ce0852187ac18c2ca3beae7507aedc8b51d142e47da1aae22",
+    "source_overlay_image":"e41bc80c2bea",
+    "recreation":"docker compose up -d --no-build --force-recreate applypilot passed",
+    "health":{"ok":true,"multi_user":true},
+    "production_deletions":0,
+    "protected_counts_before_after":{"jobs":[21,21],"documents":[5,5],"writing_documents":[2,2]},
+    "active_applications_before":0
+  },
+  "limitations":"The new workspace lifecycle flow has these retention/cleanup guarantees. Legacy Classic-dashboard deletion retains its separate existing behaviour; unknown CLI pipeline work remains guarded.",
+  "pre_state":"ops/implementations/20261007-job-lifecycle/pre_state.json",
+  "post_state":"ops/implementations/20261007-job-lifecycle/post_state.json",
+  "snapshot_note":"Prior user changes preserved; no commits created."
+}

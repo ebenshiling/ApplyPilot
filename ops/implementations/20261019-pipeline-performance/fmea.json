@@ -1,0 +1,12 @@
+{
+  "change_id":"20261019-pipeline-performance",
+  "scope":["dashboard","pipeline","read_models"],
+  "failure_modes":[
+    {"mode":"Ready schema marker survives file replacement or external migration","cause":"Remembering only a database path","effect":"Requests use an old file or missing schema","severity":9,"detection":"File-replacement, schema-change and repeat-read SQL tests","mitigation":"Check device/inode and SQLite schema_version; reopen replaced thread-local connections; serialize first initialization; explicit init_db remains unconditional"},
+    {"mode":"Stale configuration grants execution","cause":"Caching inputs beyond display reads","effect":"Wrong document/rights/approval checks","severity":10,"detection":"Test reuse expires at read scope end and mutations/next request see new files","mitigation":"Context-local, workspace/country-keyed read scopes only; no persistent cache and no executor/approval snapshot decorator"},
+    {"mode":"Cross-workspace or cross-country reuse","cause":"Incomplete cache keys or browser races","effect":"Wrong account data or jurisdiction displayed","severity":9,"detection":"Nested/parallel owner isolation tests and navigation response tests","mitigation":"Explicit root and country context in keys, scoped cleanup, render generation guards"},
+    {"mode":"Mutated configuration affects other callers","cause":"Sharing mutable cached dictionaries","effect":"Wrong preview scope or defaults","severity":8,"detection":"Mutation-isolation tests","mitigation":"Defensive copies of memoized read values"},
+    {"mode":"Progress becomes inaccurate","cause":"Light polling skips eligibility computation","effect":"Wrong queue counts or missing failures","severity":7,"detection":"Compare full snapshot and progress counts/failures on populated fixtures","mitigation":"Reuse existing candidates/exclusions and recent-run services; omit only static discovery planning and preview artifacts"},
+    {"mode":"Polling recreates load or overwrites edits","cause":"Full snapshot polling, overlapping requests or late responses","effect":"Slow UI and lost control values","severity":7,"detection":"Browser network counts and preserved controls across refresh/navigation","mitigation":"Dedicated progress endpoint, single in-flight poll, request/render generation checks and debounced preview cancellation"}
+  ]
+}

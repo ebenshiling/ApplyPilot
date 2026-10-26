@@ -1,0 +1,9 @@
+{
+  "implementation_id":"20261016-nz-phase4",
+  "authorization":"User requested continuation through remaining approved phases",
+  "scope":"P4.1-P4.10: country master CV metadata/routing, shared canonical facts, strict factual finalisation, NZ policies and scoped disclosures",
+  "baseline":"Verified Phase 3 in isolated uncommitted feature worktree",
+  "steps":["Inspect every current CV/writer/publication path and protected UK contracts","Add bounded canonical fact/wording manifests and source reconciliation without auto-verifying existing facts","Add country/category CV metadata and exact NZ routes without UK fallback","Enforce strict final-byte validation at publication/export/upload boundaries while retaining drafts and historical artifacts","Add country policy/disclosure rendering and preserve original supported file formats","Run adversarial and UK regression verification; record actual missing candidate inputs"],
+  "required_candidate_inputs":"Exact paths for three NZ masters (software, data/BI, support) and canonical professional evidence; not supplied in this continuation",
+  "excluded":["Invented candidate facts or verified status","Reading real candidate workspaces without explicit file inputs","Phase 6 live submission authority","New AI provider/framework","Automatic release"]
+}

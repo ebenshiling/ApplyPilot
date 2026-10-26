@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from applypilot.config import APP_DIR
-from applypilot.database import init_db
+from applypilot.database import init_db, workspace_connection
 
 
 def _now_iso() -> str:
@@ -355,7 +355,7 @@ def revoke_session(token: str, root: Path | None = None) -> None:
 def ensure_workspace_for_user(username: str, root: Path | None = None) -> Path:
     ws = user_workspace(username, root)
     ws.mkdir(parents=True, exist_ok=True)
-    init_db(ws / "applypilot.db")
+    workspace_connection(ws / "applypilot.db")
     return ws
 
 

@@ -1,0 +1,17 @@
+{
+  "implementation_id": "20261004-pipeline-upgrade",
+  "title": "Reliable, configurable native Pipeline workspace",
+  "owner": "ai-agent",
+  "phases": [
+    "Shared scoped eligibility, convergent rendering, active dependencies, bounded retries, truthful results and checkpoints",
+    "Lossless search editing, explicit priorities, resume-route explanations, fingerprints and ambiguity handling",
+    "Workspace source registries, validation/previews, employer preservation and source health",
+    "Native responsive Pipeline UI, campaigns, run previews, problems and recovery",
+    "Application packets, evidence inspection, selective second opinions, measured usage/cost and outcome cohorts",
+    "UI-driven multi-CV import, flexible source/variant editing and CV revision history",
+    "Native profile and portfolio maintenance with structured, reusable professional evidence",
+    "Cover and Statement Studios with generation, editable drafts, validation, history, previews and downloads",
+    "Regression/browser verification, documentation and deployment"
+  ],
+  "constraints": ["Additive migrations and preserved approved/submitted documents", "No automated submissions during verification", "No paid inference during tests", "Preserve user configuration and existing CLI entry points"]
+}

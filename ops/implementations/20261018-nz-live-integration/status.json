@@ -1,0 +1,24 @@
+{
+  "implementation_id": "20261018-nz-live-integration",
+  "status": "completed_deployed",
+  "phase": "current_docker_app_verified",
+  "owner_release_authorized": true,
+  "verification": [
+    {"command":"python scripts/agent_verify.py","result":"passed","compile":"passed","pytest_passed":805,"pytest_skipped":62,"pytest_seconds":402.48,"strict_ai":"7/7","formal_dataset":"13/13","country_ui":"local-only Chromium enabled, includes polling persistence"},
+    {"suite":"tests/test_nz_live_release.py and tests/test_assisted_browser.py with APPLYPILOT_RUN_PLAYWRIGHT=1","result":"16 passed in 196.84 seconds before the additional non-browser NZ application-context test; that added test passed in final full verification","scope":"actual Playwright executor against local HTTP fixtures; no real employer contacted"},
+    {"command":"git diff --check 18f888806ca30665f6b0aff008b341681538a9ee","result":"passed","note":"Plain HEAD diff also reports pre-existing CRLF whitespace in ten UK YAML files, retained from original user work"},
+    {"suite":"Node syntax checks","result":"passed","files":["workspace.js","assisted-browser.js","document-review.js","nz-preparation.js"]},
+    {"command":"docker compose build applypilot","result":"passed","image":"sha256:cb7d0af3ea4070edab294da71bbde97832d2efc29c16ca73d8b011061d4182c7"},
+    {"command":"docker compose up -d --no-build applypilot","result":"passed","container":"applypilot-dashboard","url":"http://localhost:8765/workspace"},
+    {"suite":"Authenticated deployed Chromium smoke","result":"passed","report":"deployment_check.json","nz_enabled":true,"live_execution_enabled":true,"nz_panels_loaded":true,"uk_record_count_preserved":98,"javascript_errors":0,"test_session":"revoked after verification"}
+  ],
+  "integration":{"paths":135,"conflicts":0,"baseline":"18f888806ca30665f6b0aff008b341681538a9ee","manifest":"integration_manifest.json"},
+  "backup":"backup.json",
+  "handoff":"docs/NZ_WORKSPACE.md",
+  "released":["NZ country view in current Docker deployment","NZ discovery and vacancy/evidence management","NZ source/document preparation and tracking","existing live assisted browser for GB and NZ","existing CLI application engines and schedules"],
+  "retained_checks":["factual document and PDF validation","country/workspace ownership","source capability and readiness","final assisted-browser approval","single attempt and uncertain-result reconciliation"],
+  "acceptance_scope":"Browser execution validated against local HTTP employer fixtures and the deployed workspace UI. No claim that every real ATS or unconfigured source is accepted; actual candidate facts remain user-supplied.",
+  "commit_push":"not requested or performed",
+  "live_employer_requests": false,
+  "live_applications_submitted": false
+}

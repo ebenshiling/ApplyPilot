@@ -6,9 +6,11 @@ Auto-detects provider from environment:
   LLM_URL         -> Local llama.cpp / Ollama compatible endpoint
 
 Optional:
-  LLM_PROVIDER    -> Force provider: gemini|openai|local
+  ANTHROPIC_API_KEY -> Anthropic Claude Messages API
+  LLM_PROVIDER    -> Force provider: gemini|openai|anthropic|local
 
 LLM_MODEL env var overrides the model name for any provider.
+OPENAI_REASONING_EFFORT configures Luna reasoning (default: none).
 """
 
 import json
@@ -19,11 +21,15 @@ import re
 import threading
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 import httpx
+from applypilot.ai_routing import current_task, model_context, resolve_route, task_context, WRITING_TASKS, REASONING_HEADROOM
 
 log = logging.getLogger(__name__)
+_LUNA_MODELS = frozenset({"gpt-6-luna", "gpt-5.6-luna"})
+_LUNA_EFFORTS = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
 
 # ---------------------------------------------------------------------------
 # Provider detection
@@ -46,12 +52,15 @@ def _pick_gemini_model(model: str) -> str:
 
 def _detect_provider() -> tuple[str, str, str, str]:
     """Return (provider, base_url, model, api_key) based on environment variables."""
-    model_override = (os.environ.get("LLM_MODEL", "") or "").strip()
-    provider_override = (os.environ.get("LLM_PROVIDER", "") or "").strip().lower()
+    from applypilot.ai_settings import environment
+    env = environment()
+    model_override = (env.get("LLM_MODEL", "") or "").strip()
+    provider_override = (env.get("LLM_PROVIDER", "") or "").strip().lower()
 
-    gemini_key = (os.environ.get("GEMINI_API_KEY", "") or "").strip()
-    openai_key = (os.environ.get("OPENAI_API_KEY", "") or "").strip()
-    local_url = (os.environ.get("LLM_URL", "") or "").strip()
+    gemini_key = (env.get("GEMINI_API_KEY", "") or "").strip()
+    openai_key = (env.get("OPENAI_API_KEY", "") or "").strip()
+    anthropic_key = (env.get("ANTHROPIC_API_KEY", "") or "").strip()
+    local_url = (env.get("LLM_URL", "") or "").strip()
 
     if provider_override:
         if provider_override == "gemini":
@@ -70,9 +79,13 @@ def _detect_provider() -> tuple[str, str, str, str]:
         if provider_override == "local":
             if not local_url:
                 raise RuntimeError("LLM_PROVIDER=local but LLM_URL is not set")
-            return ("local", local_url.rstrip("/"), model_override or "local-model", os.environ.get("LLM_API_KEY", ""))
+            return ("local", local_url.rstrip("/"), model_override or "local-model", env.get("LLM_API_KEY", ""))
+        if provider_override in {"anthropic", "claude"}:
+            if not anthropic_key:
+                raise RuntimeError("LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set")
+            return ("anthropic", "https://api.anthropic.com/v1", model_override or "claude-sonnet-4-6", anthropic_key)
 
-        raise RuntimeError("Invalid LLM_PROVIDER. Use: gemini, openai, local")
+        raise RuntimeError("Invalid LLM_PROVIDER. Use: gemini, openai, anthropic, local")
 
     # Default ordering:
     # 1) explicit local endpoint
@@ -81,7 +94,7 @@ def _detect_provider() -> tuple[str, str, str, str]:
             "local",
             local_url.rstrip("/"),
             model_override or "local-model",
-            os.environ.get("LLM_API_KEY", ""),
+            env.get("LLM_API_KEY", ""),
         )
 
     # 2) Gemini key
@@ -103,8 +116,10 @@ def _detect_provider() -> tuple[str, str, str, str]:
             openai_key,
         )
 
+    if anthropic_key:
+        return ("anthropic", "https://api.anthropic.com/v1", model_override or "claude-sonnet-4-6", anthropic_key)
     raise RuntimeError(
-        "No LLM provider configured. Set GEMINI_API_KEY, OPENAI_API_KEY, or LLM_URL in your environment."
+        "No LLM provider configured. Set GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, or LLM_URL."
     )
 
 
@@ -124,6 +139,55 @@ _BACKOFF_MAX = float(os.environ.get("LLM_BACKOFF_MAX", "60") or "60")
 
 _rate_lock = threading.Lock()
 _last_request_ts = 0.0
+_request_budget = ContextVar("llm_request_budget", default=None)
+
+
+@contextmanager
+def request_budget(timeout_seconds: float = 45, max_attempts: int = 1):
+    """Context-local interactive limits; never change a pooled client's defaults."""
+    token = _request_budget.set((max(1, min(120, timeout_seconds)), max(1, min(_MAX_RETRIES, max_attempts))))
+    try:
+        yield
+    finally:
+        _request_budget.reset(token)
+
+
+def _attempt_limit() -> int:
+    budget = _request_budget.get()
+    return budget[1] if budget else _MAX_RETRIES
+
+
+def _request_options() -> dict:
+    budget = _request_budget.get()
+    return {"timeout": httpx.Timeout(budget[0], connect=min(10, budget[0]))} if budget else {}
+
+
+class ProviderAccessError(RuntimeError):
+    """Sanitized account-level failure; do not retry it for every job in a batch."""
+    def __init__(self, provider: str, category: str, status_code: int, message: str):
+        self.provider = provider
+        self.category = category
+        self.status_code = status_code
+        self.batch_blocking = True
+        super().__init__(message)
+
+
+def provider_access_error(provider: str, exc: httpx.HTTPStatusError) -> ProviderAccessError | None:
+    status = exc.response.status_code
+    code = ""
+    try:
+        error = exc.response.json().get("error", {})
+        if isinstance(error, dict):
+            code = str(error.get("code") or error.get("status") or "").lower()
+    except (ValueError, AttributeError):
+        pass
+    category = "payment" if status == 402 or code == "insufficient_quota" else "authentication" if status == 401 else "permission" if status == 403 else "configuration" if status == 404 else None
+    if not category:
+        return None
+    actions = {"payment": "Check billing/credits and the API project linked to this key, or explicitly choose another configured provider in Settings.",
+               "authentication": "Replace the provider API key in Settings.", "permission": "Check API/project permissions, billing availability and model access for this key.",
+               "configuration": "Check that this model is available to the selected provider/project in Settings."}
+    return ProviderAccessError(provider, category, status, f"{provider.title()} blocked this request (HTTP {status}; {category}). {actions[category]}")
 
 
 def _throttle() -> None:
@@ -174,16 +238,55 @@ class LLMClient:
     - Gemini: Generative Language API models/*:generateContent
     """
 
-    def __init__(self, provider: str, base_url: str, model: str, api_key: str) -> None:
+    def __init__(self, provider: str, base_url: str, model: str, api_key: str, *, reasoning_effort: str | None = None, thinking_budget: int | None = None, reasoning_token_allowance: int | None = None) -> None:
         self.provider = provider
         self.base_url = base_url
         self.model = model
         self.api_key = api_key
+        self._reasoning_effort = reasoning_effort
+        self.thinking_budget = thinking_budget
+        if reasoning_token_allowance is not None and (isinstance(reasoning_token_allowance, bool) or not isinstance(reasoning_token_allowance, int) or not 0 <= reasoning_token_allowance <= 16384):
+            raise ValueError("Reasoning token allowance must be an integer between 0 and 16384")
+        self.reasoning_token_allowance = reasoning_token_allowance
         self._client = httpx.Client(timeout=_TIMEOUT)
+        self._usage_local = threading.local()
+
+    @property
+    def last_usage(self) -> dict:
+        return getattr(self._usage_local, "value", {})
+
+    @property
+    def last_model(self) -> str:
+        return getattr(self._usage_local, "model", self.model)
+
+    @property
+    def openai_reasoning_effort(self) -> str | None:
+        if self.provider != "openai" or self.model not in _LUNA_MODELS:
+            return None
+        effort = self._reasoning_effort if self._reasoning_effort is not None else (os.environ.get("OPENAI_REASONING_EFFORT", "none") or "none").strip().lower() or "none"
+        if effort not in _LUNA_EFFORTS:
+            raise ValueError("OPENAI_REASONING_EFFORT for Luna must be none, low, medium, high, xhigh, or max")
+        return effort
+
+    @property
+    def cache_identity(self) -> str:
+        return f"{self.provider}:{self.model}:{self.openai_reasoning_effort or ''}:{self.thinking_budget}:{self.reasoning_token_allowance}"
+
+    def completion_token_limit(self, requested: int) -> int:
+        """Bound total Luna completion tokens; headroom is not a separate reserve."""
+        effort = self.openai_reasoning_effort
+        if effort is None:
+            return requested
+        if isinstance(requested, bool) or not isinstance(requested, int) or not 1 <= requested <= 128000:
+            raise ValueError("Luna completion limit must be an integer between 1 and 128000")
+        allowance = 0
+        if effort != "none" and current_task() in WRITING_TASKS:
+            allowance = self.reasoning_token_allowance if self.reasoning_token_allowance is not None else REASONING_HEADROOM.get(effort, 0)
+        return min(128000, requested + allowance)
 
     # -- public API ---------------------------------------------------------
 
-    def chat(
+    def _chat(
         self,
         messages: list[dict],
         temperature: float = 0.0,
@@ -192,6 +295,12 @@ class LLMClient:
         thinking_budget: int | None = None,
     ) -> str:
         """Send a chat completion request and return the assistant message text."""
+        self._usage_local.value = {}
+        self._usage_local.model = self.model
+        self._usage_local.operation_id = None
+        self._usage_local.operation_request_key = None
+        self._usage_local.operation_country = None
+        log.info("LLM request task=%s provider=%s model=%s", current_task() or "default", self.provider, self.model)
         # Qwen3 optimization: prepend /no_think to skip chain-of-thought
         # reasoning, saving tokens on structured extraction tasks.
         if "qwen" in self.model.lower() and messages:
@@ -205,8 +314,11 @@ class LLMClient:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 response_mime_type=response_mime_type,
-                thinking_budget=thinking_budget,
+                thinking_budget=thinking_budget if thinking_budget is not None else self.thinking_budget,
             )
+
+        if self.provider == "anthropic":
+            return self._chat_anthropic(messages, temperature, max_tokens, response_mime_type)
 
         return self._chat_openai_compat(
             messages,
@@ -214,6 +326,35 @@ class LLMClient:
             max_tokens=max_tokens,
             response_mime_type=response_mime_type,
         )
+
+    def _chat_anthropic(self, messages: list[dict], temperature: float, max_tokens: int, response_mime_type: str | None) -> str:
+        system = "\n\n".join(str(m.get("content", "")) for m in messages if m.get("role") == "system")
+        conversation = [{"role": m["role"], "content": m["content"]} for m in messages if m.get("role") in {"user", "assistant"}]
+        if response_mime_type == "application/json":
+            system += "\nReturn valid JSON only, with no markdown fences or commentary."
+        payload = {"model": self.model, "system": system, "messages": conversation,
+                   "temperature": temperature, "max_tokens": max_tokens}
+        for attempt in range(_attempt_limit()):
+            try:
+                _throttle()
+                from applypilot.operations import before_provider
+                before_provider(payload,self)
+                response = self._client.post(self.base_url + "/messages", json=payload,
+                    headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}, **_request_options())
+                if response.status_code in {429, 500, 502, 503, 529} and attempt < _attempt_limit() - 1:
+                    time.sleep(_compute_backoff_seconds(attempt, response.status_code, _parse_retry_after(response.headers.get("retry-after"))))
+                    continue
+                response.raise_for_status()
+                data = response.json()
+                self._usage_local.value = data.get("usage", {})
+                if data.get("stop_reason") == "max_tokens":
+                    raise RuntimeError("Claude output exceeded the configured token limit")
+                return "".join(block.get("text", "") for block in data.get("content", []) if block.get("type") == "text").strip()
+            except httpx.TimeoutException:
+                if attempt == _attempt_limit() - 1:
+                    raise
+                time.sleep(_compute_backoff_seconds(attempt, None, None))
+        raise RuntimeError("Claude request failed after bounded retries")
 
     def _chat_openai_compat(
         self,
@@ -232,18 +373,30 @@ class LLMClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        effort = self.openai_reasoning_effort
+        if effort is not None:
+            payload.pop("max_tokens")
+            payload["max_completion_tokens"] = self.completion_token_limit(max_tokens)
+            log.info("Luna completion budget task=%s effort=%s requested=%s total=%s", current_task() or "default", effort, max_tokens, payload["max_completion_tokens"])
+            payload["reasoning_effort"] = effort
+            payload["messages"] = [{**m, "role": "developer"} if m.get("role") == "system" else dict(m) for m in messages]
+            if effort != "none":
+                payload.pop("temperature")
         if response_mime_type == "application/json" and self.provider == "openai":
             payload["response_format"] = {"type": "json_object"}
 
-        for attempt in range(_MAX_RETRIES):
+        for attempt in range(_attempt_limit()):
             try:
                 _throttle()
+                from applypilot.operations import before_provider
+                before_provider(payload,self)
                 resp = self._client.post(
                     f"{self.base_url}/chat/completions",
                     json=payload,
                     headers=headers,
+                    **_request_options(),
                 )
-                if resp.status_code in (429, 503) and attempt < _MAX_RETRIES - 1:
+                if resp.status_code in (429, 503) and attempt < _attempt_limit() - 1:
                     retry_after = _parse_retry_after(resp.headers.get("retry-after") or resp.headers.get("Retry-After"))
                     wait = _compute_backoff_seconds(attempt, resp.status_code, retry_after)
                     log.warning(
@@ -257,9 +410,19 @@ class LLMClient:
                     continue
                 resp.raise_for_status()
                 data = resp.json()
+                self._usage_local.value = data.get("usage", {})
+                if effort is not None:
+                    choices = data.get("choices") or []
+                    if not choices:
+                        raise RuntimeError("OpenAI returned no completion choices")
+                    if choices[0].get("finish_reason") == "length":
+                        raise RuntimeError("Luna reached its output limit, including reasoning tokens. Reduce reasoning effort or adjust the output limit.")
+                    content = (choices[0].get("message") or {}).get("content")
+                    if not isinstance(content, str) or not content.strip():
+                        raise RuntimeError("Luna returned no usable text response")
                 return data["choices"][0]["message"]["content"]
             except httpx.TimeoutException:
-                if attempt < _MAX_RETRIES - 1:
+                if attempt < _attempt_limit() - 1:
                     wait = _compute_backoff_seconds(attempt, None, None)
                     log.warning(
                         "LLM request timed out, retrying in %ds (attempt %d/%d)",
@@ -315,22 +478,23 @@ class LLMClient:
         if system_texts:
             payload["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_texts)}]}
 
-        # AI Studio Gemini API key is passed as query parameter.
-        params = {"key": self.api_key}
+        # Keep credentials out of URLs and HTTP exception/log messages.
         url = f"{self.base_url}/v1beta/models/{_pick_gemini_model(self.model)}:generateContent"
 
-        for attempt in range(_MAX_RETRIES):
+        for attempt in range(_attempt_limit()):
             try:
                 _throttle()
+                from applypilot.operations import before_provider
+                before_provider(payload,self)
                 resp = self._client.post(
                     url,
-                    params=params,
                     json=payload,
-                    headers={"Content-Type": "application/json"},
+                    headers={"Content-Type": "application/json", "x-goog-api-key": self.api_key},
+                    **_request_options(),
                 )
 
                 # Model not available for new users: fall back to a newer model.
-                if resp.status_code == 404 and attempt == 0:
+                if resp.status_code == 404 and attempt == 0 and attempt < _attempt_limit() - 1:
                     try:
                         msg = (resp.json() or {}).get("error", {}).get("message", "")
                     except Exception:
@@ -340,12 +504,12 @@ class LLMClient:
                         fallback = _pick_gemini_model(fallback)
                         if fallback != _pick_gemini_model(self.model):
                             log.warning("Gemini model %s unavailable; falling back to %s", self.model, fallback)
-                            self.model = fallback
-                            url = f"{self.base_url}/v1beta/models/{_pick_gemini_model(self.model)}:generateContent"
+                            self._usage_local.model = fallback
+                            url = f"{self.base_url}/v1beta/models/{fallback}:generateContent"
                             # retry immediately on the new model
                             continue
 
-                if resp.status_code in (429, 503) and attempt < _MAX_RETRIES - 1:
+                if resp.status_code in (429, 503) and attempt < _attempt_limit() - 1:
                     retry_after = _parse_retry_after(resp.headers.get("retry-after") or resp.headers.get("Retry-After"))
                     wait = _compute_backoff_seconds(attempt, resp.status_code, retry_after)
                     log.warning(
@@ -363,10 +527,12 @@ class LLMClient:
                 if not candidates:
                     return ""
                 parts = (candidates[0].get("content") or {}).get("parts") or []
+                usage = data.get("usageMetadata", {})
+                self._usage_local.value = {"input_tokens": usage.get("promptTokenCount"), "output_tokens": usage.get("candidatesTokenCount")}
                 texts = [p.get("text", "") for p in parts if isinstance(p, dict)]
                 return "".join(texts).strip()
             except httpx.TimeoutException:
-                if attempt < _MAX_RETRIES - 1:
+                if attempt < _attempt_limit() - 1:
                     wait = _compute_backoff_seconds(attempt, None, None)
                     log.warning(
                         "LLM request timed out, retrying in %ds (attempt %d/%d)",
@@ -380,6 +546,38 @@ class LLMClient:
 
         raise RuntimeError("LLM request failed after all retries")
 
+    def chat(self, messages: list[dict], temperature: float = 0.0, max_tokens: int = 4096,
+             response_mime_type: str | None = None, thinking_budget: int | None = None) -> str:
+        self._usage_local.value={}
+        self._usage_local.operation_id=None
+        self._usage_local.operation_request_key=None
+        self._usage_local.operation_country=None
+        from applypilot.operations import transport
+        return transport(self,messages,temperature,max_tokens,response_mime_type,thinking_budget,
+                         lambda:self._guarded_chat(messages,temperature,max_tokens,response_mime_type,thinking_budget))
+
+    def _guarded_chat(self, messages: list[dict], temperature: float = 0.0, max_tokens: int = 4096,
+             response_mime_type: str | None = None, thinking_budget: int | None = None) -> str:
+        cached_error = getattr(self._usage_local, "blocked_error", None)
+        if cached_error and getattr(self._usage_local, "blocked_until", 0) > time.monotonic():
+            self._usage_local.value = {}
+            raise cached_error
+        try:
+            return self._chat(messages, temperature, max_tokens, response_mime_type, thinking_budget)
+        except httpx.HTTPStatusError as exc:
+            classified = provider_access_error(self.provider, exc)
+            if classified:
+                self._usage_local.blocked_error = classified
+                self._usage_local.blocked_until = time.monotonic() + 900
+                raise classified from None
+            raise
+        finally:
+            try:
+                from applypilot.pipeline_store import record_usage
+                record_usage(self)
+            except Exception:
+                log.debug("Pipeline usage ledger unavailable", exc_info=True)
+
     def ask(self, prompt: str, **kwargs) -> str:
         """Convenience: single user prompt -> assistant response."""
         return self.chat([{"role": "user", "content": prompt}], **kwargs)
@@ -391,7 +589,8 @@ def chat_json(messages: list[dict], temperature: float = 0.0, max_tokens: int = 
     # Gemini supports responseMimeType; OpenAI supports response_format.
     if (client.provider or "").lower() == "gemini":
         # Default: disable thinking to avoid MAX_TOKENS truncation in JSON mode.
-        tb_raw = (os.environ.get("GEMINI_JSON_THINKING_BUDGET", "0") or "0").strip()
+        route_budget = getattr(client, "thinking_budget", None)
+        tb_raw = str(route_budget) if route_budget is not None else (os.environ.get("GEMINI_JSON_THINKING_BUDGET", "0") or "0").strip()
         try:
             thinking_budget = int(tb_raw)
         except Exception:
@@ -457,6 +656,7 @@ def structured_json(
     required_keys: tuple[str, ...] = (),
     task_name: str = "structured output",
     repair_attempts: int = 1,
+    routing_task: str | None = None,
 ) -> dict[str, Any]:
     """Request a JSON object, retrying once when the response shape is invalid.
 
@@ -483,7 +683,11 @@ def structured_json(
                 }
             ]
 
-        raw = chat_json(request_messages, temperature=temperature, max_tokens=max_tokens)
+        if routing_task:
+            with task_context(routing_task):
+                raw = chat_json(request_messages, temperature=temperature, max_tokens=max_tokens)
+        else:
+            raw = chat_json(request_messages, temperature=temperature, max_tokens=max_tokens)
         try:
             parsed = parse_json_response(raw)
             if not isinstance(parsed, dict):
@@ -509,9 +713,12 @@ def structured_json(
 def close_client() -> None:
     """Close the shared HTTP client (optional)."""
     global _instance
-    if _instance is not None:
-        _instance._client.close()
+    with _clients_lock:
+        clients = list(_clients.values()) + ([_instance] if _instance is not None else [])
+        _clients.clear()
         _instance = None
+    for client in {id(c): c for c in clients}.values():
+        client._client.close()
 
 
 # ---------------------------------------------------------------------------
@@ -519,27 +726,30 @@ def close_client() -> None:
 # ---------------------------------------------------------------------------
 
 _instance: LLMClient | None = None
+_clients: dict[tuple, LLMClient] = {}
+_clients_lock = threading.RLock()
 
 
-def get_client() -> LLMClient:
-    """Return (or create) the module-level LLMClient singleton."""
+def get_client(task: str | None = None) -> LLMClient:
+    """Return an immutable configured client for the current/explicit task."""
     global _instance
-    if _instance is None:
-        provider, base_url, model, api_key = _detect_provider()
-        log.info("LLM provider: %s  base_url: %s  model: %s", provider, base_url, model)
-        _instance = LLMClient(provider, base_url, model, api_key)
-    return _instance
+    route = resolve_route(task)
+    key = (route.provider, route.base_url, route.model, route.api_key, route.reasoning_effort, route.thinking_budget, route.reasoning_token_allowance)
+    with _clients_lock:
+        client = _clients.get(key)
+        if client is None:
+            client = LLMClient(route.provider, route.base_url, route.model, route.api_key,
+                               reasoning_effort=route.reasoning_effort, thinking_budget=route.thinking_budget, reasoning_token_allowance=route.reasoning_token_allowance)
+            _clients[key] = client
+            log.info("LLM route task=%s provider=%s model=%s", route.task, route.provider, route.model)
+        if route.task == "default":
+            _instance = client
+        return client
 
 
 @contextmanager
 def temporary_model(model: str | None):
     """Temporarily override the active client model for the duration of a block."""
 
-    client = get_client()
-    old_model = client.model
-    try:
-        if model:
-            client.model = _pick_gemini_model(model) if (client.provider or "").lower() == "gemini" else str(model)
-        yield client
-    finally:
-        client.model = old_model
+    with model_context(model):
+        yield get_client()

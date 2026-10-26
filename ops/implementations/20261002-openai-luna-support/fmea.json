@@ -1,0 +1,12 @@
+{
+  "change_id": "20261002-openai-luna-support",
+  "status": "mitigations_verified",
+  "verification": "259 tests passed; mocked Luna parameter/usage/output/cache contracts, legacy model requests, full agent checks, Docker recreation, sanitized active configuration and health endpoint verified. Live inference quality remains a user-managed trial.",
+  "scope": ["scoring", "tailoring", "assistant", "OpenAI client"],
+  "failure_modes": [
+    {"mode": "Luna rejects older request parameters", "cause": "max_tokens and temperature incompatible with reasoning requests", "effect": "Scoring/CV/assistant requests fail", "severity": 8, "detection": "Mock transport assertions for both Luna models and reasoning levels", "mitigation": "Use max_completion_tokens and omit temperature for non-none reasoning", "owner": "AI client", "follow_up_phase": "implementation"},
+    {"mode": "Unexpected reasoning spend or no visible output", "cause": "Provider medium default consumes output budget", "effect": "Higher costs and truncated JSON", "severity": 7, "detection": "Default effort, token-bound and truncated/empty-response tests", "mitigation": "Default none, validate explicit effort and fail truncated replies without automatic output-budget increases", "owner": "AI client", "follow_up_phase": "implementation"},
+    {"mode": "Existing Gemini/local/OpenAI models regress", "cause": "New payload logic applied too broadly", "effect": "Established CLI workflows fail", "severity": 8, "detection": "Legacy model/local payload checks and full agent verification", "mitigation": "Scope Luna adjustments to confirmed OpenAI Luna IDs", "owner": "AI client", "follow_up_phase": "implementation"},
+    {"mode": "Changing reasoning reuses stale assistant answers", "cause": "Cache keyed only by model and evidence", "effect": "Trial does not exercise chosen setting", "severity": 5, "detection": "Cache-identity change test", "mitigation": "Include reasoning setting in cache identity", "owner": "assistant", "follow_up_phase": "implementation"}
+  ]
+}

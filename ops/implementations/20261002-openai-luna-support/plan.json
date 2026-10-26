@@ -1,0 +1,15 @@
+{
+  "implementation_id": "20261002-openai-luna-support",
+  "title": "GPT-6 and GPT-5.6 Luna client compatibility",
+  "status": "completed",
+  "scope": ["OpenAI request parameters", "reasoning configuration", "assistant cache identity", "Docker environment forwarding", "setup guide"],
+  "steps": [
+    "Confirm official Luna model and Chat Completions parameter contracts",
+    "Use max_completion_tokens, explicit reasoning effort, compatible temperature handling and developer messages for the two Luna models",
+    "Keep previous provider/model request paths backward compatible",
+    "Reject truncated/empty Luna replies and include reasoning settings in assistant cache identity",
+    "Test with mocked HTTP transports, run agent verification, and document the user-managed activation/trial"
+  ],
+  "sources": ["https://developers.openai.com/api/docs/models/gpt-6-luna", "https://developers.openai.com/api/docs/models/gpt-5.6-luna", "https://developers.openai.com/api/docs/guides/latest-model", "https://platform.openai.com/docs/api-reference/chat/create"],
+  "verification": ["python -m pytest -q tests/test_llm.py tests/test_command_center.py", "python scripts/agent_verify.py"]
+}

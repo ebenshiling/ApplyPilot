@@ -1,0 +1,18 @@
+@import url('/assets/workspace.css');
+body{background:var(--paper)!important;color:var(--ink)!important;padding:0!important}
+.wrap{max-width:none!important;width:100%!important;padding:15px!important;margin:0!important}
+.page-head,.page-nav{display:none!important}
+.panel,.setup-section,.setup-nav,.setup-statusbar,#pipeline-controls,.setup-panel-unwrapped{background:var(--panel)!important;color:var(--ink)!important;border-color:var(--line)!important;box-shadow:none!important}
+.setup-shell{grid-template-columns:190px minmax(0,1fr)!important;gap:16px!important}
+.setup-main{min-width:0!important}
+.setup-section .section-title,.setup-nav h3{color:var(--ink)!important;font-family:'Libre Caslon Display',Georgia,serif!important;font-size:24px!important;font-weight:400!important}
+.job-desc,.section-desc,.setup-nav .nav-help,.meta-tag{color:var(--muted)!important}
+.full-desc,.search-input,.select-input{width:100%!important;box-sizing:border-box!important;background:var(--panel)!important;color:var(--ink)!important;border-color:var(--line)!important;border-radius:6px!important;font-size:13px!important}
+textarea.full-desc{display:block!important;line-height:1.6!important}
+.apply-link,.filter-btn,.setup-nav button,.page-nav-btn{border-radius:6px!important;background:var(--soft)!important;color:var(--ink)!important;border-color:var(--line)!important;padding:8px 11px!important;font-size:12px!important}
+.setup-nav button.active,.apply-link.primary{background:var(--accent)!important;color:var(--paper)!important}
+.meta-tag,.status-pill{background:var(--soft)!important;border-color:var(--line)!important;border-radius:4px!important}
+.fields-2,.fields-3{align-items:start!important}
+.setup-actions{gap:8px!important}
+.pipe-recent-runs{max-height:240px;overflow:auto}
+@media(max-width:700px){.setup-shell{grid-template-columns:1fr!important}.setup-nav{position:static!important}.setup-nav button{width:auto!important;display:inline-block!important;margin-right:5px!important}.fields-2,.fields-3{grid-template-columns:1fr!important}.wrap{padding:8px!important}}

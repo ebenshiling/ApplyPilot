@@ -10,17 +10,19 @@ This intentionally avoids hardcoded personal content.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 from applypilot import naming
 from applypilot.config import RESUME_PATH, STATEMENT_DIR, load_profile
 from applypilot.database import get_connection
 from applypilot.llm import structured_json
+from applypilot.ai_routing import routed_task, route_info
+from applypilot.country_context import preparation_task
 from applypilot.role_routing import route_resume_for_job
 from applypilot.scoring.validator import BANNED_WORDS, sanitize_text
 
@@ -87,10 +89,15 @@ def _statement_cache_path(
             str(supplemental_facts or ""),
             str(min_words or ""),
             str(max_words or ""),
+            str(job.get("_studio_instructions") or ""),
+            str(job.get("_studio_structure") or ""),
+            json.dumps(job.get("_nhs_plan") or {}, sort_keys=True),
+            json.dumps(route_info("statement"), sort_keys=True),
         ]
     )
     h = hashlib.sha1(blob.encode("utf-8", errors="ignore")).hexdigest()
-    return STATEMENT_DIR / "cache" / f"{h}.txt"
+    base = Path(job["_workspace_dir"])/"supporting_statements" if job.get("_workspace_dir") else STATEMENT_DIR
+    return base / "cache" / f"{h}.txt"
 
 
 _STRUCTURE_VARIANTS: tuple[dict[str, str], ...] = (
@@ -347,7 +354,7 @@ def _is_negated_claim(text: str, start: int) -> bool:
     prefix = (text or "").lower()[max(0, start - 100) : start]
     return bool(
         re.search(
-            r"\b(?:not|never|without|no direct|limited|lack(?:ing)?|have not|has not|do not|does not|cannot|unable)\b",
+            r"\b(?:not|never|without|no|limited|lack(?:ing)?|have not|has not|do not|does not|cannot|unable)\b",
             prefix,
         )
     )
@@ -421,7 +428,13 @@ def _find_unsupported_claims(statement: str, evidence_source: str) -> list[str]:
                 continue
             matched = True
             break
-        if matched and not any(_marker_start(evidence, marker) >= 0 for marker in evidence_markers):
+        supported = False
+        for marker in evidence_markers:
+            for match in re.finditer(r"\b"+re.escape(marker)+r"\b", evidence):
+                if not _is_negated_claim(evidence, match.start()) and not _is_non_claim_context(evidence, match.start()):
+                    supported = True
+                    break
+        if matched and not supported:
             claims.append(label)
     return claims
 
@@ -456,6 +469,9 @@ def evaluate_statement_quality(
         hard_failures.append(f"Too short ({_word_count(text)} words)")
     if max_words and _word_count(text) > max_words:
         hard_failures.append(f"Too long ({_word_count(text)} words)")
+    cap = (job.get("_nhs_plan") or {}).get("max_characters", 0)
+    if cap and len(text) > cap:
+        hard_failures.append(f"Too long for application field ({len(text)} characters; maximum {cap})")
 
     low = text.lower()
     if re.search(r"\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b", low):
@@ -532,6 +548,10 @@ def _build_prompt(
         "Do not include personal contact details (address/phone/email) in the statement. "
         "Do not write speculative first-day, first-week, or 'upon joining' plans."
     )
+    nz=job.get("country_code")=="NZ"
+    if nz:
+        system=system.replace("UK supporting statements for competitive public-sector roles","New Zealand employer-requested supporting evidence")
+        variant=dict(variant,guidance=variant["guidance"].replace("NHS values","the employer's stated values"))
 
     if max_words <= 400:
         length_rule = f"Length: under {max_words} words. Aim for {min_words} to {max_words} words."
@@ -572,7 +592,7 @@ CONSTRAINTS:
 - Do not claim direct clinical systems, patient administration systems, Health Board systems, NHS hospital systems, or formal clinical-system training unless those words appear in the CV or supplemental facts as candidate evidence.
 - Do not claim group training, training scheduling, attendance recording, delegate feedback, or audit reports unless directly evidenced. If not evidenced, refer only to user guidance, onboarding, documentation, or one-to-one support.
 - Do not overstate process mapping or project management. Use "transferable understanding" only where supported by documentation, workflows, incident handling, or project evidence.
-- Mention certificates only as supporting knowledge, not as workplace experience: Google Advanced Data Analytics Professional Certificate and IBM Data Engineering Professional Certificate if provided.
+- Mention only the exact credential names supplied in the candidate evidence. Individual course-completion certificates are not a completed professional certificate, degree, registration or workplace experience. Never assume a full Google or IBM programme has been completed.
 - Avoid weak apology phrases such as "while I do not", "although I have not", and avoid speculative phrases such as "my immediate focus", "upon joining", or "from the outset".
 - Do NOT use or echo these phrases (banned): {banned}
 {('- Previous draft issues to fix: ' + avoid_txt) if avoid_txt else ''}
@@ -581,6 +601,13 @@ Return JSON only:
 {{"statement":"..."}}
 """.strip()
 
+    if nz:
+        user=user.replace("WRITE a supporting statement suitable for NHS / UK public sector application forms.","WRITE employer-requested supporting evidence for the actual New Zealand vacancy.").replace("Use plain English, UK spelling.","Use plain English and New Zealand spelling.")
+    else:
+        from applypilot.nhs_writing import prompt_context
+        user += prompt_context(job.get("_nhs_plan") or {})
+    from applypilot.document_policy import prompt as country_document_policy
+    system += country_document_policy(job,"statement")
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
@@ -622,6 +649,8 @@ def _validate_statement(text: str, *, min_words: int = 650, max_words: int = 180
     return errors
 
 
+@routed_task("statement")
+@preparation_task
 def generate_supporting_statement(
     resume_text: str,
     job: dict,
@@ -656,7 +685,9 @@ def generate_supporting_statement(
         pass
 
     variant = _pick_variant(job)
-    criterion_groups = _extract_person_spec_criteria_by_priority(str(job.get("full_description") or ""))
+    if job.get("_studio_structure"):
+        variant = next((v for v in _STRUCTURE_VARIANTS if v["name"] == job["_studio_structure"]), variant)
+    criterion_groups = _extract_person_spec_criteria_by_priority(str((job.get("_nhs_plan") or {}).get("person_spec") or job.get("full_description") or ""))
     criteria = [
         *[f"Essential: {item}" for item in (criterion_groups.get("essential") or [])],
         *[f"Desirable: {item}" for item in (criterion_groups.get("desirable") or [])],
@@ -675,6 +706,8 @@ def generate_supporting_statement(
             min_words=min_words,
             max_words=max_words,
         )
+        if job.get("_studio_instructions"):
+            msgs.append({"role": "user", "content": "Writing preferences (style only, not additional facts): " + job["_studio_instructions"]})
         try:
             data = structured_json(
                 msgs,
@@ -727,27 +760,15 @@ def generate_supporting_statement(
 def run_supporting_statements(min_score: int = 7, limit: int = 0) -> dict:
     """Generate supporting statements for high-fit jobs (best-effort)."""
     profile = load_profile()
-    default_resume = RESUME_PATH.read_text(encoding="utf-8")
+    from applypilot.country_context import current
+    default_resume = "" if current() and current().country_code=="NZ" else RESUME_PATH.read_text(encoding="utf-8")
     conn = get_connection()
 
-    where = (
-        "fit_score >= ? AND tailored_resume_path IS NOT NULL "
-        "AND full_description IS NOT NULL "
-        "AND (supporting_statement_path IS NULL OR supporting_statement_path = '') "
-        "AND COALESCE(statement_attempts, 0) < ?"
-    )
-    params: list[object] = [min_score, MAX_ATTEMPTS]
-    query = "SELECT rowid AS job_id, * FROM jobs WHERE " + where + " ORDER BY fit_score DESC"
-    if limit > 0:
-        query += " LIMIT ?"
-        params.append(limit)
-    rows = conn.execute(query, tuple(params)).fetchall()
-    if not rows:
+    from applypilot.eligibility import candidates
+    jobs = candidates(conn, "statement", min_score, limit=limit)
+    if not jobs:
         log.info("No jobs needing supporting statements (score >= %d).", min_score)
         return {"generated": 0, "errors": 0, "elapsed": 0.0}
-
-    cols = rows[0].keys()
-    jobs = [dict(zip(cols, r)) for r in rows]
 
     STATEMENT_DIR.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
@@ -757,6 +778,14 @@ def run_supporting_statements(min_score: int = 7, limit: int = 0) -> dict:
 
     for job in jobs:
         completed += 1
+        if "statement" in os.environ.get("APPLYPILOT_FORCE_DOCUMENTS", "").split(","):
+            try:
+                requirements = json.loads(job.get("document_requirements") or "{}")
+            except ValueError:
+                requirements = {}
+            requirements["statement"] = True
+            conn.execute("UPDATE jobs SET document_requirements=? WHERE url=?", (json.dumps(requirements), job["url"]))
+            conn.commit()
         try:
             # Prefer tailored resume.
             resume_text = default_resume
@@ -786,7 +815,8 @@ def run_supporting_statements(min_score: int = 7, limit: int = 0) -> dict:
                 profile.get("personal", {}), ext="txt", username=username, job=job
             )
             prefix = Path(stem).stem
-            out_path = STATEMENT_DIR / f"{prefix}_SS.txt"
+            import uuid
+            out_path = STATEMENT_DIR / f"{prefix}_v{uuid.uuid4().hex[:12]}_SS.txt"
             out_path.write_text(statement, encoding="utf-8")
 
             results.append(
@@ -809,23 +839,10 @@ def run_supporting_statements(min_score: int = 7, limit: int = 0) -> dict:
                 }
             )
             log.error("%d/%d [ERROR] %s -- %s", completed, len(jobs), str(job.get("title") or "")[:40], e)
+        from applypilot.pipeline_store import persist_document
+        persist_document(conn, "statement", results[-1])
 
-    now = datetime.now(timezone.utc).isoformat()
-    saved = 0
-    for r in results:
-        if r.get("path"):
-            conn.execute(
-                "UPDATE jobs SET supporting_statement_path=?, supporting_statement_at=?, "
-                "statement_attempts=COALESCE(statement_attempts,0)+1 WHERE url=?",
-                (r["path"], now, r["url"]),
-            )
-            saved += 1
-        else:
-            conn.execute(
-                "UPDATE jobs SET statement_attempts=COALESCE(statement_attempts,0)+1, supporting_statement_path=NULL WHERE url=?",
-                (r.get("url"),),
-            )
-    conn.commit()
+    saved = sum(bool(r.get("path")) for r in results)
 
     elapsed = time.time() - t0
     log.info("Supporting statements done in %.1fs: %d generated, %d errors", elapsed, saved, errors)

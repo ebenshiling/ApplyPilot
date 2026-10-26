@@ -1,0 +1,11 @@
+{
+  "change_id":"20261019-nz-search-first",
+  "scope":["dashboard","discovery","pipeline_status"],
+  "failure_modes":[
+    {"mode":"External search links mistaken for imported vacancies","cause":"One ambiguous discovery button","effect":"False claim of in-app coverage or empty-result success","severity":8,"detection":"Assert explicit external-board labels and unchanged vacancy counts after search","mitigation":"Separate search links, saved vacancies and automatic imports; show exact next action"},
+    {"mode":"Endless loading or automatic run restart","cause":"Disabled wait cursor, unbounded polling or re-render retries","effect":"User cannot tell whether search finished","severity":7,"detection":"Browser idle, terminal, transport error and bounded polling tests","mitigation":"Normal disabled cursor, finite status polling, explicit terminal actions, no start calls from polling"},
+    {"mode":"Cross-country/owner run or cancellation","cause":"Using latest global pipeline status without checking run identity","effect":"Wrong results or stopping a UK workflow","severity":9,"detection":"Wrong-country and replaced-run tests","mitigation":"Bind status/cancel to owned NZ discover run and campaign history"},
+    {"mode":"Advanced setup still blocks first search","cause":"Required employer/CV/source fields in primary form","effect":"User cannot start","severity":7,"detection":"Search with no employers, CVs or configured sources; browser first viewport test","mitigation":"Two-field search form; optional save/details and progressive disclosure"},
+    {"mode":"Old UI response or polling overwrites edits","cause":"Country/navigation change during async work","effect":"Lost inputs or incorrect active page","severity":7,"detection":"Late response and country-switch browser tests","mitigation":"Existing render tokens plus owned search generation, abortable requests and detached-view polling exit"}
+  ]
+}

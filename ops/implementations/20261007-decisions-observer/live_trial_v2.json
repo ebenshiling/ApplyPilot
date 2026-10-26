@@ -1,0 +1,30 @@
+{
+  "mode":"live_synthetic_trial",
+  "model":"gpt-6-luna",
+  "prompt_revision":"v2_explicit_page_boundaries",
+  "state":"completed",
+  "cases":9,
+  "correct_all_components":8,
+  "page_state_correct":8,
+  "navigation_correct":9,
+  "confirmation_correct":9,
+  "false_confirmations":0,
+  "low_confidence_pages":3,
+  "failed_requests":0,
+  "median_latency_ms":280.98,
+  "reported_input_tokens":6569,
+  "estimated_standard_usd":0.0006569,
+  "page_results":[
+    {"case":"listing","expected":"listing","predicted":"listing","confidence":0.98},
+    {"case":"login","expected":"login","predicted":"login","confidence":0.99},
+    {"case":"next_page","expected":"application","predicted":"unknown","confidence":0.29},
+    {"case":"missing_information","expected":"application","predicted":"application","confidence":0.95},
+    {"case":"security_check","expected":"security_check","predicted":"security_check","confidence":0.81},
+    {"case":"final_review","expected":"review","predicted":"review","confidence":0.94},
+    {"case":"new_receipt","expected":"confirmation","predicted":"confirmation","confidence":0.84},
+    {"case":"conditional_receipt","expected":"unknown","predicted":"unknown","confidence":0.56},
+    {"case":"old_receipt","expected":"review","predicted":"review","confidence":0.44}
+  ],
+  "scope":"Rerun of the same nine synthetic calibration cases after refining category definitions. Not an independent validation set; no real applications or applicant records used.",
+  "total_live_evaluation":{"requests":18,"input_tokens":11716,"estimated_standard_usd":0.0011716}
+}

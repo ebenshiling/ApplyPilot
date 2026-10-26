@@ -1,0 +1,13 @@
+{
+  "deployed_url": "http://localhost:8765/workspace",
+  "select_all_shown": 84,
+  "individual_selection": true,
+  "bulk_confirmation_opened_and_cancelled": true,
+  "clear_selection": true,
+  "jobs_page_preserved": true,
+  "records_before": 94,
+  "records_after": 94,
+  "mutation_requests": 0,
+  "live_records_deleted_by_verification": 0,
+  "javascript_errors": 0
+}

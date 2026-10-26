@@ -676,7 +676,7 @@ def validate_tailored_resume(
 # ── Cover Letter Validation ──────────────────────────────────────────────
 
 
-def validate_cover_letter(text: str, profile: dict | None = None, resume_text: str = "") -> dict:
+def validate_cover_letter(text: str, profile: dict | None = None, resume_text: str = "", *, min_words: int = 120, max_words: int = 250) -> dict:
     """Programmatic validation of a cover letter.
 
     Args:
@@ -699,12 +699,12 @@ def validate_cover_letter(text: str, profile: dict | None = None, resume_text: s
 
     # 3. Too long
     words = len(text.split())
-    if words > 250:
-        errors.append(f"Too long ({words} words). Max 250.")
+    if words > max_words:
+        errors.append(f"Too long ({words} words). Max {max_words}.")
 
     # 3b. Too short (these look empty in PDFs)
-    if words < 120:
-        errors.append(f"Too short ({words} words). Min 120.")
+    if words < min_words:
+        errors.append(f"Too short ({words} words). Min {min_words}.")
 
     # 3c. Must have at least 3 paragraphs (separated by blank lines)
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
@@ -730,6 +730,9 @@ def validate_cover_letter(text: str, profile: dict | None = None, resume_text: s
         last = non_empty[-1]
         # Heuristic: at least two words, contains letters, not ending with comma.
         if len(last.split()) >= 2 and re.search(r"[A-Za-z]", last) and not last.endswith(","):
+            has_name_line = True
+        known_name = str(((profile or {}).get("personal") or {}).get("full_name") or "").strip()
+        if known_name and last.casefold() == known_name.casefold():
             has_name_line = True
 
     if not (has_closing_word and has_name_line):

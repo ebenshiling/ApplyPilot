@@ -1,0 +1,18 @@
+{
+  "implementation_id":"20261009-direct-source-recovery",
+  "status":"completed",
+  "phase":"deployed",
+  "owner":"ai-agent",
+  "updated_at":"2026-10-09",
+  "reported_input":{"name":"Indeed","type":"search","url":"https://uk.indeed.com/"},
+  "initial_findings":"Save requires a query placeholder, while preview skips that validation. Remote HTTP/network errors are converted to a generic provider-configuration error despite previews using no AI.",
+  "live_reproduction":{"exception_type":"HTTPStatusError","remote_http_status":403,"scope":"Read-only preview of the screenshot's Indeed homepage; no save or job insertion"},
+  "features":["Shared source/template validation before save or network preview", "Explicit Indeed search-template shortcut and inline guidance", "Categorized site HTTP/challenge/timeout/network errors with truthful save-versus-preview feedback", "Source actions retain form and unsaved search controls", "Duplicate detection, validated workspace YAML, preserved advanced source metadata and base URLs"],
+  "targeted_verification":"39 passed in 113.06 seconds covering direct-source recovery and Pipeline workspace including real UI recovery",
+  "guide":"docs/DIRECT_SOURCE_RECOVERY.md",
+  "verification":{"command":"$env:APPLYPILOT_RUN_PLAYWRIGHT='1'; .\\.ci311\\Scripts\\python.exe scripts/agent_verify.py","pytest":"575 passed, 1 skipped in 1721.72 seconds","ai_regression":"7/7 passed","ai_formal":"13/13 passed","result":"passed"},
+  "deployment_note":"Deployed in the combined global-location/visual-Insights release; final combined verification 588 passed, 1 skipped",
+  "deployment":{"image":"sha256:e83e46ff2c70d378f258f5a35d882316eba1e42fcae55f724058c41dc15bcd6b","health":{"ok":true,"multi_user":true},"invalid_homepage_preview":"400 with query-placeholder guidance before network","valid_template_preview":{"status":502,"category":"blocked","remote_http_status":403},"source_form_assets":"Indeed template shortcut, inline errors and retained form source served","scope":"Read-only checks; candidate source settings were not automatically populated"},
+  "pre_state":"ops/implementations/20261009-direct-source-recovery/pre_state.json",
+  "post_state":"ops/implementations/20261009-direct-source-recovery/post_state.json"
+}

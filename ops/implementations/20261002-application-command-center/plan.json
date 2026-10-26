@@ -1,0 +1,27 @@
+{
+  "implementation_id": "20261002-application-command-center",
+  "title": "ApplyPilot application command center and reliable CV Studio",
+  "created_at": "2026-10-02",
+  "status": "core_release_completed",
+  "roadmap": "docs/UPGRADE_PLAN.md",
+  "scope": ["frontend", "professional_profile", "cv_generation", "application_tracking", "live_events", "ai_providers", "hiring_tracker", "email", "scheduling", "analytics"],
+  "constraints": ["Preserve CLI workflows", "Additive backward-compatible migrations", "Preserve submitted document snapshots", "Use frontend-design skill", "Track evidence rather than AI-inferred status"],
+  "phases": [
+    {"id": "0", "name": "Baseline and contracts", "depends_on": [], "priority": "high"},
+    {"id": "1", "name": "Frontend workbench", "depends_on": ["0"], "priority": "high"},
+    {"id": "2", "name": "Reliable CV updates and professional facts", "depends_on": ["0"], "priority": "high"},
+    {"id": "3", "name": "Application records and upgraded actions", "depends_on": ["0"], "priority": "high"},
+    {"id": "4", "name": "Live execution and dependable recovery", "depends_on": ["3"], "priority": "high"},
+    {"id": "5", "name": "AI assistance and provider integration", "depends_on": ["2", "3", "4"], "priority": "medium"},
+    {"id": "6", "name": "Hiring tracker and communications", "depends_on": ["3", "5"], "priority": "medium"},
+    {"id": "7", "name": "Scheduling, preferences, and analytics", "depends_on": ["4", "6"], "priority": "medium"}
+  ],
+  "first_release_phases": ["0", "1", "2", "3", "4"],
+  "first_release_scenario": "Add qualification, save, identify outdated CV, regenerate existing CV, preview correct PDF section, pick job, observe application progress, inspect confirmation or actionable failure.",
+  "required_implementation_commands": [
+    "python scripts/capture_repo_state.py --out ops/implementations/20261002-application-command-center/pre_state.json",
+    "python scripts/agent_verify.py",
+    "python scripts/capture_repo_state.py --out ops/implementations/20261002-application-command-center/post_state.json"
+  ],
+  "acceptance_criteria_location": "docs/UPGRADE_PLAN.md"
+}

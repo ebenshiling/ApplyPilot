@@ -1,0 +1,11 @@
+{
+  "change_id":"20261007-job-lifecycle",
+  "scope":["job lifecycle","artifact cleanup","history","dashboard"],
+  "failure_modes":[
+    {"mode":"Delete a shared or original CV","cause":"Filename-only ownership or path traversal","effect":"Evidence lost for other applications","severity":10,"detection":"Shared/source/symlink tests","mitigation":"Generated-directory allowlist; workspace containment; cross-job/source references; preview manifest and revalidation"},
+    {"mode":"Delete an active or uncertain application","cause":"Concurrent workers or stale UI","effect":"Lost handoff or duplicate submission","severity":10,"detection":"Worker, pipeline and stale-preview guards","mitigation":"Reject active/uncertain/scheduled work; serialize deletion; preserve timeline before removing records"},
+    {"mode":"Record CV failure as employer rejection","cause":"Conflated status labels","effect":"Incorrect outcomes and analytics","severity":8,"detection":"Outcome validation tests","mitigation":"Separate closure reasons; rejected/withdrawn require an existing submission; preserve pipeline failure context"},
+    {"mode":"Cleanup fails after deletion","cause":"Locked file or process interruption","effect":"Storage not reclaimed or history lost","severity":8,"detection":"Failure/retry tests","mitigation":"Commit compact history and cleanup manifest first; report actual freed bytes; durable retry with fresh ownership checks"},
+    {"mode":"Deleted record reappears or job ID is reused","cause":"Discovery or SQLite rowid reuse","effect":"Wrong record/attachment association","severity":8,"detection":"Rediscovery and ID-floor tests","mitigation":"Retired URL tombstone and new-job ID floor; history addressed by independent ID"}
+  ]
+}

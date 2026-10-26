@@ -1,0 +1,11 @@
+{
+  "change_id":"20261026-bulk-job-deletion",
+  "scope":["dashboard","lifecycle","deletion"],
+  "failure_modes":[
+    {"mode":"Wrong jobs selected or deleted across filter/country changes","cause":"Select-all scope unclear or async country mutation","effect":"Unintended data loss","severity":10,"detection":"Filtered selection and country-change tests","mitigation":"Select all shown only; explicit snapshot of IDs/count/titles; captured country checked before preview and delete; existing server country/ownership validation"},
+    {"mode":"Active or uncertain application deleted","cause":"Client-only eligibility assumptions","effect":"Lost live application context","severity":10,"detection":"Bulk mixed eligible/blocked browser tests and existing lifecycle unit tests","mitigation":"Fresh preview and token for each job; retain server active/browser/pipeline/uncertain checks; report skipped records"},
+    {"mode":"Shared/original files removed","cause":"Bulk bypasses lifecycle cleanup","effect":"Lost CV or another job's files","severity":10,"detection":"Batch shared-file/original preservation test with real existing endpoints","mitigation":"Reuse existing retire and cleanup unchanged; each subsequent preview reflects remaining references"},
+    {"mode":"Partial completion or lost response misreported as success","cause":"Sequential operations interrupted","effect":"User cannot tell what remains","severity":8,"detection":"Partial failure, cancellation and transport-error tests","mitigation":"Per-record results, no automatic retries, bounded requests, refresh after completion and explicit summary"},
+    {"mode":"Unwanted redirect or lost remaining selection","cause":"Existing navigate(history) and blanket selection reset","effect":"Repeated navigation and poor bulk recovery","severity":6,"detection":"Single/bulk browser navigation and failed-selection checks","mitigation":"Return to Jobs; remove confirmed deleted IDs and prune disappeared records; keep remaining selections"}
+  ]
+}

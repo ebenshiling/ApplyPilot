@@ -1,0 +1,812 @@
+[
+  {
+    "path": "README.md",
+    "action": "update",
+    "old_sha256": "1d3d431fbe4d91ddb63efe42dcf8958b71ad7c5473ce3f6a769ea6e0b6ea6e02",
+    "new_sha256": "e6101ff75ff221fbf007f1fd64b4f547730d245abe8cc63a025511ac065843bf"
+  },
+  {
+    "path": "docs/NZ_PHASE1_HANDOFF.md",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "48b227321208fd9699518cd585bd5f12ad22e4773e245f9644a5aab4a8259fd0"
+  },
+  {
+    "path": "docs/NZ_PHASE2_HANDOFF.md",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "b738f9f42d8787cafeb7e0a6e144f6a15cf2d32eeadc5fb19503c2fd75899509"
+  },
+  {
+    "path": "docs/NZ_PHASE3_HANDOFF.md",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "e32288ad4fc1fbafa8a149e508af2f10aaff70e240857f4de01724b8ebeca1db"
+  },
+  {
+    "path": "docs/NZ_PHASE4_HANDOFF.md",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "caa45acb8de2370bc1b7fbe93a149c5d5c87f7b5f4031f79fb20ca1f7beeb43f"
+  },
+  {
+    "path": "docs/NZ_PHASE5_HANDOFF.md",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "bd41fe88438b2f1e7a54217c8af0bde369966201f22340e4f073b06e4b7bf6f3"
+  },
+  {
+    "path": "docs/NZ_PHASE6_HANDOFF.md",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "1a7f4fcb0c033211aa0dcdc2e3e0b01b222ec5b5f8092361cf504aad9cb82bfe"
+  },
+  {
+    "path": "docs/NZ_RELEASE_READINESS.md",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "b6de1935a35ed6c3067bd8b7a9eb6a4e1905babf183b03bd13eb859439937239"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase1/fmea.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "56aa9aef4eefdae5e1d5deaabe78fd9f2b8425afb70ee24877bc974e6f2bd11b"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase1/plan.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "0aff3ba2805202275b3452f9cf0c1069bb4eb645b44ec51728a29493f5ee2441"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase1/post_state.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "38ae32463e99d535b1eb7906d3ad3af30336c9f11a086c0e85b0ed172fd928b6"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase1/pre_state.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "b57c947ef43765b6a14c6d3c397cf0f7c44e664d2209a5203727aa044199124d"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase1/status.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "87e91ffb1957a1da866f25ab4443d931ac732187002d005bbf53d84d0e65a692"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase2/fmea.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "20f12208e2bd70930a13c30df6de7bea04cfc0691e8d81577a5a719a1a6a7590"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase2/plan.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "2b61b9440752fd85117f433cd5ddfc1491ecafb03e8fa5287658d364bca0c9de"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase2/post_state.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "0521e4c1cdfa97adc53f80f7bc669a2a56ebbee5e5e570459b9c2754609f93f4"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase2/pre_state.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "7ca93abb93e74897991b01ad0db96bcd27b0f3072b8fcffc63872660da3d220b"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase2/status.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "14c0a42d54ecd6c25a94e98f6df5b23594aa86f9e661cb51f3040b6b0a8acd1b"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase3/fmea.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "d0b42d9ec3f5f22ff5f09043703308959b7d460aee794432a53c5939a4e9609a"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase3/plan.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "b262871d1e7aa54a8741d9c35f3796a8c7d5682b71af31057e86a09336547ded"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase3/post_state.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "51434462d7f4ce91a9bca624a89b58f86ab70c24e8b73ac034fd572f736d011f"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase3/pre_state.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "737ff4afa62b8f9b064f0c4423b6ed9912d625f18e501e3cbb7a8e7120a582f8"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase3/status.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "1346790a58050a0c8c976cf9eb93ae9d63eb5a965a055021911aaacdd0c10855"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase4/fmea.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "512694410caa1ebb59ddccc65afa722795c74ad8cbaed26dbac2bf91d89d1d14"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase4/plan.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "54f497e34010f7e2f63a988169aeeb5c51370c33abb7206925684281146e13f7"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase4/post_state.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "67673c968eee1c2a0addfcec3e277a78388bbded3d38b463194410bad4e55dc9"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase4/pre_state.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "a3e6093481e1973a32cbf3ebc2c37121b91bb7fcb194663d03409cbe621524d5"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase4/status.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "2c829b00a9ee25f022005b2c4b4f1c1d5a00fbcf28a46e0b592997dae820fa9f"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase5/fmea.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "50d86be367443cfedd3d8daf572fb47beacb01ecf02bdeee67e3c3f2a1987c8f"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase5/plan.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "c5ef2bae76c54a3d0b73e61ac00a2a8c625bbc38975d01b1b0d61977e2216e42"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase5/post_state.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "838536e9a5d2add3e13cab6af3cc4ea3e8744660343a88f56c983e5c4ef8f869"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase5/pre_state.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "140c3feccf775368246ad95d574154022017e1471cca9e4deead6fa4e68a4a3b"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase5/status.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "6963b77ed6da5bc11c4a974bb39c7bedc331213fc7748e1eaf36689a999b486b"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase6/fmea.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "c5403a784c6a8dba91750cb24656c6530fcf6cdd736f27b0fd42464d74713792"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase6/plan.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "c44cf30cd6065c407452d02e0415c32ce57a6f84ac91915202a2d683650318f3"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase6/post_state.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "ccc02942d885ca88d040ed49441b5c797a1b06d8d48fba601bb35a917c12e6eb"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase6/pre_state.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "9f2b6de6c46c79be686482c20758c91b480a867d054fbd11b1d748ee431839f2"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase6/status.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "574a5e67527e83e6f4f31fef710d368ba6d084dd3622cfc082469e3758e88f86"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase7/fmea.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "9c73eb772121cbb728f65a1affd67e175ef81bc308dbc0f98d404c643e65ee44"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase7/plan.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "54d4f7c9c60e0aa945c5c13eb81d95a1918df180e3d70af9b79d44af6171cb65"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase7/post_state.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "d723a9fce03d27daff74df5bcfb79c9c6ccad6c7e70f62ebca428e7566f9fde9"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase7/pre_state.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "6ce4b750df6e430d76d92dd21030cb74678ba85f12bb3f5b0615e11558e426e0"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase7/release_gates.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "1b3f5c9e2e4a6b7b4722ddfd8a321bee19d16a8c3f88c35ff71d100a9de3515a"
+  },
+  {
+    "path": "ops/implementations/20261016-nz-phase7/status.json",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "ae9d47916d91d123bc5ca6898aa479d7852fbf02b0c44d1e6addd64b26e4c876"
+  },
+  {
+    "path": "src/applypilot/ai_settings.py",
+    "action": "update",
+    "old_sha256": "8fdbd0808d3560d4a16e6e5833da47a81ec1ccb89ee9e53a665e67d0c2df7801",
+    "new_sha256": "ca0a1f703b1cef07610595c0aa9e0cd6faa82e8c8f9abc32169c33869be119fd"
+  },
+  {
+    "path": "src/applypilot/application_profile.py",
+    "action": "update",
+    "old_sha256": "adc71cd145407736dbd0e7ab8b732156b681f25078271798c07ecee31b49b9f9",
+    "new_sha256": "ed520251d15d97c75f82d5478ae54012fd6e27e22781d1ad2c98283bb45793ec"
+  },
+  {
+    "path": "src/applypilot/apply/application_packet.py",
+    "action": "update",
+    "old_sha256": "efdd0feaecff116cf0ebf95d59bb4e9f774c3ecc72bff6e80175f5ee5d9c4bab",
+    "new_sha256": "80d7169c03e03c05948ae71e9455788a60c2ece65e3d3f192df9bb135203bdf8"
+  },
+  {
+    "path": "src/applypilot/apply/assisted_browser.py",
+    "action": "update",
+    "old_sha256": "a5d31f4a1f4db4c308ee166087c3e4483b3459e7215bdbc0793c44a7948e2641",
+    "new_sha256": "1f717aef8171381e1f7a04e63226293e71ec7822ed19c0949ae3eebaa0af53c2"
+  },
+  {
+    "path": "src/applypilot/apply/authority.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "61bc1c3ad0a71e6de1c5d03d9c88d9beb18e63f3bcecd551a6c73c756858bfc3"
+  },
+  {
+    "path": "src/applypilot/apply/chrome.py",
+    "action": "update",
+    "old_sha256": "070ad6cb2f79c140e29100a44ddd846d87cd074e6e12e7ddc19a7278ce21baa0",
+    "new_sha256": "d0b3b933ccf2a7e39ee7198cf7b5eafd1902c61b2969c743f045dff2f2b71c2c"
+  },
+  {
+    "path": "src/applypilot/apply/launcher.py",
+    "action": "update",
+    "old_sha256": "730b5590cd1bdc2ef768ea9aa06941944133fac00e907a55f9ee98dbd1bffc7c",
+    "new_sha256": "d6f7ee29c16617599408af636ac0be4e4d58ae4d65bcd4b0f7cf0dabbff5cc48"
+  },
+  {
+    "path": "src/applypilot/apply/llm_engine.py",
+    "action": "update",
+    "old_sha256": "b434e95d79c954f8fe7a95c8c218827ffe775638030d5c8c606363da67a0cbac",
+    "new_sha256": "ac9c1bfb3514beae5bff10518774be8cf2405cc7c749ff1a159b7b8a3b4cdb23"
+  },
+  {
+    "path": "src/applypilot/apply/prompt.py",
+    "action": "update",
+    "old_sha256": "9ca40f56cf067930c663035c92facf3ebccad7ad08353b00ac4efbb811d76638",
+    "new_sha256": "3af4670357e03e1868e0e4702950e1f970a5dc4464ad09d917ac56548676e408"
+  },
+  {
+    "path": "src/applypilot/apply/question_assistant.py",
+    "action": "update",
+    "old_sha256": "545afcc493ffe30f3af519d9a462ba650c921b575a872ff746471b8c6603b163",
+    "new_sha256": "40e8a59ea20c16e404d351b1192e277b54c4efd21bb5c1e5a11f37721f9fd245"
+  },
+  {
+    "path": "src/applypilot/apply/safety.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "52e43275b280f584fd2dc9aa5e5412eb5cba895ffbdf9d2748210dafa615072d"
+  },
+  {
+    "path": "src/applypilot/canonical.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "ee5e65a919239b13757e32750b4d2b744c24d2c484fd4153c45c4ed5d8429160"
+  },
+  {
+    "path": "src/applypilot/cli.py",
+    "action": "update",
+    "old_sha256": "27c1fd6cff614d842a19d2fcfeffe4f77978d1d5ba4356c0569d5e980f67a3d6",
+    "new_sha256": "c80227e937d7e55d32280f738d360404deb71b55b6a3cc61fba4e1e81209e0ae"
+  },
+  {
+    "path": "src/applypilot/command_api.py",
+    "action": "update",
+    "old_sha256": "6d7926d91a9a17361b203f006b733202eefb23624a81bbfc409499dc524d780a",
+    "new_sha256": "26a9684833a83ded139376de4fb881fccd2a220ee21d232c1578121f20975e3f"
+  },
+  {
+    "path": "src/applypilot/command_center.py",
+    "action": "update",
+    "old_sha256": "2727adb141bbb1d40d65be180fd4dd47704b1c8b2d10fb99856ced7622ef39b3",
+    "new_sha256": "24306f599268433725fff70d9465095639b4e78d797d40e32b8a9c1123dc2523"
+  },
+  {
+    "path": "src/applypilot/config.py",
+    "action": "update",
+    "old_sha256": "b6f4afa59a8f7ec9175b67fc3390af1e4ddf9ec453e726e11daba176c33a4e56",
+    "new_sha256": "77892042ec58711aecfb62604580563431e2cc3bc17656e29170a270566f7b06"
+  },
+  {
+    "path": "src/applypilot/config/searches.nz.example.yaml",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "d69195fbe172b7efccad1ad18a92021e537d2c9ba213e6d26f3dbc3f646e6dee"
+  },
+  {
+    "path": "src/applypilot/country_answers.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "1e737387c93993eab35e097977fe52dd56c69ab9992928d17080c8426a5677f9"
+  },
+  {
+    "path": "src/applypilot/country_context.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "828d430d7cd6e1186f5c8f9b84ec7bc184be972b2ec7ccb327aad947a0079dff"
+  },
+  {
+    "path": "src/applypilot/cv_library.py",
+    "action": "update",
+    "old_sha256": "edc23c48fa71e42d9490948d429a6b38f5f9b7c083b1aa67d1f00cb64742619f",
+    "new_sha256": "a9a13bda5641a6117ae3a632c4d19f4c4efede05414aae34c24504212467045e"
+  },
+  {
+    "path": "src/applypilot/dashboard_server.py",
+    "action": "update",
+    "old_sha256": "25276bca05cce251a831f6a1c38388171f77206a384b80951dd2d717d6040128",
+    "new_sha256": "a4b8638ce7418b99615375b54926e914643a7b427688874c0ffdbe4d3d1d02ca"
+  },
+  {
+    "path": "src/applypilot/database.py",
+    "action": "update",
+    "old_sha256": "892f3b30570916923edff8c8eda6d86f3525d9fa17853b0a7c81fc24b8434f56",
+    "new_sha256": "d8729a301f8f00727e4d7b58a50369e46f8e2882f9af929275a2a74cec3af1da"
+  },
+  {
+    "path": "src/applypilot/discovery/jobspy.py",
+    "action": "update",
+    "old_sha256": "a34b4110fe359c1130ffb362080a83652cd534c8b0a5bca4988ebb0128cbd55b",
+    "new_sha256": "e85fb7a43b842fa181af9f0d9c25f102f8fca5335e5c7cdcb210f1ede5f722de"
+  },
+  {
+    "path": "src/applypilot/discovery/nz.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "8dbdd217e2c5b1ba6b4674d1ff5d5d7d317b779e4079040b463d22bddcb16fe3"
+  },
+  {
+    "path": "src/applypilot/discovery/observations.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "f2e583d1921150ac53d99b3672afe0b1d4ed2447068880d0782700cd3f6bd086"
+  },
+  {
+    "path": "src/applypilot/discovery/salary_filter.py",
+    "action": "update",
+    "old_sha256": "328603243b57c9d50b5573ea71347079d9f52cf163b8641115b223a7c2e254bc",
+    "new_sha256": "054f40a24e36e08ba6ceec8b7bb3969a87c0a32cbfa0210671b47c768ebaa9ff"
+  },
+  {
+    "path": "src/applypilot/discovery/smartextract.py",
+    "action": "update",
+    "old_sha256": "e43801a02b0c1f0171ae8b4550292fb07bd530ab8730223fcc48c424e7f8aff1",
+    "new_sha256": "a4f403e5aaf9135ce9938bb211b8e64d133ea2f39ee01a8eedb437e820c938d3"
+  },
+  {
+    "path": "src/applypilot/discovery/workday.py",
+    "action": "update",
+    "old_sha256": "d9330a4e03df9929756a0aca5d90f1fb58a0c8b46805b0e4a438ec2fbb211f8b",
+    "new_sha256": "6170718fe4b5169f5ff766a734ea0898c98a6e4e7744a4b09e8c55a38ff3fb0b"
+  },
+  {
+    "path": "src/applypilot/document_policy.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "d0c4ba17dfa41572985dc272e10bd8b392d2a6db185d9d22bae91c5d212e0dc9"
+  },
+  {
+    "path": "src/applypilot/document_review.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "efd864e7226246dfbbc79c58141e46e99501020dc66e23824acda26c78c1be79"
+  },
+  {
+    "path": "src/applypilot/eligibility.py",
+    "action": "update",
+    "old_sha256": "22a10b64ca3d9a97325e5e1cc6f682132a40e8583ff5da74a684faf45c542e39",
+    "new_sha256": "fe44a06d62abbbc41e1c20678f506fd19ce00f849123feca58471c9f4c387d81"
+  },
+  {
+    "path": "src/applypilot/enrichment/detail.py",
+    "action": "update",
+    "old_sha256": "c0fdb5955fe9e0523093471951cbf68b3c3550d9abea6df9dfc7fff2a0593697",
+    "new_sha256": "baa271b36c98452458e66246e5086ebdcdce4f56356c108835f1db032b1c55c4"
+  },
+  {
+    "path": "src/applypilot/evidence_inbox.py",
+    "action": "update",
+    "old_sha256": "e1dae562aae848b7a33b678de7466d245d3b53c11edf93f47ecec94fdc7a01a1",
+    "new_sha256": "e672f28dc7528e861bc882206798dde8da87a7bb152a2f447b965f72d3936a60"
+  },
+  {
+    "path": "src/applypilot/geography.py",
+    "action": "update",
+    "old_sha256": "94b16568f462df3b5c193379e51a67c5e4f951c2a1577eabc4c19662b44e951b",
+    "new_sha256": "2ae85a63a308e78328b03add19194e835f2d5d603b4f029245738d1ea375dd8f"
+  },
+  {
+    "path": "src/applypilot/job_lifecycle.py",
+    "action": "update",
+    "old_sha256": "408d51b2d12fe975b17b456c776291cfe5b0c12c59fbc3337ddf9f5c8a6aba23",
+    "new_sha256": "31c722ca8825568661c354a1a31eadd6213d0ecf8290c6a4f428466e43ebd8fa"
+  },
+  {
+    "path": "src/applypilot/llm.py",
+    "action": "update",
+    "old_sha256": "a86ff83934a9e02d37e681eb6f4c2752ac17196baef6353f2c7bae6be4723ec3",
+    "new_sha256": "87d7736f24c098c57c4562e98e3e7a7289127488bca147c566e9631d7dd40a29"
+  },
+  {
+    "path": "src/applypilot/nz_documents.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "9afec5f6a534889446f41eb88fba42252bd891724eabe19b62b2f7fd68bc6ff9"
+  },
+  {
+    "path": "src/applypilot/nz_evidence.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "a3c16fda6a746a57ac3850589d54e397249ab96534efa657481d5185b0ed0031"
+  },
+  {
+    "path": "src/applypilot/operations.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "0bf1e1eb324ed53f0bd513cb5859dd8d2df07b3f4e4cc8d2773d3bd119c402a5"
+  },
+  {
+    "path": "src/applypilot/opportunity_insights.py",
+    "action": "update",
+    "old_sha256": "358837be78cbacfb410a5c03a5a3cbcffa12f15d72bc722c8de01c73bba3f98c",
+    "new_sha256": "cd55ad1cd02c711d23a2b914e015339b71763b06ab94692ed5d742225ff4f2bd"
+  },
+  {
+    "path": "src/applypilot/pipeline.py",
+    "action": "update",
+    "old_sha256": "e1d73b32e4eca23ab82874834caa3fb3b4542a22bfcccf5c41bf6861a1031757",
+    "new_sha256": "19126cee7b538da7c0aad2f17e73d4b6e16ede3f6d8410dca5cf1ac8f526b6e6"
+  },
+  {
+    "path": "src/applypilot/pipeline_store.py",
+    "action": "update",
+    "old_sha256": "55c8079219a1c1d1c4b0b0de42741801ac987612432317ca58f9d2e698adfc70",
+    "new_sha256": "323a758c1887602f1f9169364020f3b07b34b8bfab2240bb950de269a36a5991"
+  },
+  {
+    "path": "src/applypilot/pipeline_workspace.py",
+    "action": "update",
+    "old_sha256": "8faa59d4f8af6db12c80d9a511d5691462d8c2c7dee6a97094b51e86368f42fd",
+    "new_sha256": "c6193a346563f459fae0d8c6ac33e7551f532473f5c7afaa42bccab7bce1be7e"
+  },
+  {
+    "path": "src/applypilot/preparation.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "6008645b428ece6dcaa3c4d3173ea3b9f5869034ca70011da9f7071f04e7e09e"
+  },
+  {
+    "path": "src/applypilot/professional.py",
+    "action": "update",
+    "old_sha256": "fe532bfff833fdefdfb5024001c0813b5b58c75e437ff72b63c2868475cc5f0a",
+    "new_sha256": "f00ec8da3166b7543cc9f5dbde4a595eac75eca40411df1a74fbf6c8d0d43552"
+  },
+  {
+    "path": "src/applypilot/role_routing.py",
+    "action": "update",
+    "old_sha256": "a7dfc903d9be70b46c0415442edcc0ab30c0f2e619fcd7137a42932c8fe7fc15",
+    "new_sha256": "9ec8a074583a66f8b63a6c0c98fa122df77f03d9bed7c88c92be38e1e485e990"
+  },
+  {
+    "path": "src/applypilot/scheduler.py",
+    "action": "update",
+    "old_sha256": "de4503ca8f4789536b5b689fb328e596ee7f346411e874fd55d364fd8fae44a5",
+    "new_sha256": "1d6b24b293aadd556f360410775b1d37525be78cee16142e8e05637cbc4a6b2a"
+  },
+  {
+    "path": "src/applypilot/scoring/cover_letter.py",
+    "action": "update",
+    "old_sha256": "59da07f13546ddac7b37b5c7de38b3f52019637ad39f77bb93f8fa74344e3ab1",
+    "new_sha256": "e667f34c885ebe670b53edd3c7d1859a3e8581893a6e4d4f4346a76a26e058d1"
+  },
+  {
+    "path": "src/applypilot/scoring/pdf.py",
+    "action": "update",
+    "old_sha256": "778dcfe6a05f2c190b9db8889c42dce04b7b7dbc6943c314667202c40f3f3b9c",
+    "new_sha256": "bee03186fc097138e7a64a19697b1ea4478df496335f032d7ea9461ce18b587f"
+  },
+  {
+    "path": "src/applypilot/scoring/scorer.py",
+    "action": "update",
+    "old_sha256": "64725288fe784aac4fa10b6647f5546192ce2fd73fb66ebaed65661ce4eff414",
+    "new_sha256": "a74db99b08df9fa0b06a9f1f15f634ee4461c7e3b1f4c1340152e50f29d625af"
+  },
+  {
+    "path": "src/applypilot/scoring/supporting_statement.py",
+    "action": "update",
+    "old_sha256": "fbdf99c3854a54e9e3246024fb4cb9c2cb99c3d172051d84c269e7104672f3b4",
+    "new_sha256": "5c67e58620a82fcf5f6729d1812853670e0ceaaf4de9c43befacb3515433aa9a"
+  },
+  {
+    "path": "src/applypilot/scoring/tailor.py",
+    "action": "update",
+    "old_sha256": "1d067677b56299fc106622296e92612d36c32a630a79a3c030ae26692a2e8a02",
+    "new_sha256": "08693f7c41dfe0af2a63367d7372e18cbcd940bb81561363f5a84f1c21bc378a"
+  },
+  {
+    "path": "src/applypilot/setup_workspace.py",
+    "action": "update",
+    "old_sha256": "8b4afca8a661b651feee34d5a473e419a3a6d8e03e26fe52f37d59be4d9655f2",
+    "new_sha256": "932a093c6d04d83cd8e3da3f5e75ba6ae56eb4b0bf842e91744d90b18fa04bcf"
+  },
+  {
+    "path": "src/applypilot/source_access.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "01d3b613bdca601393c1b128fdea803080b012eba2a8c377bb5b0ea15bac148e"
+  },
+  {
+    "path": "src/applypilot/source_registry.py",
+    "action": "update",
+    "old_sha256": "41f616c7c715dafe5999706e414218ea4e85d19609f520542c7d01b34647b516",
+    "new_sha256": "cd110149fe7035ad7f8d17023277e31fca54b356f29f3113c414f186771dca25"
+  },
+  {
+    "path": "src/applypilot/uk_sponsorship.py",
+    "action": "update",
+    "old_sha256": "1d9ac5d60d5f617c826acedec1bf016a0026ff33018d99f45dab0bb6313280a2",
+    "new_sha256": "d3c3d3581ca7f44b95bbb8591a5c1a73aea971db0c5d70a09ccc2024195cfb9f"
+  },
+  {
+    "path": "src/applypilot/web/canonical.js",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "170933c2b4fe33ba93c250cd9c0bf9703c87a75a64f532a17e5f93ca1b9cde7a"
+  },
+  {
+    "path": "src/applypilot/web/document-review.js",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "d5c585343e07834df16da5933ef162074e49ec4a7176dec8cec0bedf9bb90054"
+  },
+  {
+    "path": "src/applypilot/web/nz-discovery.js",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "f6a7d691cd26a4d12b96bb5c228387e4247b4a832eac4a04480220e5739adb94"
+  },
+  {
+    "path": "src/applypilot/web/nz-evidence.js",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "802376a770682dcc6a8117f4d472046f9c11653e3099eec275cc093fd25fc058"
+  },
+  {
+    "path": "src/applypilot/web/nz-preparation.js",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "deb5c48009c54355ee51d797baac504d6ea10c2f6e1cd8cc908c01b3990e9e9f"
+  },
+  {
+    "path": "src/applypilot/web/pipeline.js",
+    "action": "update",
+    "old_sha256": "254934513719abb2cbc70f352740279eb58ffa1511465a02c0cc52d6b2c3614a",
+    "new_sha256": "e1497fff839b526dabba435358bbc6bee66a5b044c39fe6d923eeec1df35544f"
+  },
+  {
+    "path": "src/applypilot/web/studios.js",
+    "action": "update",
+    "old_sha256": "4ad8839b44af5cf09c10261c7816da6d66ed5b8ad381b7ac106cfdf943bfa3a9",
+    "new_sha256": "de9e6ffbaf52c927dc8b22eab83075ec1b3eeeb45f5ceca4233290962b0a7adc"
+  },
+  {
+    "path": "src/applypilot/web/workspace.css",
+    "action": "update",
+    "old_sha256": "c80e12abaf748cd99777a02d04f6b98d87307cef77dcd0962fa67180d6d37e6f",
+    "new_sha256": "42235ff98a47bf5c269b78482b1450ff639fa170f2c65487c29b750780c636c6"
+  },
+  {
+    "path": "src/applypilot/web/workspace.html",
+    "action": "update",
+    "old_sha256": "27c5783792ddd771b2356e5be51f9b5702b4b2c221d4e274a059e3f3396be73f",
+    "new_sha256": "4bec05194116993ca8b45fca727a4a5e821286009cd1c10edf35af3a9cd12274"
+  },
+  {
+    "path": "src/applypilot/web/workspace.js",
+    "action": "update",
+    "old_sha256": "5edad5cedaeb38c6ac7e9f4077b799224b780a2fb2cb4516a63db2d934a3a8ae",
+    "new_sha256": "4277ac07ad7d1df32b06b62228b7b9edaa1fd391cc99b408c983203da0406491"
+  },
+  {
+    "path": "src/applypilot/workspace_transfer.py",
+    "action": "update",
+    "old_sha256": "2526a7fcdd406299ac6737dd176ebf89c93df1d536a6fea5446cec78cafea18f",
+    "new_sha256": "e063f27028d5595124d66db2892560bfc5dd062a3f1e49c6b530020a13a3fad4"
+  },
+  {
+    "path": "src/applypilot/writing_studio.py",
+    "action": "update",
+    "old_sha256": "1a3e342fa221275367c329063be49c31c63357920daafb857df242e40b6d8c18",
+    "new_sha256": "7f872400380366d2e893b0e8101d5fbac8f98dbdd707f71b9f5ff0f01e9eb12c"
+  },
+  {
+    "path": "tests/document_fixtures.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "b772bfa4d8bf96c49b0a30ef4ba72492a8d55c87fa73065d04f91da10ec8a513"
+  },
+  {
+    "path": "tests/test_application_packet.py",
+    "action": "update",
+    "old_sha256": "23b90b1d1d9d266e62ff0d425d9984998327a9da5af9d7b480c4f45a3cc254ee",
+    "new_sha256": "5fc264eef3bb93e0ec7c8db12a01fadf90f69c904e93aa100cae413673ea044e"
+  },
+  {
+    "path": "tests/test_assisted_browser.py",
+    "action": "update",
+    "old_sha256": "9146f5b1c4272f687ef2ba87ead29c837af5af3b07e447dd624a43f223a7385c",
+    "new_sha256": "9f2b8255cf934ea112a53d0724d44accfabacdca7b2a0c09017bbf3f897fd73d"
+  },
+  {
+    "path": "tests/test_canonical_finalisation.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "515fc51be11f5bc2c59d988887c378bebd5555f1be051e53069397d1c780b8cf"
+  },
+  {
+    "path": "tests/test_command_center.py",
+    "action": "update",
+    "old_sha256": "ace7ed5e88092d90557661c6e45d4706d70863ef7a26ca8a6c2022a5337436c5",
+    "new_sha256": "c73a104a8054b6b566c8ddfa385e519bd9f264210ab6f146dc9d19fff03d5588"
+  },
+  {
+    "path": "tests/test_country_foundation.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "20e4483e83289abf89bd92df7e8948fd19b7ff69fd186d5fa51a79f05e187a9a"
+  },
+  {
+    "path": "tests/test_cover_letter_prompting.py",
+    "action": "update",
+    "old_sha256": "6907454651ef1af32967508e19ad5f676b7aefad4e0aa784e73960dd09f85069",
+    "new_sha256": "f4359ba0ccce1f2c9774ca63387ed16247c8a2c077ab1ddee844e2d05b0991dd"
+  },
+  {
+    "path": "tests/test_dashboard_setup_endpoints.py",
+    "action": "update",
+    "old_sha256": "adf006cb633e000f04b48971cc9ba588269ee0caf4d9fd9776cd4b60381ca400",
+    "new_sha256": "3e419c2c20a20157b190d564b5a04c3d5cb13e0a377329196678aec061653b6f"
+  },
+  {
+    "path": "tests/test_job_lifecycle.py",
+    "action": "update",
+    "old_sha256": "f185dfba912a0f1b09002f0cfe74daa386dcad0955a2d63e3281aaa8f68c5679",
+    "new_sha256": "af2209dd97d05672be02946c545cee8277cb64ffe12d96fc53f1a9a166b06d3d"
+  },
+  {
+    "path": "tests/test_native_studios.py",
+    "action": "update",
+    "old_sha256": "75ed5933307ecfcce082844225dd79809d4c967ddf6e08b3b3f3336d8512f2dd",
+    "new_sha256": "3ef923c2780b3f854dff41d5a3a2eee73ba349e229e4c87a3e1d1526b192e64e"
+  },
+  {
+    "path": "tests/test_nz_discovery.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "1a1e75ea46f63b1951fee6c24c01d1b6afe660822ddaee1921f22d6cfc898684"
+  },
+  {
+    "path": "tests/test_nz_evidence.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "c9453574c2bae2471753271eee6ce3f65e70eeefdbb50ff10b3c1e61e964c93e"
+  },
+  {
+    "path": "tests/test_nz_preparation_tracking.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "ff99d66f4cff35c0b2619a6290e86aeb692cb4092b0917d8bde7ed4a01f1dd9f"
+  },
+  {
+    "path": "tests/test_nz_release_rehearsal.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "116644f35ec45e62f8025b5faa532d9cdb1dcec68a1fb1555b0f6018c9a863aa"
+  },
+  {
+    "path": "tests/test_opportunity_insights.py",
+    "action": "update",
+    "old_sha256": "c634ef3cf7d27a6fe017ba33be839c61291af419d0be372d116ac7365ca89944",
+    "new_sha256": "aced2fc43a026b86e3db86a432b42a839904570c2e828be8fc7e115fe911ac2d"
+  },
+  {
+    "path": "tests/test_pipeline_reliability.py",
+    "action": "update",
+    "old_sha256": "d5ea12d1383919564367abca24c843f494abec02fde6923eed6f50e989391e2d",
+    "new_sha256": "97f5116b1d014a2656eb9b5635aeacb75a72abdd4af7a35027f0e2ed64a52a1a"
+  },
+  {
+    "path": "tests/test_pipeline_workspace.py",
+    "action": "update",
+    "old_sha256": "38c27de5c267355cb86c7a96c6a8851f9eb5c7f85f6bff07e7fb643e57211b3c",
+    "new_sha256": "92857748d981205e362cb5dc22d89f5b721367654faa84a435e374ca2a3e615e"
+  },
+  {
+    "path": "tests/test_preparation_operations.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "79dbc08b232791bddcf14805c7caa56aa8bbea9de63d88b73b27d955047ccc97"
+  },
+  {
+    "path": "tests/test_resume_assembly.py",
+    "action": "update",
+    "old_sha256": "b270ccbdc3aac35431e8f0961c59d957e58fc9c87bd03a4d41609d53815d4eed",
+    "new_sha256": "ff0050e88c6b1833bf7b9021d2e0a3b9097754a4ae6d622020182e583b2064f7"
+  },
+  {
+    "path": "tests/test_submission_containment.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "97f04fd5324f25c2e5b4951d62e95cab7027628928fab94ec394f2ccc2308274"
+  },
+  {
+    "path": "tests/test_submission_reconciliation.py",
+    "action": "update",
+    "old_sha256": "740f584fa8cb61abc2fe1c79f1663c710d04f1d049d4d1f6e9eeba562acb56cb",
+    "new_sha256": "fd64a61ad3b125d78af406881fd30d25b8c20d9aec0161a5a75fa74cb298fdb2"
+  },
+  {
+    "path": "tests/test_submit_authority.py",
+    "action": "add",
+    "old_sha256": null,
+    "new_sha256": "b6a6993de587ac03301707fc672520eeed61de3977af3ee3fb4e5f3c920960bc"
+  },
+  {
+    "path": "tests/test_tailor_lenient_mode.py",
+    "action": "update",
+    "old_sha256": "2ff19e72e8f2f8723bd136766533be12432f2d88550a4eb2e372956e8f8b5c3f",
+    "new_sha256": "696d584c72acce405e40dbfb22fc4d419a07a85a687f9aac1e64ee5e6d511923"
+  }
+]

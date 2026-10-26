@@ -1,0 +1,8 @@
+{
+  "implementation_id": "20261016-nz-phase3",
+  "authorization": "User requested continuation through the remaining approved phases after Phase 2",
+  "baseline": "Verified uncommitted Phase 2 feature worktree; original checkout remains untouched",
+  "scope": ["P3.1 identity and immutable evidence schema", "P3.2 manual official-check UI/API", "P3.3 reduction, freshness, expiry and conflicts", "P3.4 literal vacancy evidence extraction", "P3.5 four transparent recruitment classes", "P3.6 retain GB-only sponsorship annotation", "P3.7 local-only stale reminders"],
+  "steps": ["Implement additive schema and bounded employer/evidence services", "Connect normalized discovery observations to evidence classification", "Expose authenticated NZ manual identity/evidence/history and recruitment panels", "Verify no official network calls, country isolation, immutable audit and classification edge cases", "Run required verification and write handoff"],
+  "excluded": ["Automated INZ access", "New AI models/providers", "Visa/job-check approval claims", "Automatic release or live submission", "Production candidate data access"]
+}

@@ -1,0 +1,8 @@
+{
+  "directory": "/home/swazy364/code/ApplyPilot/.release-backups/20261018-nz-live-integration",
+  "source_archive": "source.tar.gz",
+  "data_archive": "docker-data.tar.gz",
+  "previous_image": "applypilot-applypilot:nz-pre-release-20261018",
+  "archives_verified": true,
+  "service_stopped": true
+}

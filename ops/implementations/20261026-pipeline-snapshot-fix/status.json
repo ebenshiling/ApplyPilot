@@ -1,0 +1,23 @@
+{
+  "implementation_id":"20261026-pipeline-snapshot-fix",
+  "status":"completed_deployed",
+  "phase":"actual_worker_handoff_verified",
+  "root_cause":"Blank dashboard campaign selector captured as empty string; CLI worker resolved absent campaign as None. All other captured operation fields matched.",
+  "fix":"Normalize optional campaign text on context construction, worker resolution, snapshot export and restoration. Existing version-1 empty manifests restore without rewriting settings or weakening real operation comparisons.",
+  "verification":[
+    {"suite":"Sanitized real failing snapshot comparison","before":"before_check.json","after":"after_check.json","result":"before: campaign alone mismatched and restore failed; after: all four comparisons and restore passed"},
+    {"suite":"Snapshot launch and country regression","result":"73 passed","seconds":94.02,"includes":"real isolated CLI bootstrap with Workspace searches and named campaign; denied sockets; version-1 legacy empty snapshots; wrong owner/country/named campaign/settings rejected"},
+    {"command":"python scripts/agent_verify.py","result":"passed","compile":"passed","pytest_passed":869,"pytest_skipped":61,"pytest_seconds":833.40,"strict_ai":"7/7","formal_dataset":"13/13","country_ui":"local-only Chromium enabled"},
+    {"command":"git diff --check 18f888806ca30665f6b0aff008b341681538a9ee","result":"passed"},
+    {"command":"docker compose build --quiet applypilot then docker compose up -d --no-build applypilot","result":"passed"},
+    {"suite":"Pre-deployment activity check","result":"pipeline idle; no active visible browser sessions","report":"preflight.json"},
+    {"suite":"Real Docker dashboard runner → CLI subprocess","result":"passed","report":"deployment_check.json","stages":["discover","enrich","score"],"mode":"isolated no-network dry run","worker_exit_code":0,"empty_campaign_canonicalized":true,"provider_network_attempts":0,"fixture_jobs_created":0}
+  ],
+  "live_discovery_started_by_verification":false,
+  "live_search_settings_modified":false,
+  "live_jobs_modified":false,
+  "schema_changes":false,
+  "backup":"backup.json",
+  "handoff":"docs/PIPELINE_WORKSPACE.md",
+  "commit_push":"not requested or performed"
+}

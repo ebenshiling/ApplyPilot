@@ -1,0 +1,11 @@
+{
+  "change_id": "20261010-workspace-video-preparation",
+  "scope": ["dashboard routing", "workspace navigation", "video preparation"],
+  "failure_modes": [
+    {"mode": "Admin access controls disappear with classic UI", "cause": "User management existed only in classic injected markup", "effect": "Administrators lose UI account management", "severity": 6, "occurrence": 5, "detection": "Native authenticated browser account-management walkthrough and existing admin API tests", "mitigation": "Native Settings User Admin panel with existing admin-only API gates and audit"},
+    {"mode": "Old bookmarks render classic UI or redirect in a loop", "cause": "Legacy entry routes remain active", "effect": "Wrong workspace appears in product use and recordings", "severity": 5, "occurrence": 3, "detection": "HTTP route and browser entry tests", "mitigation": "One-way redirects to /workspace, including embedded setup and pipeline links"},
+    {"mode": "Login or per-user isolation breaks", "cause": "Redirect bypasses the existing authentication gate", "effect": "Workspace inaccessible or exposed", "severity": 8, "occurrence": 2, "detection": "Authenticated and unauthenticated multi-user tests", "mitigation": "Keep login gates and API authentication intact"},
+    {"mode": "Native page falls back to classic iframe", "cause": "Unknown view or failed dependency uses old UI", "effect": "Classic workspace reappears", "severity": 4, "occurrence": 3, "detection": "Browser dependency recovery and invalid-hash checks", "mitigation": "Native jobs fallback and native reload recovery only"},
+    {"mode": "Server continues generating classic HTML", "cause": "Startup or API hooks call the renderer", "effect": "Unnecessary rendering and stale classic output", "severity": 3, "occurrence": 4, "detection": "Renderer guard tests", "mitigation": "Remove startup generation and retire asynchronous server rendering hook"}
+  ]
+}

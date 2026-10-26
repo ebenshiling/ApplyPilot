@@ -1,0 +1,26 @@
+{
+  "captured_at": "2026-10-03T20:03:32.211992+00:00",
+  "python": {
+    "version": "3.12.3",
+    "executable": "/usr/bin/python3"
+  },
+  "git": {
+    "head": "36839ea49c4d6b6c3ec5a72c2b6f0a7861bf3621",
+    "branch": "main",
+    "dirty": true
+  },
+  "repo": {
+    "root": "/home/swazy364/code/ApplyPilot"
+  },
+  "key_files": {
+    "pyproject.toml": true,
+    "README.md": true,
+    "src/applypilot/view.py": true,
+    "src/applypilot/dashboard_server.py": true,
+    "tests": true
+  },
+  "env": {
+    "APPLYPILOT_DIR": null,
+    "APPLYPILOT_SEARCHES_PATH": null
+  }
+}

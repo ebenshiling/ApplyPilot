@@ -1,0 +1,5 @@
+{
+  "source_archive": "/home/swazy364/code/ApplyPilot/.release-backups/20261026-pipeline-snapshot-fix/deployed-source.tar.gz",
+  "previous_image": "applypilot-applypilot:before-snapshot-fix-20261026",
+  "live_data_modified": false
+}

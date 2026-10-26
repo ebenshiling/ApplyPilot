@@ -1368,6 +1368,10 @@ def generate_dashboard(
 
       /* Setup textarea/input overrides for readability */
       .setup-body .full-desc {{
+        width: 100%;
+        box-sizing: border-box;
+        display: block;
+        resize: vertical;
         background: var(--surface);
         color: var(--text-strong);
         border-color: var(--setup-soft-border);
@@ -1642,6 +1646,7 @@ def generate_dashboard(
 
  <nav class="page-nav motion-2" aria-label="Page navigation">
    <span class="page-nav-label">View:</span>
+   <a class="apply-link primary" data-live="1" href="/workspace">New workspace ↗</a>
    <button type="button" class="page-nav-btn active" data-page="jobs" onclick="navigatePage('jobs')">Jobs</button>
    <div class="page-nav-sep"></div>
    <button type="button" class="page-nav-btn" data-page="pipeline" onclick="navigatePage('pipeline')">Pipeline</button>
@@ -1791,7 +1796,7 @@ def generate_dashboard(
   <span class="filter-label" style="opacity:0.85">Presets:</span>
   <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['discover','enrich','score','tailor','statement','cover','pdf'])">All</button>
   <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['discover','enrich','score'])">Prep-only</button>
-  <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['tailor','statement','cover','pdf'])">Apply-only</button>
+  <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['tailor','statement','cover','pdf'])">Prepare documents</button>
 
   <span class="filter-label" style="margin-left:0.5rem;opacity:0.85">Stages:</span>
   <button type="button" class="filter-btn" data-live="1" data-pipe-run="1" onclick="pipelineRun(['discover'])">Discover</button>
@@ -2748,7 +2753,10 @@ function _btnBusy(btn, on, label) {{
 function setupJump(id) {{
   try {{
     const el = document.getElementById(id);
-    if (!el) return;
+     if (!el) return;
+     document.querySelectorAll('.setup-section[id]').forEach(section => {{
+       section.hidden = section.id !== id;
+     }});
     try {{ _setupNavSetActive(id); }} catch (e) {{}}
     el.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
   }} catch (e) {{}}
@@ -3682,7 +3690,7 @@ function setupClearSmartSites() {{
   toast('Smart-site filter cleared (all enabled)', 'info');
 }}
 
-function setupGenerateSearchesYaml() {{
+async function setupGenerateSearchesYaml() {{
   const country = ((document.getElementById('search-country') || {{}}).value || '').trim()
     || ((document.getElementById('setup-country') || {{}}).value || '').trim()
     || 'USA';
@@ -3741,7 +3749,7 @@ function setupGenerateSearchesYaml() {{
   lines.push('');
   lines.push('queries:');
   for (let i = 0; i < roles2.length; i++) {{
-    const tier = i < 2 ? 1 : (i < 5 ? 2 : 3);
+    const tier = 1;
     lines.push('  - query: "' + esc(roles2[i]) + '"');
     lines.push('    tier: ' + tier);
   }}
@@ -3785,7 +3793,10 @@ function setupGenerateSearchesYaml() {{
 
   const yaml = lines.join('\\n') + '\\n';
   const ta = document.getElementById('setup-searches');
-  if (ta) ta.value = yaml;
+  let preserved;
+  try {{ preserved = await _apiJson('/api/center/pipeline/config/preview', {{builder_yaml: yaml}}); }}
+  catch (error) {{ toast('Could not preserve existing configuration: ' + error.message, 'error', 5000); throw error; }}
+  if (ta) ta.value = preserved.yaml;
 
   const adv = document.getElementById('setup-adv-yaml');
   if (adv) adv.checked = true;
@@ -3872,11 +3883,18 @@ function _readJsonFieldOrEmpty(id) {{
 
 function _setTemplateItems(id, items) {{
   const nl = String.fromCharCode(10);
+  if (id === 'setup-tpl-certifications' || id === 'setup-tpl-education') {{
+    _setVal(id, (Array.isArray(items) ? items : String(items || '').split(/\\r?\\n/)).join(nl));
+    return;
+  }}
   _setVal(id, _templateItemsFromAny(items).join(nl));
 }}
 
 function _getTemplateItems(id) {{
   const raw = ((document.getElementById(id) || {{}}).value || '');
+  if (id === 'setup-tpl-certifications' || id === 'setup-tpl-education') {{
+    return Array.from(new Set(raw.split(/\\r?\\n/).map(x => x.trim()).filter(Boolean)));
+  }}
   return _splitTemplateItems(raw);
 }}
 
@@ -4050,8 +4068,8 @@ function setupTemplateToJson(quiet) {{
   const curDataProjects = _templateProjectEntriesFromAny(resumeSections.data_projects);
   const curSupportProjects = _templateProjectEntriesFromAny(resumeSections.support_projects);
   const curAppSupportProjects = _templateProjectEntriesFromAny(resumeSections.application_support_projects);
-  if (education.length) resumeSections.education = _mergeTemplateItems(curEdu, education);
-  if (certifications.length) resumeSections.certifications = _mergeTemplateItems(curCerts, certifications);
+   resumeSections.education = education;
+   resumeSections.certifications = certifications;
   if (techEnv.length) resumeSections.technical_environment = _mergeTemplateItems(curTech, techEnv);
   if (dataProjects.length) {{
     resumeSections.data_projects = dataProjects;
@@ -4505,7 +4523,8 @@ async function setupRegenerateTailoredResumes(btn) {{
     const prevDry = !!(dryEl && dryEl.checked);
     try {{
       if (dryEl) dryEl.checked = false;
-      await pipelineRun(['tailor']);
+     await _apiJson('/api/center/regenerate', {{}});
+     toast('Selected CV regeneration started. Follow progress in Pipeline.', 'success');
     }} finally {{
       if (dryEl) dryEl.checked = prevDry;
     }}
@@ -5572,7 +5591,7 @@ async function setupUploadResumePdf(btn) {{
 
 async function setupSaveSearches(btn) {{
   const adv = !!((document.getElementById('setup-adv-yaml') || {{}}).checked);
-  if (!adv) setupGenerateSearchesYaml();
+  if (!adv) await setupGenerateSearchesYaml();
   const text = ((document.getElementById('setup-searches') || {{}}).value || '').trim();
   if (!text) {{
     toast('Paste searches.yaml', 'warn', 3200);
@@ -6609,7 +6628,9 @@ async function markApplied(id) {{
 }}
 
 async function markFailed(id) {{
-  const reason = prompt('Fail reason (optional):', 'manual') || 'manual';
+  const answer = prompt('Fail reason (optional):', 'manual');
+  if (answer === null) return;
+  const reason = answer || 'manual';
   try {{
     await apiMark(id, 'failed', reason);
     updateCardStatus(id, 'failed', 'Failed');

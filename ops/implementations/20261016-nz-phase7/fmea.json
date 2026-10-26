@@ -1,0 +1,8 @@
+{
+  "change_id":"20261016-nz-phase7",
+  "failure_modes":[
+    {"mode":"Fixture checks are mistaken for production launch evidence","cause":"Passing tests hide missing candidate/source/ATS acceptance","effect":"Unsupported live release or misleading verification claims","severity":10,"detection":"Explicit gate matrix and source/adapter limitations","mitigation":"Release remains blocked; no default enablement or deployment; label all actual verification fixture-only"},
+    {"mode":"Migration/rollback loses history or revives unsafe authority","cause":"Positional writes, destructive restore or older binary ignores context","effect":"Lost applications or unapproved replay","severity":10,"detection":"Old-schema rerun/hash rehearsal and restart/import approval negatives","mitigation":"Additive schema, compatible contained rollback, populated restore refusal and fresh review requirements"},
+    {"mode":"Original dirty user checkout is modified","cause":"Verification uses editable install or production paths","effect":"Unintended private/source changes","severity":10,"detection":"Explicit PYTHONPATH/temporary roots and final original-repo status comparison","mitigation":"All implementation/testing remains in isolated feature worktree; no production startup/dependency install/commit/push"}
+  ]
+}

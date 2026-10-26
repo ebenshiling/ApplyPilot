@@ -1,0 +1,63 @@
+{
+  "implementation_id": "20261008-submission-reconciliation",
+  "status": "completed",
+  "phase": "deployed",
+  "owner": "ai-agent",
+  "updated_at": "2026-10-09",
+  "features": [
+    "Evidence-backed confirmed-submitted, confirmed-not-submitted and still-unsure reconciliation",
+    "Workspace ownership, attempt-bound tokens and immediate transactions protect current attempts",
+    "Uncertainty remains locked without a verified outcome; reconciliation never submits or starts a retry",
+    "Job-record and blocked assisted-browser packet reconciliation controls",
+    "Saved last-attempt images for future browser attempts with authenticated retrieval",
+    "Separate active, archived and deleted-history totals with preserved all-time hiring outcomes"
+  ],
+  "verification": {
+    "command": "$env:APPLYPILOT_RUN_PLAYWRIGHT='1'; .\\.ci311\\Scripts\\python.exe scripts/agent_verify.py",
+    "result": "passed",
+    "pytest": "530 passed, 1 skipped in 1280.32 seconds",
+    "new_tests": 13,
+    "targeted": "57 passed in 289.70 seconds covering reconciliation, lifecycle and command center",
+    "ai_regression": "7/7 passed",
+    "ai_formal": "13/13 passed",
+    "static": "Ruff, compileall, JavaScript syntax checks and scoped git diff --check passed",
+    "skip_note": "Existing Windows symlink-permission test skipped"
+  },
+  "deployment": {
+    "build": "docker compose build --quiet applypilot passed",
+    "recreation": "docker compose up -d --no-build --force-recreate applypilot passed",
+    "image": "sha256:1f1c723cec5cf4da187e1c7906bc82fb64c7046887f76041470b6a7db583044e",
+    "health": {"ok": true, "multi_user": true},
+    "active_applications_before": 0,
+    "active_browsers_before": 0,
+    "pipeline_before": "No active runs in registered workspaces; production runs completed or partial",
+    "authenticated_checks": "Live overview and job 28 reconciliation context returned 200; new assets served",
+    "unauthenticated_checks": "Reconciliation context and attempt-image endpoints returned 401",
+    "temporary_verification_session": "Created in-process and revoked in finally; token not logged",
+    "production_metrics": {
+      "total": 15,
+      "active_jobs": 6,
+      "archived": 9,
+      "retired": 6,
+      "ever_found": 21,
+      "picked": 0,
+      "submitted": 1,
+      "interviews": 0
+    },
+    "job28": {
+      "title": "Data Consultant",
+      "apply_status": "submission_uncertain",
+      "applied_at": null,
+      "attempt_id": "7C1gmL1rYdmuPGiBPvlQ4c1GZoiskOgl",
+      "historical_attempt_unchanged": true,
+      "previous_checks": 0,
+      "has_attempt_image": false,
+      "attempt_image_status": 404,
+      "note": "No employer receipt verified; no reconciliation POST or submission performed on production"
+    }
+  },
+  "guide": "docs/SUBMISSION_RECONCILIATION.md",
+  "pre_state": "ops/implementations/20261008-submission-reconciliation/pre_state.json",
+  "post_state": "ops/implementations/20261008-submission-reconciliation/post_state.json",
+  "snapshot_note": "Prior user changes preserved; no commits created. Pre-state Windows Git metadata was unavailable; post-state uses native WSL Git."
+}

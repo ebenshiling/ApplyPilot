@@ -1,0 +1,15 @@
+{
+  "implementation_id": "20261002-task-ai-routing",
+  "title": "Task-specific AI provider/model routing",
+  "status": "completed",
+  "scope": ["AI routing", "scoring", "tailoring", "statements", "cover letters", "review", "extraction", "forms", "dashboard assistant", "Docker configuration"],
+  "steps": [
+    "Implement validated per-task route configuration and safe route descriptions",
+    "Use context-local task/model scopes and immutable pooled clients for concurrent workers",
+    "Wire each AI boundary and nested reviewer; include routes in statement/assistant caches and reports",
+    "Expose effective routes in dashboard and forward environment settings to subprocesses via Compose",
+    "Activate Gemini scoring/summaries/extraction, current OpenAI Luna writing, and a configurable GPT-4.1-mini review baseline",
+    "Verify request contracts, context isolation, call-site wiring, cache changes and deployment without paid inference tests"
+  ],
+  "verification": ["python -m pytest -q tests/test_ai_routing.py tests/test_llm.py", "APPLYPILOT_RUN_PLAYWRIGHT=1 python scripts/agent_verify.py", "Docker safe route configuration and /health checks"]
+}

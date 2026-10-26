@@ -1,0 +1,11 @@
+{
+  "change_id":"20261007-decisions-observer",
+  "scope":["browser observations","dashboard API","workspace settings","usage persistence"],
+  "failure_modes":[
+    {"mode":"Prediction submits or advances an application","cause":"Classifier output treated as a browser command","effect":"Unapproved application","severity":10,"detection":"Adversarial prediction and approval regression tests","mitigation":"Observer-only interface has no browser/action references; results only feed reports"},
+    {"mode":"Observation delays takeover or final review","cause":"Synchronous network request in browser loop","effect":"Unresponsive session","severity":8,"detection":"Blocked-provider takeover test","mitigation":"Single asynchronous pending observation, bounded request timeout, no observer wait in browser actions"},
+    {"mode":"Unexpected spend or repeated calls","cause":"Polling and concurrent reservations","effect":"Excess requests","severity":7,"detection":"Atomic budget and deduplication tests","mitigation":"Default-off workspace setting; per-day and shared budget; 20 unique checkpoints per browser session; single transport attempt"},
+    {"mode":"Credentials or entered answers reach observation logs","cause":"Raw field values, URLs or provider exceptions recorded","effect":"Private data exposure","severity":9,"detection":"Payload and report redaction/isolation tests","mitigation":"No field values, screenshots or page URLs; redact known contact/credential data from bounded excerpts; save hashes and typed predictions only"},
+    {"mode":"Misleading benchmark results","cause":"Unknown tokens or comparison against heuristics called accuracy","effect":"Bad rollout decision","severity":6,"detection":"Metrics tests","mitigation":"Separate labelled synthetic accuracy from browser baseline agreement; unknown usage/cost stays unknown; refusal/failure explicit"}
+  ]
+}

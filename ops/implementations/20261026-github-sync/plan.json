@@ -1,0 +1,10 @@
+{
+  "implementation_id":"20261026-github-sync",
+  "authorization":"User requested committing and pushing all local project work, including changes by other authors, from the current local branch to its remote.",
+  "branch":"main",
+  "upstream":"origin/main",
+  "remote":"https://github.com/ebenshiling/ApplyPilot.git",
+  "steps":["Inspect status, full tracked diff, recent commits and tracking; fetch origin","Review all tracked/untracked project changes and launch media; scan text for credential patterns without exposing values","Exclude runtime databases/journals, private credential files and Windows download metadata; preserve local copies","Stage the reviewed complete project set, inspect staged diff and checks, commit using existing identity/hooks, then push main to origin/main","Verify the remote commit and final working-tree status"],
+  "verification":"Application source already passed python scripts/agent_verify.py: 902 passed, 61 skipped, strict AI 7/7 and formal dataset 13/13. Publication changes are metadata/ignore rules only.",
+  "commit_scope":"All local source, configuration examples, docs, tests, implementation records and launch-video project/deliverables visible to Git; no author-based exclusions."
+}

@@ -1,0 +1,20 @@
+{
+  "implementation_id":"20261010-video-production",
+  "status":"completed",
+  "phase":"video_delivered",
+  "owner":"ai-agent",
+  "output":"brag-output/brag.mp4",
+  "format":"H.264 MP4, 1920x1080, 30fps, AAC stereo at 48kHz",
+  "duration_seconds":240,
+  "bytes":48226269,
+  "sha256":"3a458005c314421fe131582ab2f1edd8dce0da8a1eb73e1ac52d31d57658adb2",
+  "chapters":16,
+  "features":"Actual native Jobs, Settings, CV Studio, Portfolio, Pipeline search/routing, Cover/Statement Studios, preparation preview, shared assisted browser with candidate typing and approval checkpoint, application updates/calendar export, message import, interactive Insights drill-down, retained History and AI preferences/backup",
+  "sound":"Windows system speech narration and original synthesized music",
+  "capture":"Dedicated local fictional demo workspace; persistent demonstration-data label; actual UI and application APIs; zero browser page errors",
+  "companions":["brag-output/index.html","brag-output/brag.jpg","brag-output/brag.srt","brag-output/brag.vtt","brag-output/share-copy.txt"],
+  "verification":{"full_video_decode":"passed","browser_metadata":{"width":1920,"height":1080,"duration":240,"error":null},"browser_playback_and_seek":"passed","scene_and_transition_samples":32,"visual_review":"passed; Insights pickup improves actual chart drill-down and outro holds a settled brand frame","report":"brag-output/work/verification.json"},
+  "test_scope_reason":"Media-only production and bookkeeping; no application source changed. Application-wide verification passed in the immediately preceding workspace phase. This phase verifies the actual rendered deliverable with full decode, browser playback, seek and visual inspection rather than repeating unchanged application tests.",
+  "pre_state":"ops/implementations/20261010-video-production/pre_state.json",
+  "post_state":"ops/implementations/20261010-video-production/post_state.json"
+}

@@ -22,16 +22,16 @@ def test_lenient_tailor_enabled_via_profile_mode() -> None:
     assert _lenient_tailor_enabled(profile) is True
 
 
-def test_strict_evidence_disabled_when_lenient(monkeypatch) -> None:
+def test_lenient_style_cannot_disable_factual_evidence(monkeypatch) -> None:
     monkeypatch.setenv("APPLYPILOT_TAILOR_LENIENT", "1")
     profile = {"tailoring": {"strict_evidence": True}}
-    assert _strict_evidence_enabled(profile) is False
+    assert _strict_evidence_enabled(profile) is True
 
 
 def test_strict_evidence_enabled_by_default_in_strict_mode(monkeypatch) -> None:
     monkeypatch.delenv("APPLYPILOT_TAILOR_LENIENT", raising=False)
     monkeypatch.delenv("APPLYPILOT_TAILOR_STRICT_EVIDENCE", raising=False)
-    assert _strict_evidence_enabled({"tailoring": {"mode": "strict"}}) is False
+    assert _strict_evidence_enabled({"tailoring": {"mode": "strict"}}) is True
 
 
 def test_min_coverage_defaults_follow_mode(monkeypatch) -> None:

@@ -1,0 +1,31 @@
+{
+  "implementation_id": "20261002-task-ai-routing",
+  "status": "completed",
+  "owner": "ai-agent",
+  "phases": [
+    {"name": "inspection", "status": "completed", "notes": "Located all get_client/chat_json/structured_json boundaries and mutable singleton model overrides; both deployment provider keys present."},
+    {"name": "implementation", "status": "completed", "notes": "Validated routes, context-local scopes/model overrides, immutable pooled clients, independent review, all pipeline AI boundaries, route-aware caches, safe task table and actual assistant model labels. Gemini keys moved to headers and request fallback metadata is thread-local."},
+    {"name": "verification_and_deployment", "status": "completed", "notes": "283 tests passed with Playwright enabled, compilation, 7 AI regression checks, 13 formal cases, scoped F-rule lint, JS syntax and intended diff checks. Docker rebuilt/recreated; all nine routes configured and /health ok."}
+  ],
+  "verification": {
+    "result": "passed",
+    "commands": ["python -m pytest -q tests/test_ai_routing.py tests/test_llm.py", "APPLYPILOT_RUN_PLAYWRIGHT=1 python scripts/agent_verify.py", "node --check src/applypilot/web/workspace.js", "ruff check routing/client/command-center modules and tests --select F", "docker compose up -d --build --force-recreate applypilot", "Docker route_table configuration and GET /health"],
+    "tests": "283 passed",
+    "catalog_access": "Read-only Gemini models catalog returned 200 and gemini-2.5-flash generateContent availability; OpenAI model metadata endpoints for gpt-6-luna and gpt-4.1-mini returned 200",
+    "paid_inference": "No live inference used for verification; request contracts and task integration tested with mocks"
+  },
+  "deployed_routes": {
+    "score": "gemini/gemini-2.5-flash (thinking budget 0)",
+    "summary": "gemini/gemini-2.5-flash (thinking budget 0)",
+    "extract": "gemini/gemini-2.5-flash (thinking budget 0)",
+    "tailor": "openai/gpt-6-luna (reasoning none)",
+    "statement": "openai/gpt-6-luna (reasoning none)",
+    "cover": "openai/gpt-6-luna (reasoning none)",
+    "review": "openai/gpt-4.1-mini",
+    "assistant": "openai/gpt-6-luna (reasoning none)",
+    "forms": "openai/gpt-6-luna (reasoning none)"
+  },
+  "pre_state": "ops/implementations/20261002-task-ai-routing/pre_state.json",
+  "post_state": "ops/implementations/20261002-task-ai-routing/post_state.json",
+  "quality_comparison": "Reviewer baseline is configurable; no provider is claimed to have won a live document-quality comparison."
+}

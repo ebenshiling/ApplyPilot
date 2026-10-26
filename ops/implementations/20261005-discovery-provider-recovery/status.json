@@ -1,0 +1,22 @@
+{
+  "implementation_id":"20261005-discovery-provider-recovery",
+  "status":"completed",
+  "owner":"ai-agent",
+  "phases":[
+    {"name":"diagnosis","status":"completed","notes":"JobSpy 1.2.0 installed but curl_cffi missing. Gemini metadata GET accepted old key; user subsequently identified incorrect API key and updated .env. A plain restart retained the old container key, confirmed through a value-free comparison."},
+    {"name":"packaging","status":"completed","notes":"Docker/bootstrap install python-jobspy==1.2.0 with normal dependency resolution and an import smoke. Discovery preflights once and names a missing transitive module accurately. Live import succeeds with curl_cffi 0.16.3."},
+    {"name":"provider recovery","status":"completed","notes":"Sanitized classified payment/auth/permission/model errors, per-client-thread account circuit, batch scoring defer/pause and successful-versus-attempted counts. Page text fallback retained with partial reporting and recovery UI."},
+    {"name":"verification and restart","status":"completed","notes":"402 tests, compile, 7 AI regression checks and 13 formal cases passed. Image built with import smoke; service recreated to reload corrected .env key, import and health verified; protected data checked."}
+  ],
+  "verification":{
+    "result":"passed",
+    "tests":"402 passed with Playwright enabled in 523.33 seconds",
+    "commands":["APPLYPILOT_RUN_PLAYWRIGHT=1 python scripts/agent_verify.py","ruff check recovery/client/discovery/enrichment modules and tests --select F","docker compose build applypilot","docker compose -f docker-compose.yml up -d --no-build --force-recreate applypilot","JobSpy import; sanitized service-key/.env comparison; /health; production before/after diagnostics"],
+    "production":{"health":"ok=true, multi_user=true","jobspy_import":"success","service_key_matches_updated_env":true,"counts_preserved":{"jobs":21,"cc_documents":4,"cc_messages":111},"protected_inputs":"All 13 immediate pre/post profile/search/default/variant hashes matched","pending_score":7},
+    "paid_inference":"None. Read-only Gemini model catalog GET returned 200; planned minimal generation probe was cancelled after user identified and corrected the key.",
+    "deployment_note":"Initial restart did not reload .env. Linux-source mount override from the Windows Docker client led to a permission/startup failure; immediately recreated using base Windows Compose/UNC paths, restored healthy service and confirmed original user data/hashes. The temporary incorrect override was removed.",
+    "provider_note":"New-key generation was not invoked automatically; user can retry the seven queued scoring jobs from the UI. No billing change or provider switch performed."
+  },
+  "pre_state":"ops/implementations/20261005-discovery-provider-recovery/pre_state.json",
+  "post_state":"ops/implementations/20261005-discovery-provider-recovery/post_state.json"
+}

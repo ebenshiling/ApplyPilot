@@ -1,0 +1,22 @@
+{
+  "implementation_id": "20261002-smart-evidence-inbox",
+  "status": "completed",
+  "owner": "ai-agent",
+  "phases": [
+    {"name": "inspection", "status": "completed", "notes": "Current importer treats every message as review; dropdown defaults to acknowledged; receipt times and model evidence absent."},
+    {"name": "backend", "status": "completed", "notes": "Additive legacy classification migration, native IDs/receipt times, exact sender rules, paged filters, cached and leased source-validated Luna analysis, explicit atomic hiring/date/detail review."},
+    {"name": "frontend_and_tests", "status": "completed", "notes": "Bucket filters/counts/search/pagination, dismiss/ignore/restore, analysis source quotes/model labels, unselected uncertain outcomes, date/link/contact checkboxes and preserved drafts. Browser/API/unit coverage added."},
+    {"name": "verification_and_deployment", "status": "completed", "notes": "Full agent gate passed 311 tests, compilation, 7 AI regression checks and 13 formal cases; scoped lint and JavaScript syntax passed. Docker rebuilt/recreated and health/configuration verified."}
+  ],
+  "verification": {
+    "result": "passed",
+    "tests": "311 passed with Playwright enabled",
+    "commands": ["APPLYPILOT_RUN_PLAYWRIGHT=1 python scripts/agent_verify.py", "ruff check inbox/mail/command-center modules and tests --select F", "node --check src/applypilot/web/workspace.js", "docker compose up -d --build --force-recreate applypilot", "GET /health and Docker email route description"],
+    "deployed_route": {"provider": "openai", "model": "gpt-6-luna", "reasoning_effort": "none", "configured": true},
+    "migration_counts": {"application_review": 10, "job_alert_review": 28, "promotion_review": 4, "unknown_review": 49},
+    "inference_testing": "Mocked AI responses only; no paid inference performed for verification"
+  },
+  "pre_state": "ops/implementations/20261002-smart-evidence-inbox/pre_state.json",
+  "post_state": "ops/implementations/20261002-smart-evidence-inbox/post_state.json",
+  "ai_usage": "User-triggered GPT-6 Luna with reasoning none; no automatic paid inference during synchronization or migration."
+}

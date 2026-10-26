@@ -1,0 +1,51 @@
+queries:
+- query: Application Support Analyst
+  tier: 1
+- query: Data Analyst
+  tier: 2
+locations:
+- location: Manchester, United Kingdom
+  country: United Kingdom
+  city: Manchester
+  country_code: GB
+  remote: false
+- location: Toronto, Canada
+  country: Canada
+  city: Toronto
+  province_state: Ontario
+  country_code: CA
+  remote: false
+- location: Remote
+  country: United Kingdom
+  remote: true
+boards:
+- indeed
+- linkedin
+- google
+country: UK
+geographic_filter_mode: selected
+smart_sites:
+- NHS Jobs
+- Reed
+defaults:
+  results_per_site: 15
+  hours_old: 72
+board_search_budget: 6
+smart_target_budget: 4
+workday_target_budget: 4
+resume_routing:
+  variants:
+    application_support: resume_variants/application_support.txt
+    data_analyst: resume_variants/data_analyst.txt
+  families:
+  - name: application_support
+    variant: application_support
+    keywords:
+    - application support
+  context_routing:
+    enabled: false
+  blended_routes:
+    enabled: false
+  title_routes:
+    Application Support Analyst: application_support
+    Data Analyst: data_analyst

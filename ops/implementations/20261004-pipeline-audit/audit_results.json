@@ -1,0 +1,44 @@
+{
+  "result": "reproduced",
+  "finding_count": 15,
+  "findings": {
+    "comma_override": [
+      {
+        "query": "Application Support Analyst, Data Analyst",
+        "tier": 1
+      }
+    ],
+    "zero_score_excluded_from_retry": true,
+    "archived_tailor_pending_vs_eligible": [
+      1,
+      0
+    ],
+    "existing_pdf_pending_vs_conversions": [
+      1,
+      0
+    ],
+    "no_progress_passes_without_backoff": 3,
+    "pdf_finished_while_tailor_not_done": true,
+    "returned_error_reported_ok": true,
+    "sequential_statement_threshold_not_forwarded": true,
+    "selected_only_statements_processed": [
+      "archived",
+      "unselected"
+    ],
+    "unconfigured_route": "default",
+    "resume_text_cache_stale_after_edit": true,
+    "blend_with_context_disabled_and_one_context_hit": "blend",
+    "custom_source_requires_registry_entry": true,
+    "smart_storage_discards_supplied_company": true,
+    "workspace_configuration_snapshot": {
+      "query_count": 25,
+      "location_count": 9,
+      "board_count": 4,
+      "planned_board_searches_before_overrides": 900,
+      "smart_targets_before_environment_filters_and_cap": 900,
+      "resume_routing_present": false,
+      "data_analyst_searched_by_default_workday_tiers": false,
+      "graduate_titles_excluded": true
+    }
+  }
+}

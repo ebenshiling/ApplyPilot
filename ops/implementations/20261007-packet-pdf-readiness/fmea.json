@@ -1,0 +1,11 @@
+{
+  "change_id":"20261007-packet-pdf-readiness",
+  "scope":["packet PDFs","authenticated dashboard","assisted application readiness"],
+  "failure_modes":[
+    {"mode":"Partial or stale PDF replaces an existing document","cause":"Renderer failure or source edit during rendering","effect":"Wrong reviewed attachment","severity":9,"detection":"Failed-render and concurrent-source-change tests","mitigation":"Render to a temporary sibling; verify PDF and unchanged inputs before atomic canonical replacement"},
+    {"mode":"Render another workspace's document","cause":"Job path or symlink escapes workspace","effect":"Private data exposure","severity":9,"detection":"Workspace/symlink path tests","mitigation":"Resolve and verify each input/output path against the authenticated workspace"},
+    {"mode":"UI reports ready for a text draft with no current PDF","cause":"Path-presence-only labels","effect":"User blocked at launch or uploads incomplete packet","severity":7,"detection":"Missing/stale artifact and UI recovery tests","mitigation":"Server-owned per-document readiness; targeted Prepare PDFs action; launch gated on refreshed readiness"},
+    {"mode":"Preparation changes submitted or active applications","cause":"Concurrent worker or retry","effect":"Evidence altered during submission","severity":9,"detection":"Active/uncertain/submitted guards","mitigation":"Reject preparation for active/submitted/uncertain records; preserve source text, approval and submission fields"},
+    {"mode":"New readiness fields break CLI/pipeline consumers","cause":"Changing shared packet schema semantics","effect":"Existing preparation workflows fail","severity":7,"detection":"Full regression suite","mitigation":"Keep existing shared packet gate; add a richer browser packet adapter and scoped rendering"}
+  ]
+}

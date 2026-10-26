@@ -1,0 +1,21 @@
+{
+  "implementation_id": "20261002-openai-luna-support",
+  "status": "completed",
+  "owner": "ai-agent",
+  "created_at": "2026-10-02",
+  "phases": [
+    {"name": "contracts", "status": "completed", "notes": "Verified official model pages and Chat Completions docs: max_completion_tokens includes reasoning; temperature only with reasoning none; developer messages; explicit effort avoids medium default."},
+    {"name": "implementation", "status": "completed", "notes": "Scoped Luna payloads use max_completion_tokens, developer messages and validated explicit reasoning. Temperature omitted for reasoning; empty/truncated replies rejected. Effort included in cache identity and forwarded by Compose."},
+    {"name": "verification", "status": "completed", "notes": "24 LLM tests passed; full agent_verify with Playwright enabled passed 259 tests, compilation, 7 AI regression checks and 13 formal evaluation cases. Docker service rebuilt/recreated at user request and health endpoint returned ok."}
+  ],
+  "verification": {
+    "commands": ["python -m pytest -q tests/test_llm.py", "APPLYPILOT_RUN_PLAYWRIGHT=1 python scripts/agent_verify.py", "ruff check src/applypilot/llm.py src/applypilot/command_center.py tests/test_llm.py --select F", "docker compose up -d --build --force-recreate applypilot", "GET /health"],
+    "result": "passed",
+    "tests": "259 passed",
+    "deployed_configuration": {"provider": "openai", "model": "gpt-6-luna", "reasoning_effort": "none", "api_key_configured": true, "gmail_oauth_configured": false},
+    "deployment": "Container applypilot-dashboard running; /health returned ok=true, multi_user=true"
+  },
+  "pre_state": "ops/implementations/20261002-openai-luna-support/pre_state.json",
+  "post_state": "ops/implementations/20261002-openai-luna-support/post_state.json",
+  "live_requests": "No live AI inference calls were made for verification. Model availability, billing and document quality still require the user-managed Explain fit/CV trial."
+}

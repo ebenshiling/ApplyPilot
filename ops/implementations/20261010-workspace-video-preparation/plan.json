@@ -1,0 +1,12 @@
+{
+  "implementation_id": "20261010-workspace-video-preparation",
+  "title": "Install brag-slim and make the native workspace the served interface",
+  "steps": [
+    "Install the requested brag-slim skill project-locally and verify its instructions",
+    "Redirect classic dashboard entry points to the native workspace and remove classic UI fallbacks",
+    "Stop server-owned classic HTML rendering while retaining standalone CLI export",
+    "Verify routing, authentication, native startup and repository checks",
+    "Prepare a detailed 1920x1080 mouse-led commercial walkthrough storyboard"
+  ],
+  "video_scope": "Preparation for the user's next video-production step; no finished video claimed in this phase"
+}

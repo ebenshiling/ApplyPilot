@@ -1,0 +1,8 @@
+{
+  "implementation_id":"20261026-pipeline-snapshot-fix",
+  "reported_command":"/usr/local/bin/python3.11 -u -m applypilot run discover enrich score --min-score 7 --workers 1",
+  "root_cause":"The dashboard's empty campaign selector is captured as an empty string; the subprocess has no campaign environment variable and resolves None. Workspace, country and the captured configuration hash match.",
+  "steps":["Record sanitized comparison of the failing run's captured operation","Canonicalize absent campaign identifiers at context construction, export and restoration while retaining strict owner/country/named-campaign/configuration validation","Test legacy empty manifests, genuine mismatch rejection and the actual parent-to-CLI subprocess launch with discovery/enrichment/scoring in no-network dry-run mode","Run regression verification, retain previous image/source, deploy and check old-manifest restoration and isolated real worker startup"],
+  "data_policy":"No changes to the user's search settings, candidate facts or job records. No live discovery/provider calls or employer submissions during verification.",
+  "rollback":"Restore previous image/source and preserve data volumes; no schema migration."
+}

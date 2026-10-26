@@ -1,0 +1,13 @@
+Incident investigation and practical diagnostics
+
+In my application support role at Northstar Digital, I investigate incidents by reviewing SQL queries, application logs and the steps needed to reproduce an issue. I record the checks performed and distinguish confirmed findings from assumptions. This helps colleagues continue an investigation and understand the basis of a proposed resolution.
+
+Clear communication and service documentation
+
+I coordinate updates with users and technical colleagues. My approach is to explain the current position clearly, document the next action, and make the information useful to people with different levels of technical knowledge. I maintain service documentation and share troubleshooting notes as part of this work.
+
+Reusable evidence and continuous learning
+
+I built a service reliability knowledge base containing reviewed troubleshooting procedures and recurring-issue diagnostics. The project uses SQL, Python and Markdown and organizes practical support evidence for reuse. I have also completed ITIL Foundation study and continue to develop my understanding of service management.
+
+I would bring these examples to the Application Support Analyst role, while reviewing the full person specification and discussing areas where further learning is required.

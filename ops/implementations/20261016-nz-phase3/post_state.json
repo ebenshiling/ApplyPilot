@@ -1,0 +1,26 @@
+{
+  "captured_at": "2026-10-16T16:41:41.432788+00:00",
+  "python": {
+    "version": "3.12.3",
+    "executable": "/usr/bin/python3"
+  },
+  "git": {
+    "head": "e357acd0bb939fe6c1dea02cee70c13538ca6025",
+    "branch": "feat/nz-phase2-discovery-metadata",
+    "dirty": true
+  },
+  "repo": {
+    "root": "/mnt/c/Users/swazy/AppData/Local/Temp/opencode/applypilot-nz-phase2"
+  },
+  "key_files": {
+    "pyproject.toml": true,
+    "README.md": true,
+    "src/applypilot/view.py": true,
+    "src/applypilot/dashboard_server.py": true,
+    "tests": true
+  },
+  "env": {
+    "APPLYPILOT_DIR": null,
+    "APPLYPILOT_SEARCHES_PATH": null
+  }
+}

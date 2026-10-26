@@ -1,0 +1,45 @@
+{
+  "measurements": [
+    {
+      "endpoint": "/api/center?country_code=GB",
+      "seconds": [
+        0.754,
+        0.6702
+      ],
+      "response_bytes": 2486130
+    },
+    {
+      "endpoint": "/api/center/pipeline?country_code=GB",
+      "seconds": [
+        9.2426,
+        9.8891
+      ],
+      "response_bytes": 82016
+    },
+    {
+      "endpoint": "/api/pipeline/status",
+      "seconds": [
+        0.2542,
+        0.252
+      ],
+      "response_bytes": 468
+    },
+    {
+      "endpoint": "/api/center/nz/discovery?country_code=NZ",
+      "seconds": [
+        0.6903,
+        0.6847
+      ],
+      "response_bytes": 5507
+    },
+    {
+      "endpoint": "/api/center/nz/preparation?country_code=NZ",
+      "seconds": [
+        0.8811,
+        0.6902
+      ],
+      "response_bytes": 4200
+    }
+  ],
+  "profile": "         82213923 function calls (81819001 primitive calls) in 25.801 seconds\n\n   Ordered by: cumulative time\n   List reduced from 1755 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000   25.829   25.829 /app/src/applypilot/pipeline_workspace.py:209(state)\n        1    0.010    0.010   25.747   25.747 /app/src/applypilot/pipeline_workspace.py:120(preview)\n      263    0.012    0.000   20.546    0.078 /app/src/applypilot/role_routing.py:336(score_fingerprint)\n      731    0.003    0.000   16.807    0.023 /usr/local/lib/python3.11/site-packages/yaml/__init__.py:117(safe_load)\n      731    0.099    0.000   16.805    0.023 /usr/local/lib/python3.11/site-packages/yaml/__init__.py:74(load)\n      728    0.007    0.000   16.803    0.023 /app/src/applypilot/setup_workspace.py:627(read_searches_dict)\n      731    0.002    0.000   16.674    0.023 /usr/local/lib/python3.11/site-packages/yaml/constructor.py:47(get_single_data)\n        1    0.000    0.000   15.944   15.944 /app/src/applypilot/pipeline_workspace.py:176(<dictcomp>)\n        6    0.000    0.000   15.943    2.657 /app/src/applypilot/eligibility.py:81(candidates)\n      731    0.003    0.000   15.782    0.022 /usr/local/lib/python3.11/site-packages/yaml/composer.py:29(get_single_node)\n      731    0.002    0.000   15.720    0.022 /usr/local/lib/python3.11/site-packages/yaml/composer.py:50(compose_document)\n278627/731    0.411    0.000   15.713    0.021 /usr/local/lib/python3.11/site-packages/yaml/composer.py:63(compose_node)\n40180/731    0.176    0.000   15.693    0.021 /usr/local/lib/python3.11/site-packages/yaml/composer.py:117(compose_mapping_node)\n   881619    0.410    0.000   14.274    0.000 /usr/local/lib/python3.11/site-packages/yaml/parser.py:94(check_event)\n14570/5106    0.080    0.000   12.838    0.003 /usr/local/lib/python3.11/site-packages/yaml/composer.py:99(compose_sequence_node)\n  2121516    1.129    0.000   11.334    0.000 /usr/local/lib/python3.11/site-packages/yaml/scanner.py:113(check_token)\n      409    0.018    0.000   10.910    0.027 /app/src/applypilot/role_routing.py:199(route_resume_for_job)\n      409    0.010    0.000    9.630    0.024 /app/src/applypilot/country_context.py:248(check_job)\n      409    0.012    0.000    9.564    0.023 /app/src/applypilot/country_context.py:177(resolve)\n   399287    0.627    0.000    8.245    0.000 /usr/local/lib/python3.11/site-packages/yaml/scanner.py:156(fetch_more_tokens)\n      385    0.004    0.000    7.871    0.020 /app/src/applypilot/ai_routing.py:174(route_info)\n      385    0.014    0.000    7.865    0.020 /app/src/applypilot/ai_routing.py:108(resolve_route)\n     2696    0.151    0.000    7.827    0.003 /app/src/applypilot/ai_settings.py:32(environment)\n        1    0.004    0.004    6.885    6.885 /app/src/applypilot/eligibility.py:110(<listcomp>)\n        1    0.000    0.000    6.821    6.821 /app/src/applypilot/eligibility.py:89(<listcomp>)\n       88    0.004    0.000    6.821    0.078 /app/src/applypilot/role_routing.py:369(score_inputs_changed)\n     2696    0.009    0.000    6.421    0.002 /usr/local/lib/python3.11/site-packages/dotenv/main.py:438(dotenv_values)\n     2696    0.017    0.000    6.410    0.002 /usr/local/lib/python3.11/site-packages/dotenv/main.py:75(dict)\n     2696    0.091    0.000    6.393    0.002 /usr/local/lib/python3.11/site-packages/dotenv/main.py:294(resolve_variables)\n      264    0.001    0.000    6.135    0.023 /app/src/applypilot/pipeline_workspace.py:87(campaign_config)\n\n\n"
+}

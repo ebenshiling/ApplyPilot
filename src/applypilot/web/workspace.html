@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ApplyPilot · Your application workspace</title>
+  <link rel="stylesheet" href="/assets/workspace.css">
+  <link rel="stylesheet" href="/assets/pipeline.css">
+  <link rel="stylesheet" href="/assets/studios.css">
+  <script src="/assets/workspace.js" defer></script>
+   <script src="/assets/pipeline.js" defer></script>
+   <script src="/assets/pipeline-scope.js" defer></script>
+   <script src="/assets/nz-discovery.js" defer></script>
+   <script src="/assets/nz-search.js" defer></script>
+  <script src="/assets/nz-evidence.js" defer></script>
+  <script src="/assets/canonical.js" defer></script>
+  <script src="/assets/nz-preparation.js" defer></script>
+  <script src="/assets/document-review.js" defer></script>
+  <script src="/assets/geography-editor.js" defer></script>
+   <script src="/assets/studios.js" defer></script>
+   <script src="/assets/nhs-planner.js" defer></script>
+   <link rel="stylesheet" href="/assets/assisted-browser.css">
+    <script src="/assets/browser-frame-view.js" defer></script>
+    <script src="/assets/assisted-browser.js" defer></script>
+   <link rel="stylesheet" href="/assets/job-lifecycle.css">
+    <script src="/assets/job-lifecycle.js" defer></script>
+    <link rel="stylesheet" href="/assets/opportunity-insights.css">
+    <script src="/assets/opportunity-insights.js" defer></script>
+    <script src="/assets/insights-charts.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to workspace</a>
+  <aside class="rail" id="workspace-navigation">
+    <a class="brand" href="/workspace"><span class="brand-mark">ap</span><span>ApplyPilot<small>APPLICATION WORKSPACE</small></span></a>
+    <nav aria-label="Main navigation">
+      <button data-view="jobs" class="active"><span>01</span> Jobs</button>
+       <button data-view="applications"><span>02</span> Applications</button>
+       <button data-view="history"><span>↳</span> History & storage</button>
+      <button data-view="cv"><span>03</span> CV Studio</button>
+      <button data-view="portfolio"><span>04</span> Portfolio</button>
+      <button data-view="pipeline"><span>05</span> Pipeline</button>
+      <button data-view="cover"><span>06</span> Cover Studio</button>
+      <button data-view="statement"><span>07</span> Statement Studio</button>
+      <button data-view="inbox"><span>08</span> Evidence inbox</button>
+      <button data-view="analytics"><span>09</span> Insights</button>
+      <button data-view="settings"><span>10</span> Settings</button>
+    </nav>
+    <div class="rail-bottom"><span id="connection" class="connection">Connecting…</span><button id="theme" class="quiet">Switch theme</button></div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar"><button id="sidebar-toggle" class="quiet sidebar-toggle" aria-controls="workspace-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h16" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button><span>YOUR NEXT CHAPTER, ORGANIZED.</span><div><span id="account"></span><span id="save-state"></span><button id="refresh" class="quiet">Refresh</button></div></header>
+    <main id="main" tabindex="-1">
+      <label class="hint" for="workspace-country">Country workspace <select id="workspace-country" aria-describedby="country-foundation-note"><option value="GB">United Kingdom / legacy</option><option value="NZ" disabled>New Zealand</option></select></label>
+      <p id="country-foundation-note" class="hint">Switch between UK and NZ discovery, preparation and applications. Existing records retain their country and application history.</p>
+      <div class="heading"><div><p class="eyebrow" id="eyebrow">DISCOVER / DECIDE / APPLY</p><h1 id="page-title">Find your next move.</h1><p id="page-description">A clear view of your opportunities and what to do next.</p></div><div id="page-actions"></div></div>
+      <div id="metrics" class="metrics"></div>
+      <section id="content" aria-label="Workspace content"><p class="empty">Loading your workspace…</p></section>
+    </main>
+  </div>
+  <dialog id="job-dialog" aria-labelledby="detail-title"><div class="dialog-top"><span class="eyebrow">APPLICATION RECORD</span><button id="close-dialog" class="quiet" aria-label="Close application record">Close ×</button></div><div id="job-detail"></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

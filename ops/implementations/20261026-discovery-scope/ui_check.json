@@ -1,0 +1,14 @@
+{
+  "live_preview_updates_unsaved_edits": true,
+  "review_cancelled_without_start": true,
+  "default_max_new_jobs": 50,
+  "default_results_per_search": 10,
+  "edited_limit_previewed": 5,
+  "existing_saved_excluded": 1954,
+  "backlog_score_queue_in_this_plan": 0,
+  "workday_and_direct_opt_in": true,
+  "configuration_unchanged": true,
+  "pipeline_idle": true,
+  "blocked_mutation_attempts": 0,
+  "javascript_errors": 0
+}

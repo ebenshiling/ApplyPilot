@@ -1,0 +1,14 @@
+{
+  "change_id": "20261002-smart-evidence-inbox",
+  "status": "mitigations_verified",
+  "verification": "311-test gate passed, including rules/legacy preservation, reference ambiguity, invented evidence/matches/links, explicit clock/time-zone/date and DST checks, cache/budget guards, dismissal during inference, filtered pagination and browser placeholder/draft/date-review flows; deployment migration and route/health verified.",
+  "scope": ["inbox", "mail", "AI", "database", "hiring updates"],
+  "failure_modes": [
+    {"mode": "Alerts become false acknowledgements", "cause": "Broad keywords or first dropdown option", "effect": "Incorrect hiring records", "severity": 9, "detection": "Alert/promotion/unknown browser and classifier cases", "mitigation": "Separate categories, null uncertain proposals and placeholder review fields", "owner": "inbox", "follow_up_phase": "backend"},
+    {"mode": "AI invents a match/status/date/link", "cause": "Unverified model output or prompt injection", "effect": "Wrong application or reminder", "severity": 9, "detection": "Adversarial JSON/evidence/date fixtures", "mitigation": "No tools/actions, literal quotes, submitted candidate validation, explicit time-zone/date checks and reviewed updates", "owner": "AI analysis", "follow_up_phase": "backend"},
+    {"mode": "Migration or sync erases decisions/history", "cause": "Destructive updates or duplicate re-import", "effect": "Lost records or resurfaced dismissed mail", "severity": 9, "detection": "Legacy, native-ID and duplicate-sync fixtures", "mitigation": "Additive migration and preservation of accepted/dismissed/ignored status", "owner": "persistence", "follow_up_phase": "backend"},
+    {"mode": "Analysis overrides a simultaneous dismissal", "cause": "Long network request without final state check", "effect": "User decision lost", "severity": 8, "detection": "Concurrent hide/analysis and lease tests", "mitigation": "Analysis lease, key/state checks and no DB transaction held over inference", "owner": "analysis", "follow_up_phase": "backend"},
+    {"mode": "Background sync spends excessive credits", "cause": "Automatic analysis of newsletters", "effect": "Unexpected billing", "severity": 7, "detection": "Sync-no-AI and cache/budget tests", "mitigation": "Manual analysis, logical request budget and cached results", "owner": "mail integration", "follow_up_phase": "backend"},
+    {"mode": "Polling destroys review drafts", "cause": "Whole inbox rerender", "effect": "Wrong selection or lost pasted message", "severity": 7, "detection": "Browser draft/filter/review scenarios", "mitigation": "Separate paged review pane and retain per-message drafts", "owner": "frontend", "follow_up_phase": "frontend_and_tests"}
+  ]
+}

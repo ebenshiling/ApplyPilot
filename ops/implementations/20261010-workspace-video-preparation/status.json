@@ -1,0 +1,16 @@
+{
+  "implementation_id": "20261010-workspace-video-preparation",
+  "status": "completed",
+  "phase": "deployed_and_storyboard_ready",
+  "owner": "ai-agent",
+  "updated_at": "2026-10-10",
+  "skill": {"name":"brag-slim","source":"latent-spaces/brag","path":".agents/skills/brag-slim/SKILL.md","agent":"opencode","scope":"project-local","lock":"skills-lock.json"},
+  "changes": ["Legacy served dashboard routes redirect to the native workspace; embedded setup/pipeline links map to native views", "Classic sidebar link, dependency-recovery link and iframe renderer removed", "Server startup and legacy write hooks no longer generate classic HTML", "Native Settings User Admin preserves account actions and audit using existing protected endpoints", "Native browser clickthrough covers registration, jobs search/pick, admin access changes, profile save, source selection, run preview and sign-out"],
+  "verification": {"command":"$env:APPLYPILOT_RUN_PLAYWRIGHT='1'; & \".\\.ci311\\Scripts\\python.exe\" scripts/agent_verify.py","result":"passed","pytest":"600 passed, 1 skipped in 2208.83 seconds","ai_regression":"7/7 passed","ai_formal":"13/13 passed","compile":"passed","javascript_syntax":"workspace.js and studios.js passed","scoped_diff_check":"passed","repository_diff_note":"Existing unrelated search YAML whitespace findings preserved"},
+  "deployment": {"build":"docker compose build --quiet applypilot passed","recreation":"docker compose up -d --no-build --force-recreate applypilot passed","active_work_before_recreation":0,"workspaces_checked":39,"health":{"ok":true,"multi_user":true},"authenticated_checks":"All five legacy routes redirected correctly; native workspace/assets/API/admin access passed","unauthenticated_checks":"Workspace login gate and API 401 passed","temporary_verification_session":"Revoked in finally; token not logged"},
+  "video": {"status":"planned, not rendered","storyboard":"brag-output/brag-plan.md","format":"1920x1080 landscape, 30fps","duration_seconds":240,"focus":"Detailed real-UI mouse-led commercial tour of the native workspace","encoder_readiness":"FFmpeg not found on Windows or WSL PATH; resolve local encoder in video production phase"},
+  "tests_note":"Meaningful HTTP authentication/redirect/render guards and native Playwright interactions cover the routing and admin UI changes; storyboard requires no implementation-mirroring tests.",
+  "fmea":"All listed routing, rendering, authentication and admin-access mitigations implemented and verified.",
+  "pre_state":"ops/implementations/20261010-workspace-video-preparation/pre_state.json",
+  "post_state":"ops/implementations/20261010-workspace-video-preparation/post_state.json"
+}

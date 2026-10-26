@@ -1,0 +1,15 @@
+{
+  "change_id": "20261009-opportunity-insights-browser",
+  "scope": ["dashboard", "persistence", "submission", "ai", "export"],
+  "failure_modes": [
+    {"mode":"Invented historic activity","cause":"Migration guesses missing events","effect":"Misleading analysis","severity":8,"detection":"Idempotent legacy migration tests","mitigation":"Explicit observed-existing baseline; preserve original timestamps and mark missing history unknown"},
+    {"mode":"Lost or cross-workspace export data","cause":"Limits, retired-record omission or wrong database","effect":"Incomplete or leaked analysis","severity":9,"detection":"Large-history/retirement/auth tests","mitigation":"Workspace-owned queries; complete datasets without UI pagination limits; durable URL identities; formula-safe CSV and credential redaction"},
+    {"mode":"Wrong field overwritten","cause":"Stale draft, navigation, changed value or iframe focus","effect":"Incorrect employer answer","severity":10,"detection":"Real browser stale target, unnamed and iframe tests","mitigation":"Document/element target tokens, value fingerprints, explicit replacement and user-reviewed insertion; final approval remains page-bound"},
+    {"mode":"Fabricated qualification or sensitive answer","cause":"Question drafting guesses missing candidate evidence","effect":"False application","severity":10,"detection":"Grounding/citation/local-only tests","mitigation":"Only supplied CV/profile/verified sources; exact supporting quotes; missing-evidence feedback; sensitive/consent fields stay local/manual"},
+    {"mode":"Input lag or image stream failure","cause":"Synchronous inspection/capture blocks FIFO input","effect":"Unusable takeover","severity":8,"detection":"Interactive input/frame metrics and browser tests","mitigation":"CDP screencast with bounded fallback, lightweight focus reading, asynchronous drafts and acknowledged processed commands"},
+    {"mode":"Duplicate submission after restart","cause":"Deployment interrupts live candidate work","effect":"Repeated employer submission","severity":10,"detection":"Pre-deploy work check and approval/uncertainty regressions","mitigation":"Deploy only idle workspaces; retain single-use final approval, durable uncertainty and no automatic retry"}
+  ],
+  "mitigation_status": "Implemented and verified by 543 passing tests, strict AI evaluations and authenticated live deployment checks",
+  "engineering_follow_ups": [],
+  "coverage_note": "Existing saved history is exported; missing earlier activity is explicitly unknown. No reconstruction or real application submission was performed."
+}

@@ -76,6 +76,8 @@ def parse_resume(text: str) -> dict:
         "PROJECTS",
         "EDUCATION",
         "CERTIFICATIONS",
+        "PROFESSIONAL MEMBERSHIPS",
+        "PROFESSIONAL DEVELOPMENT",
         "PROFESSIONAL STRENGTHS",
     }
 
@@ -234,6 +236,8 @@ def build_html(resume: dict) -> str:
 
     tech_env_html = _render_simple_bullets("TECHNICAL ENVIRONMENT", "Technical Environment", bold_label=True)
     certs_html = _render_simple_bullets("CERTIFICATIONS", "Certifications")
+    memberships_html = _render_simple_bullets("PROFESSIONAL MEMBERSHIPS", "Professional Memberships")
+    development_html = _render_simple_bullets("PROFESSIONAL DEVELOPMENT", "Professional Development")
 
     # Experience
     exp_html = ""
@@ -341,6 +345,8 @@ body {{
     margin-top: 5px;
 }}
 .section-title {{
+    break-after: avoid;
+    page-break-after: avoid;
     font-size: 10pt;
     font-weight: 700;
     color: #1a3a5c;
@@ -388,6 +394,7 @@ ul {{
     padding: 0;
 }}
 li {{
+    break-inside: avoid;
     font-size: 9.5pt;
     margin-bottom: 1px;
     line-height: 1.35;
@@ -411,6 +418,8 @@ li {{
 {proj_html}
 {certs_html}
 {edu_html}
+{memberships_html}
+{development_html}
 </body>
 </html>"""
 
@@ -545,6 +554,7 @@ def convert_to_pdf(
     output_path: Path | None = None,
     html_only: bool = False,
     pdf_metadata: dict[str, str] | None = None,
+    document_kind: str | None = None,
 ) -> Path:
     """Convert a text resume/cover letter to PDF.
 
@@ -553,16 +563,20 @@ def convert_to_pdf(
         output_path: Optional override for the output path. Defaults to same
             name with .pdf extension.
         html_only: If True, output HTML instead of PDF.
+        document_kind: Explicit resume/cover/statement/letter template. When omitted,
+            the existing filename-based template selection is preserved.
 
     Returns:
         Path to the generated PDF (or HTML) file.
     """
     text_path = Path(text_path)
     text = text_path.read_text(encoding="utf-8")
+    if document_kind not in {None, "resume", "cover", "statement", "letter"}:
+        raise ValueError("Unknown PDF document kind")
 
     # Cover letters are plain text and do not follow the resume section format.
     # Render them with a minimal letter template to avoid "empty" PDFs.
-    if text_path.name.endswith("_CL.txt"):
+    if document_kind in {"cover", "statement", "letter"} or (document_kind is None and text_path.name.endswith(("_CL.txt", "_SS.txt"))):
         html = build_letter_html(text)
         if html_only:
             out = output_path or text_path.with_suffix(".html")
@@ -674,23 +688,17 @@ def batch_convert(limit: int = 50) -> int:
         Prevents generating blank/low-quality PDFs from failed or empty .txt
         artifacts.
         """
-        report_path = txt_path.with_name(txt_path.stem + "_REPORT.json")
-        if not report_path.exists():
-            # Backwards compatibility: if there is no report, allow conversion
-            # but still skip obviously empty files.
-            try:
-                return txt_path.stat().st_size > 100
-            except Exception:
-                return True
-
         try:
-            report = json.loads(report_path.read_text(encoding="utf-8"))
-            return str(report.get("status", "")).strip().lower() == "approved"
+            from applypilot.database import get_connection
+            from applypilot.country_context import workspace_for_connection
+            from applypilot.canonical import require_final
+            conn=get_connection()
+            row=conn.execute("SELECT * FROM jobs WHERE tailored_resume_path=?",(str(txt_path),)).fetchone()
+            if not row:return False
+            require_final(conn,workspace_for_connection(conn),txt_path,dict(row))
+            return True
         except Exception:
-            try:
-                return txt_path.stat().st_size > 200
-            except Exception:
-                return True
+            return False
 
     txt_files = sorted(TAILORED_DIR.glob("*.txt"))
     # Exclude legacy _JOB.txt helper files from resume conversion.
@@ -730,9 +738,48 @@ def batch_convert(limit: int = 50) -> int:
     for f in to_convert:
         try:
             convert_to_pdf(f)
+            from applypilot.database import get_connection
+            from applypilot.country_context import workspace_for_connection
+            from applypilot.canonical import bind_pdf
+            conn=get_connection()
+            row=conn.execute("SELECT * FROM jobs WHERE tailored_resume_path=?",(str(f),)).fetchone()
+            bind_pdf(conn,workspace_for_connection(conn),f,f.with_suffix(".pdf"),dict(row))
             converted += 1
         except Exception as e:
             log.error("Failed to convert %s: %s", f.name, e)
 
     log.info("Done: %d/%d PDFs generated in %s", converted, len(to_convert), TAILORED_DIR)
     return converted
+
+
+def convert_pending(conn, min_score: int = 7) -> dict:
+    """Render only effective job-scoped missing/stale artifacts."""
+    from applypilot.eligibility import candidates, pending_artifacts
+    attempted = converted = errors = 0
+    for job in candidates(conn, "pdf", min_score):
+        job_errors = 0
+        for field, path in pending_artifacts(job):
+            attempted += 1
+            try:
+                from applypilot.canonical import require_final,bind_pdf
+                from applypilot.country_context import workspace_for_connection
+                root=workspace_for_connection(conn)
+                kind={"tailored_resume_path":"resume","cover_letter_path":"cover","supporting_statement_path":"statement"}[field]
+                require_final(conn,root,path,job,kind=kind)
+                output = convert_to_pdf(path, pdf_metadata=build_pdf_metadata(
+                    "resume" if field == "tailored_resume_path" else "letter", job=job))
+                if output != path.with_suffix(".pdf"):
+                    raise RuntimeError("Canonical PDF is locked; close its viewer before retrying")
+                bind_pdf(conn,root,path,output,job,kind=kind)
+                if field == "tailored_resume_path":
+                    conn.execute("UPDATE cc_documents SET pdf_path=? WHERE job_url=? AND text_path=?", (str(output), job["url"], str(path)))
+                converted += 1
+                conn.commit()
+            except Exception as exc:
+                errors += 1
+                job_errors += 1
+                log.error("PDF conversion for job #%s failed: %s", job["job_id"], exc)
+        conn.execute("UPDATE jobs SET pdf_status=?,pdf_error=?,pdf_attempts=CASE WHEN ? THEN COALESCE(pdf_attempts,0)+1 ELSE 0 END WHERE url=?",
+                     ("failed" if job_errors else "completed", "PDF rendering failed; inspect the source file and close any locked PDF viewer" if job_errors else None, bool(job_errors), job["url"]))
+        conn.commit()
+    return {"attempted": attempted, "generated": converted, "errors": errors}

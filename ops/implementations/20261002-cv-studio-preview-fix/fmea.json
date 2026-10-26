@@ -1,0 +1,12 @@
+{
+  "change_id": "20261002-cv-studio-preview-fix",
+  "status": "mitigations_verified",
+  "verification": "238 tests passed, including dropdown value/option retention, actual preview content, correct variant save target, missing-CV recovery, and legacy workspace containment checks",
+  "scope": ["dashboard", "documents"],
+  "failure_modes": [
+    {"mode": "Dropdown contents are destroyed while loading", "cause": "Button caption mutation applied to select elements", "effect": "No preview loads or wrong source resume selected", "severity": 8, "detection": "Playwright verifies option count, selected value, preview text, variant content and save target", "mitigation": "Modify captions only on buttons, capture selection before loading, retain disabled state", "owner": "workspace UI", "follow_up_phase": "implementation"},
+    {"mode": "Blank frame hides missing/unavailable documents", "cause": "Always-visible iframe and unhandled HTTP failures", "effect": "User cannot tell whether a CV exists or loading failed", "severity": 6, "detection": "Browser empty/loading/error scenarios", "mitigation": "Explicit preview status, checked fetch before showing HTML, retry action", "owner": "workspace UI", "follow_up_phase": "implementation"},
+    {"mode": "Legacy adoption duplicates versions or exposes outside-workspace files", "cause": "Repeated reads or unvalidated persisted paths", "effect": "History clutter or cross-workspace access", "severity": 9, "detection": "Repeated adoption, missing-path and outside-root tests", "mitigation": "Transactionally adopt once, validate workspace containment, snapshot existing content, label provenance/staleness", "owner": "document API", "follow_up_phase": "implementation"},
+    {"mode": "Tab changes discard drafts or preview selection", "cause": "Full CV pane reconstruction", "effect": "Unsaved work or user context lost", "severity": 7, "detection": "Browser switching/editing/refresh scenarios", "mitigation": "Persist selected job/version, reset loading requests safely and collect credential/experience drafts", "owner": "workspace UI", "follow_up_phase": "implementation"}
+  ]
+}

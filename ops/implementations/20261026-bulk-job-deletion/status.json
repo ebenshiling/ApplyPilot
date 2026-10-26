@@ -1,0 +1,23 @@
+{
+  "implementation_id":"20261026-bulk-job-deletion",
+  "status":"completed_deployed",
+  "phase":"single_and_bulk_jobs_navigation_verified",
+  "delivered":["Close/delete returns to Jobs","Select all shown, clear selection and selected counts including hidden selections","One bulk confirmation with progress and Stop remaining","Existing fresh per-record retirement/cleanup APIs with captured country and URL identity checks","Partial/unconfirmed results and retained remaining selections","Selection controls on UK Jobs/Applications and NZ saved vacancies"],
+  "verification":[
+    {"command":"python scripts/agent_verify.py","result":"passed","compile":"passed","pytest_passed":852,"pytest_skipped":61,"pytest_seconds":809.68,"strict_ai":"7/7","formal_dataset":"13/13","country_ui":"local-only Chromium enabled; no employer/provider requests"},
+    {"suite":"Focused lifecycle and bulk browser checks","result":"26 passed before the additional identity-change case; identity-change case passed in final full verification","seconds":158.66},
+    {"suite":"Bulk deletion acceptance","result":"passed","cases":["filtered select-all and per-card counts","one-action deletion and Jobs navigation","generated files shared by selected jobs reclaimed only after final reference","unselected/source files preserved","uncertain application kept selected","cancellation and Stop remaining","server failure/unconfirmed response reported","country change before dispatch","URL identity change before dispatch","NZ deletion preserves legacy records"]},
+    {"suite":"Node syntax checks","result":"passed","files":["job-lifecycle.js","workspace.js","nz-search.js"]},
+    {"command":"git diff --check 18f888806ca30665f6b0aff008b341681538a9ee","result":"passed"},
+    {"command":"docker compose build --quiet applypilot then docker compose up -d --no-build applypilot","result":"passed"},
+    {"suite":"Pre-deployment activity check","result":"pipeline idle and no active visible browser session","report":"preflight.json"},
+    {"suite":"Authenticated deployed selection/confirmation/cancel smoke","result":"passed","report":"deployment_check.json","shown_jobs_selected":84,"individual_selection":true,"confirmation_cancelled":true,"clear_selection":true,"jobs_page_preserved":true,"records_before":94,"records_after":94,"mutation_requests":0,"javascript_errors":0}
+  ],
+  "server_lifecycle_implementation":"unchanged; existing per-record preview/retire/cleanup used",
+  "schema_changes":false,
+  "live_records_deleted_by_verification":0,
+  "verification_sessions":"temporary sessions revoked",
+  "backup":"backup.json",
+  "handoff":"docs/JOB_LIFECYCLE.md",
+  "commit_push":"not requested or performed"
+}

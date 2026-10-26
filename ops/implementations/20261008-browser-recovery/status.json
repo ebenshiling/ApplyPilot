@@ -1,0 +1,34 @@
+{
+  "implementation_id":"20261008-browser-recovery",
+  "status":"completed",
+  "phase":"deployed",
+  "owner":"ai-agent",
+  "updated_at":"2026-10-08",
+  "evidence":"Job 2 sessions opened Barhale, reached manual mode, then the outer exception handler incorrectly reported Chromium unavailable. Exact original exceptions were discarded by that handler.",
+  "diagnosis":["Verified two ASP.NET Apply input controls and no applicant fields on the public advert", "Verified cookie-preferences iframe intercepts pointer events on Apply; public site click produced a locator timeout naming that overlay", "Identified queue.Empty-branch and post-action inspection/capture exceptions outside recovery boundary", "Idle public-page inspection/capture probe did not reproduce the discarded original exception"],
+  "verification":{
+    "command":"python scripts/agent_verify.py",
+    "result":"passed",
+    "pytest":"505 passed, 1 skipped in 1225.26 seconds with browser verification enabled",
+    "new_tests":12,
+    "targeted":"42 passed covering new recovery/entry/cookie fixtures, existing assisted browser and Decisions observer",
+    "ai_regression":"7/7 passed",
+    "ai_formal":"13/13 passed",
+    "static":"ruff, compileall, node --check and scoped diff --check passed",
+    "live_public_probe":{"site":"Barhale Kallidus vacancy 1844","cookie_choice":"Save my settings in a disposable guest browser","entry_opened":true,"checkpoint":"/VacancyEligibility.aspx","applicant_fields_observed":27,"viewport_image_bytes":41111,"applicant_values_used":false,"submission_attempted":false},
+    "probe_adjustments":"Public portal proceeds to eligibility/contact fields rather than requiring password sign-in; probe now accepts either real checkpoint and waits for the live listing entry after asynchronous consent changes"
+  },
+  "deployment":{
+    "standard_build":"Docker Hub anonymous-token TLS handshake timeout",
+    "fallback":"Verified local cached-image source overlay; no new dependencies or permanent Docker settings",
+    "image":"adac48082bc8",
+    "recreation":"docker compose up -d --no-build --force-recreate applypilot passed",
+    "health":{"ok":true,"multi_user":true},
+    "active_applications_before":0,
+    "job2_packet_ready":true,
+    "job2_submission_recorded":false
+  },
+  "pre_state":"ops/implementations/20261008-browser-recovery/pre_state.json",
+  "post_state":"ops/implementations/20261008-browser-recovery/post_state.json",
+  "snapshot_note":"Prior user changes preserved; no commits created."
+}

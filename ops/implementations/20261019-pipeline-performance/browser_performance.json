@@ -1,0 +1,174 @@
+{
+  "rounds": [
+    {
+      "controls_seconds": 0.8451,
+      "resources": [
+        {
+          "url": "center/pipeline?country_code=GB",
+          "duration_ms": 356,
+          "bytes": 82316
+        },
+        {
+          "url": "center/pipeline/preview",
+          "duration_ms": 861,
+          "bytes": 32825
+        },
+        {
+          "url": "center/pipeline/progress?country_code=GB",
+          "duration_ms": 918,
+          "bytes": 27018
+        },
+        {
+          "url": "pipeline/status",
+          "duration_ms": 28,
+          "bytes": 768
+        },
+        {
+          "url": "pipeline/logs?since=0&limit=1000",
+          "duration_ms": 18,
+          "bytes": 74694
+        }
+      ]
+    },
+    {
+      "controls_seconds": 0.8265,
+      "resources": [
+        {
+          "url": "center/pipeline?country_code=GB",
+          "duration_ms": 380,
+          "bytes": 82316
+        },
+        {
+          "url": "center/pipeline/preview",
+          "duration_ms": 816,
+          "bytes": 32825
+        },
+        {
+          "url": "center/pipeline/progress?country_code=GB",
+          "duration_ms": 867,
+          "bytes": 27018
+        },
+        {
+          "url": "pipeline/status",
+          "duration_ms": 18,
+          "bytes": 768
+        },
+        {
+          "url": "pipeline/logs?since=0&limit=1000",
+          "duration_ms": 26,
+          "bytes": 74694
+        }
+      ]
+    },
+    {
+      "controls_seconds": 0.8161,
+      "resources": [
+        {
+          "url": "center/pipeline?country_code=GB",
+          "duration_ms": 360,
+          "bytes": 82316
+        },
+        {
+          "url": "center/pipeline/preview",
+          "duration_ms": 860,
+          "bytes": 32825
+        },
+        {
+          "url": "pipeline/status",
+          "duration_ms": 19,
+          "bytes": 768
+        },
+        {
+          "url": "center/pipeline/progress?country_code=GB",
+          "duration_ms": 917,
+          "bytes": 27018
+        },
+        {
+          "url": "pipeline/logs?since=0&limit=1000",
+          "duration_ms": 27,
+          "bytes": 74694
+        }
+      ]
+    }
+  ],
+  "draw_ms": [
+    15,
+    3.800000000745058,
+    3.600000001490116
+  ],
+  "long_tasks": [],
+  "responses": [
+    {
+      "url": "auth/me",
+      "status": 200
+    },
+    {
+      "url": "center?country_code=GB",
+      "status": 200
+    },
+    {
+      "url": "center/stream?since=1207",
+      "status": 200
+    },
+    {
+      "url": "center/pipeline?country_code=GB",
+      "status": 200
+    },
+    {
+      "url": "pipeline/logs?since=0&limit=1000",
+      "status": 200
+    },
+    {
+      "url": "pipeline/status",
+      "status": 200
+    },
+    {
+      "url": "center/pipeline/preview",
+      "status": 200
+    },
+    {
+      "url": "center/pipeline/progress?country_code=GB",
+      "status": 200
+    },
+    {
+      "url": "center/pipeline?country_code=GB",
+      "status": 200
+    },
+    {
+      "url": "pipeline/status",
+      "status": 200
+    },
+    {
+      "url": "pipeline/logs?since=0&limit=1000",
+      "status": 200
+    },
+    {
+      "url": "center/pipeline/preview",
+      "status": 200
+    },
+    {
+      "url": "center/pipeline/progress?country_code=GB",
+      "status": 200
+    },
+    {
+      "url": "center/pipeline?country_code=GB",
+      "status": 200
+    },
+    {
+      "url": "pipeline/status",
+      "status": 200
+    },
+    {
+      "url": "pipeline/logs?since=0&limit=1000",
+      "status": 200
+    },
+    {
+      "url": "center/pipeline/preview",
+      "status": 200
+    },
+    {
+      "url": "center/pipeline/progress?country_code=GB",
+      "status": 200
+    }
+  ]
+}

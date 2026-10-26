@@ -515,10 +515,9 @@ def test_dashboard_role_filter_ui_and_bulk_delete(monkeypatch: pytest.MonkeyPatc
 
         st, html = _http_text(admin, "GET", f"{base}/dashboard")
         assert st == 200
-        assert "Role:</span>" in html
-        assert "Delete shown" in html
-        assert "Delete role" in html
-        assert 'data-role="data analyst"' in html
+        assert "Your application workspace" in html
+        assert 'data-view="jobs"' in html
+        assert "Classic dashboard" not in html
 
         ids = [int(r[0]) for r in conn.execute("SELECT rowid FROM jobs WHERE search_query = 'Data Analyst'").fetchall()]
         assert len(ids) == 2

@@ -1,0 +1,11 @@
+{
+  "change_id":"20261008-profile-browser-speed",
+  "scope":["profile","form filling","browser input","live frame stream"],
+  "failure_modes":[
+    {"mode":"Incorrect personal/equality answer","cause":"Inferred names/traits or broad question match","effect":"Wrong employer information","severity":9,"detection":"Explicit-value, blank, exact option and radio-group tests","mitigation":"Saved values only; editable separate names; local exact/semantic field matching; leave unknown answers for takeover"},
+    {"mode":"Profile changes erase existing data","cause":"Replacing groups or naming aliases","effect":"Lost verified evidence","severity":8,"detection":"Profile merge and legacy alias tests","mitigation":"Use existing validated deep merge; preserve unknown keys; keep legacy address/state/EEO compatibility"},
+    {"mode":"Input order or final approval races","cause":"Batch/coalescing crosses click/key/review boundaries","effect":"Incorrect form or unapproved submission","severity":10,"detection":"Ordered input and approval tests","mitigation":"Bounded atomic validation; FIFO batches; flush before control actions; preserve final guards and page-bound approval"},
+    {"mode":"Stream leaks another workspace or survives logout","cause":"New long-lived route bypasses ownership/auth","effect":"Private browser exposure","severity":10,"detection":"Ownership/auth/stream lifecycle tests","mitigation":"Same-origin authenticated route; ownership check; periodic reauthentication; stop streams on hidden/closed views"},
+    {"mode":"Hot path bypasses authorization or overloads worker","cause":"Database bypass or unbounded events/frames","effect":"Unsafe input or resource pressure","severity":9,"detection":"Fast-path, batch cap and frame cadence tests","mitigation":"Retain server CSRF and session ownership; manual-only input; bounded queue/actions; throttled capture and inspection"}
+  ]
+}

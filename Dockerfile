@@ -16,8 +16,8 @@ COPY ops /app/ops
 RUN mkdir -p /ms-playwright \
     && pip install --upgrade pip \
     && pip install -e . \
-    && pip install --no-deps python-jobspy \
-    && pip install pydantic tls-client requests markdownify regex \
+    && pip install python-jobspy==1.2.0 \
+    && python -c "from jobspy import scrape_jobs; assert callable(scrape_jobs)" \
     && python -m playwright install --with-deps chromium
 
 RUN mkdir -p /data/workspace /data/multi /transfer

@@ -1,0 +1,17 @@
+{
+  "implementation_id": "20261016-nz-phase2",
+  "baseline_commit": "e357acd0bb939fe6c1dea02cee70c13538ca6025",
+  "branch": "feat/nz-phase2-discovery-metadata",
+  "scope": "Approved Phase 2: dedicated NZ campaign, source access/readiness validation, normalized vacancy ingestion and manual capture",
+  "steps": [
+    "Preserve Phase 1 country and live-submission containment; add a separate discovery-only NZ operation capability",
+    "Provide explicit NZ preset installation/editing without rewriting UK preferences/campaign content",
+    "Validate source metadata and enforce permission, retrieval/storage/AI modes, freshness and server-owned read-only validation at execution boundaries",
+    "Carry normalized observations through existing JobSpy, Workday and direct-source adapters with conservative identity/deduplication and original application URLs",
+    "Implement safe availability observations and conservative NZ salary interpretation without FX/immigration assumptions",
+    "Provide bounded NZ manual capture and discovery UI/API; keep restricted sources reference-only and AI/document generation blocked",
+    "Run focused and required isolated verification, record actual coverage/external limitations and commit if permitted"
+  ],
+  "external_dependencies": "No validated live NZ source or provider agreement is assumed. Automated coverage remains gated until permission and read-only source acceptance succeed; manual mode is complete independently.",
+  "excluded": ["Phase 3 accreditation/classification services", "CV imports and country document generation", "Live application execution", "Production/staging data changes", "New providers/frameworks", "Deployment/push/PR"]
+}

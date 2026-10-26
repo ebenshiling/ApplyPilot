@@ -175,20 +175,19 @@ def test_sanitize_cover_letter_text_rewrites_banned_experience_phrase() -> None:
     assert "my experience includes stakeholder reporting" in cleaned.lower()
 
 
-def test_sanitize_cover_letter_text_rewrites_i_believe() -> None:
+def test_sanitize_cover_letter_text_does_not_strengthen_uncertainty_into_a_fact() -> None:
     text = "I believe my reporting background fits this role well."
     cleaned = _sanitize_cover_letter_text(text)
-    assert "i believe" not in cleaned.lower()
-    assert cleaned.startswith("I know my reporting background")
+    assert cleaned == text
 
 
 def test_sanitize_cover_letter_text_rewrites_generic_closer_phrases() -> None:
     text = "I am interested in this opportunity at The Compleat Food Group and I am keen to contribute my skills to your finance team."
     cleaned = _sanitize_cover_letter_text(text)
     assert "i am interested in this opportunity at" not in cleaned.lower()
-    assert "i am keen to contribute my skills to" not in cleaned.lower()
+    assert "i am keen to contribute my skills to" in cleaned.lower()
     assert "i am drawn to the compleat food group" in cleaned.lower()
-    assert "i can bring this experience to your finance team" in cleaned.lower()
+    assert "i can bring this experience" not in cleaned.lower()
 
 
 def test_sanitize_cover_letter_text_repairs_broken_i_am_fragment() -> None:
@@ -205,7 +204,7 @@ def test_sanitize_cover_letter_text_repairs_broken_i_am_gerund_fragment() -> Non
     assert cleaned.startswith("My work includes producing comprehensive variance analyses")
 
 
-def test_polish_reporting_closer_rewrites_finance_reporting_close() -> None:
+def test_reporting_closer_cannot_invent_finance_capabilities_from_jd() -> None:
     letter = (
         "Dear Hiring Manager,\n\n"
         "Paragraph one.\n\n"
@@ -225,11 +224,11 @@ def test_polish_reporting_closer_rewrites_finance_reporting_close() -> None:
         "responsibilities": ["Ensure reports are completed accurately and within agreed timescales."],
     }
     polished = _polish_reporting_closer(letter, job, plan)
-    assert "i am keen to contribute" not in polished.lower()
-    assert "variance analysis" in polished.lower() or "reporting deadlines" in polished.lower()
+    assert polished == letter
+    assert "variance analysis" not in polished.lower()
 
 
-def test_polish_reporting_closer_rewrites_public_reporting_close() -> None:
+def test_reporting_closer_preserves_real_nhs_text_without_inventing_new_experience() -> None:
     letter = (
         "Dear Hiring Manager,\n\n"
         "Paragraph one.\n\n"
@@ -249,10 +248,11 @@ def test_polish_reporting_closer_rewrites_public_reporting_close() -> None:
         "responsibilities": ["Support timely reporting for the EPR programme."],
     }
     polished = _polish_reporting_closer(letter, job, plan)
-    assert "healthcare analytics" in polished.lower() or "epr programme" in polished.lower()
+    assert polished == letter
+    assert "NHS Foundation Trust" in polished
 
 
-def test_polish_support_closer_rewrites_it_support_close() -> None:
+def test_it_support_closer_does_not_infer_microsoft_experience() -> None:
     letter = (
         "Dear Hiring Manager,\n\n"
         "Paragraph one.\n\n"
@@ -272,11 +272,11 @@ def test_polish_support_closer_rewrites_it_support_close() -> None:
         "responsibilities": ["Provide Microsoft 365 support and ticket resolution."],
     }
     polished = _polish_support_closer(letter, job, plan)
-    assert "keen to contribute" not in polished.lower()
-    assert "microsoft 365 support" in polished.lower() or "ticket handling" in polished.lower()
+    assert polished == letter
+    assert "microsoft 365 support" not in polished.lower()
 
 
-def test_polish_support_closer_rewrites_application_support_close() -> None:
+def test_application_support_closer_does_not_infer_incident_achievements() -> None:
     letter = (
         "Dear Hiring Manager,\n\n"
         "Paragraph one.\n\n"
@@ -296,8 +296,8 @@ def test_polish_support_closer_rewrites_application_support_close() -> None:
         "responsibilities": ["Handle incidents and support service continuity."],
     }
     polished = _polish_support_closer(letter, job, plan)
-    assert "incident" in polished.lower()
-    assert "services stable" in polished.lower() or "services running" in polished.lower()
+    assert polished == letter
+    assert "incident" not in polished.lower()
 
 
 def test_generate_cover_letter_with_diagnostics_uses_plan(monkeypatch) -> None:

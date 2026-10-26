@@ -1,0 +1,79 @@
+1
+00:00:00,000 --> 00:00:06,000
+Find the role. Own the next step.
+One workspace for your search, your evidence and your applications.
+
+2
+00:00:06,000 --> 00:00:16,000
+A workspace built around your next move.
+Use the sidebar to move between opportunities, documents and progress.
+
+3
+00:00:16,000 --> 00:00:34,000
+Start with the facts.
+Settings → professional profile → review and save your application details.
+
+4
+00:00:34,000 --> 00:00:54,000
+Every version. Every qualification.
+CV Studio → source library → qualifications → versioned document preview.
+
+5
+00:00:54,000 --> 00:01:06,000
+Show the work behind the skills.
+Portfolio → verified achievements, technologies, links and reusable evidence.
+
+6
+00:01:06,000 --> 00:01:32,000
+Make the search focused.
+Pipeline → roles and locations → CV routing → sources → preview the work.
+
+7
+00:01:32,000 --> 00:01:48,000
+Decide where to spend your attention.
+Jobs → search → open the record → review the evidence → Pick.
+
+8
+00:01:48,000 --> 00:02:10,000
+Turn criteria into reviewed documents.
+Cover Studio + Statement Studio → target → draft → validate → preview.
+
+9
+00:02:10,000 --> 00:02:24,000
+Prepare the packet. Inspect the work.
+Pipeline → Prepare selected applications → preview queues and recovery.
+
+10
+00:02:24,000 --> 00:02:50,000
+Apply with visibility and control.
+Review the packet → open the shared browser → take over → final review.
+
+11
+00:02:50,000 --> 00:03:04,000
+Keep the next conversation in context.
+Applications → hiring status → notes → reminder → calendar export.
+
+12
+00:03:04,000 --> 00:03:18,000
+Turn messages into next steps.
+Evidence inbox → import → inspect the source → review the hiring update.
+
+13
+00:03:18,000 --> 00:03:38,000
+See the story behind your progress.
+Insights → interactive charts → drill down → export the underlying records.
+
+14
+00:03:38,000 --> 00:03:47,000
+Clear the clutter. Keep the story.
+History & storage → closure reasons → retained timeline → storage controls.
+
+15
+00:03:47,000 --> 00:03:56,000
+Make the workspace yours.
+Settings → private AI connections → task routing → portable backup.
+
+16
+00:03:56,000 --> 00:04:00,000
+Your next chapter, organized.
+ApplyPilot / Your application workspace

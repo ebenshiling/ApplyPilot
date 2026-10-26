@@ -12,6 +12,7 @@ Three-tier extraction cascade (cheapest first):
 
 import json
 import logging
+from contextvars import copy_context
 import os
 import re
 import sqlite3
@@ -116,7 +117,9 @@ def resolve_url(raw_url: str, site: str) -> str | None:
 
 def resolve_all_urls(conn: sqlite3.Connection) -> dict:
     """Resolve all relative URLs in the database. Returns stats."""
-    rows = conn.execute("SELECT url, site FROM jobs").fetchall()
+    from applypilot.discovery_scope import processing_where,renamed_job
+    scope=processing_where() or '1=1'
+    rows = conn.execute("SELECT url, site FROM jobs WHERE (country_code IS NULL OR country_code='GB') AND "+scope).fetchall()
     resolved = 0
     failed = 0
     already_absolute = 0
@@ -131,9 +134,11 @@ def resolve_all_urls(conn: sqlite3.Connection) -> dict:
         if new_url and new_url != url:
             try:
                 conn.execute("UPDATE jobs SET url = ? WHERE url = ?", (new_url, url))
+                renamed_job(conn,url,new_url)
                 resolved += 1
             except sqlite3.IntegrityError:
                 conn.execute("DELETE FROM jobs WHERE url = ?", (url,))
+                renamed_job(conn,url,new_url,merged=True)
                 resolved += 1
         else:
             failed += 1
@@ -143,7 +148,7 @@ def resolve_all_urls(conn: sqlite3.Connection) -> dict:
     rows = conn.execute(
         "SELECT url, site, application_url FROM jobs "
         "WHERE application_url IS NOT NULL AND application_url != '' "
-        "AND application_url NOT LIKE 'http%'"
+        "AND application_url NOT LIKE 'http%' AND (country_code IS NULL OR country_code='GB') AND "+scope
     ).fetchall()
     for row in rows:
         url, site, app_url = row[0], row[1], row[2]
@@ -159,7 +164,9 @@ def resolve_all_urls(conn: sqlite3.Connection) -> dict:
 def resolve_wttj_urls(conn: sqlite3.Connection) -> int:
     """Re-fetch WTTJ Algolia API to get proper detail URLs and fix slug-as-title.
     Returns count of URLs updated."""
-    wttj_jobs = conn.execute("SELECT url, title FROM jobs WHERE site = 'WelcomeToTheJungle'").fetchall()
+    from applypilot.discovery_scope import processing_where,renamed_job
+    scope=processing_where() or '1=1'
+    wttj_jobs = conn.execute("SELECT url, title FROM jobs WHERE site = 'WelcomeToTheJungle' AND (country_code IS NULL OR country_code='GB') AND "+scope).fetchall()
 
     if not wttj_jobs:
         return 0
@@ -211,9 +218,11 @@ def resolve_wttj_urls(conn: sqlite3.Connection) -> int:
                     "UPDATE jobs SET url = ?, title = ? WHERE url = ?",
                     (match["url"], match["name"] or old_title, old_url),
                 )
+                renamed_job(conn,old_url,match['url'])
                 updated += 1
             except sqlite3.IntegrityError:
                 conn.execute("DELETE FROM jobs WHERE url = ?", (old_url,))
+                renamed_job(conn,old_url,match['url'],merged=True)
                 updated += 1
         else:
             for s, data in slug_map.items():
@@ -223,9 +232,11 @@ def resolve_wttj_urls(conn: sqlite3.Connection) -> int:
                             "UPDATE jobs SET url = ?, title = ? WHERE url = ?",
                             (data["url"], data["name"] or old_title, old_url),
                         )
+                        renamed_job(conn,old_url,data['url'])
                         updated += 1
                     except sqlite3.IntegrityError:
                         conn.execute("DELETE FROM jobs WHERE url = ?", (old_url,))
+                        renamed_job(conn,old_url,data['url'],merged=True)
                         updated += 1
                     break
 
@@ -585,6 +596,7 @@ def extract_with_llm(page, url: str) -> dict:
             max_tokens=4096,
             required_keys=("full_description", "application_url"),
             task_name="detail enrichment",
+            routing_task="extract",
             repair_attempts=1,
         )
         elapsed = time.time() - t0
@@ -604,7 +616,9 @@ def extract_with_llm(page, url: str) -> dict:
         return {"full_description": desc or fallback_description, "application_url": apply_url}
     except Exception as e:
         log.error("LLM ERROR: %s", e)
-        return {"full_description": fallback_description, "application_url": None}
+        from applypilot.llm import ProviderAccessError
+        return {"full_description": fallback_description, "application_url": None,
+                "llm_error": str(e) if isinstance(e, ProviderAccessError) else "AI extraction unavailable; retained cleaned page text", "extraction_fallback": "page_text"}
 
 
 # -- Description cleaning ---------------------------------------------------
@@ -718,9 +732,12 @@ def scrape_detail_page(page, url: str) -> dict:
     result["full_description"] = llm_result.get("full_description")
     result["application_url"] = llm_result.get("application_url") or tier2_apply
     result["tier_used"] = 3
+    if llm_result.get("llm_error"):
+        result["error"] = llm_result["llm_error"]
+        result["extraction_fallback"] = "page_text"
 
     if result.get("full_description"):
-        result["status"] = "ok" if result.get("application_url") else "partial"
+        result["status"] = "ok" if result.get("application_url") and not result.get("extraction_fallback") else "partial"
     elif result.get("application_url"):
         result["status"] = "partial"
     else:
@@ -753,6 +770,21 @@ def scrape_site_batch(
     own_conn = conn is None
     if own_conn:
         conn = init_db()
+
+    # NZ descriptions use only permitted Phase 2 adapters, before browser/AI work.
+    allowed_jobs = []
+    for url, title in jobs:
+        try:
+            row = conn.execute("SELECT country_code FROM jobs WHERE url=?", (url,)).fetchone()
+            if not row or row[0] != "NZ":
+                allowed_jobs.append((url, title))
+        except Exception:
+            continue
+    jobs = allowed_jobs
+    if not jobs:
+        if own_conn:
+            conn.close()
+        return stats
 
     now = datetime.now(timezone.utc).isoformat()
 
@@ -798,10 +830,11 @@ def scrape_site_batch(
 
                     # Sponsorship signals (best-effort): use extracted company if available,
                     # otherwise preserve what discovery already stored.
+                    existing_company = None  # never reuse a prior job's jurisdiction after a failed read
                     try:
-                        existing_company = conn.execute("SELECT company FROM jobs WHERE url = ?", (url,)).fetchone()
+                        existing_company = conn.execute("SELECT * FROM jobs WHERE url = ?", (url,)).fetchone()
                         existing_company_val = (
-                            str(existing_company[0]) if existing_company and existing_company[0] else None
+                            str(existing_company["company"]) if existing_company and existing_company["company"] else None
                         )
                     except Exception:
                         existing_company_val = None
@@ -809,10 +842,14 @@ def scrape_site_batch(
                     company_val = str(result.get("company") or existing_company_val or "").strip()
                     try:
                         from applypilot.uk_sponsorship import annotate_sponsorship
+                        from applypilot.country_context import uk_sponsorship_allowed
 
-                        sig = annotate_sponsorship(
-                            company=company_val or None, text=result.get("full_description"), app_dir=None
-                        )
+                        sig = None
+                        if existing_company and uk_sponsorship_allowed(dict(existing_company), config.load_search_config()):
+                            sig = annotate_sponsorship(
+                                company=company_val or None, text=result.get("full_description"), app_dir=None,
+                                country_code="GB",
+                            )
                     except Exception:
                         sig = None
 
@@ -831,7 +868,7 @@ def scrape_site_batch(
                         "       sponsor_source = COALESCE(NULLIF(?, ''), sponsor_source), "
                         "       sponsor_checked_at = COALESCE(NULLIF(?, ''), sponsor_checked_at), "
                         "       detail_scraped_at = ?, "
-                        "       detail_error = NULL "
+                        "       detail_error = ? "
                         " WHERE url = ?",
                         (
                             result.get("full_description"),
@@ -845,6 +882,7 @@ def scrape_site_batch(
                             (sig.sponsor_source if sig else None),
                             checked_at,
                             now,
+                            result.get("error"),
                             url,
                         ),
                     )
@@ -889,18 +927,8 @@ def _run_detail_scraper(
 
     Returns aggregate stats dict.
     """
-    where_parts: list[str] = ["detail_scraped_at IS NULL"]
-    params: list[str] = []
-    if SKIP_DETAIL_SITES:
-        ph = ",".join("?" for _ in SKIP_DETAIL_SITES)
-        where_parts.append(f"COALESCE(site, '') NOT IN ({ph})")
-        params.extend(str(s) for s in SKIP_DETAIL_SITES)
-
-    where_sql = " AND ".join(where_parts)
-    rows = conn.execute(
-        f"SELECT url, title, site FROM jobs WHERE {where_sql} ORDER BY site",
-        tuple(params),
-    ).fetchall()
+    from applypilot.eligibility import candidates
+    rows = [(j["url"], j.get("title"), j.get("site") or "Direct") for j in candidates(conn, "enrich")]
 
     if not rows:
         log.info("No pending jobs to scrape.")
@@ -957,7 +985,7 @@ def _run_detail_scraper(
             return stats
 
         with ThreadPoolExecutor(max_workers=min(workers, len(order))) as pool:
-            futures = {pool.submit(_scrape_site, site): site for site in order}
+            futures = {pool.submit(copy_context().run, _scrape_site, site): site for site in order}
             for future in as_completed(futures):
                 _merge_stats(future.result())
     else:
@@ -1037,7 +1065,7 @@ def stream_detail(
             skip_filter = " AND ".join(f"site != '{s}'" for s in SKIP_DETAIL_SITES)
             rows = conn.execute(
                 "SELECT url, title, site FROM jobs "
-                f"WHERE detail_scraped_at IS NULL AND {skip_filter} "
+                f"WHERE detail_scraped_at IS NULL AND {skip_filter} AND (country_code IS NULL OR country_code='GB') "
                 "ORDER BY site LIMIT 200"
             ).fetchall()
 
@@ -1089,6 +1117,11 @@ def run_enrichment(limit: int = 100, workers: int = 1) -> dict:
     Returns:
         Dict with stats: processed, ok, partial, error, tiers.
     """
+    from applypilot.country_context import current
+    if current() and current().country_code=="NZ":
+        from pathlib import Path
+        from applypilot.preparation import enrich
+        return enrich(init_db(Path(current().workspace)/"applypilot.db"),Path(current().workspace),limit=limit)
     conn = init_db()
 
     # URL resolution first

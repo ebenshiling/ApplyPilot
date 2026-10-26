@@ -1,0 +1,23 @@
+{
+  "implementation_id": "20261002-writing-reasoning-headroom",
+  "status": "completed",
+  "owner": "ai-agent",
+  "phases": [
+    {"name": "inspection", "status": "completed", "notes": "Luna currently maps caller limit directly to max_completion_tokens; CV 2300 and cover 1200 leave limited room for new low reasoning."},
+    {"name": "implementation", "status": "completed", "notes": "Effort-based bounded headroom applies only to Luna writing tasks; optional per-task allowance validated and included in pool/cache/route identities. Existing none/nonwriting/other-provider limits retained."},
+    {"name": "verification_and_deployment", "status": "completed", "notes": "Full agent gate passed 349 tests, compilation, 7 AI regression checks and 13 formal cases. Docker rebuilt/recreated, health ok, active low reasoning and combined budgets verified without inference."}
+  ],
+  "verification": {
+    "result": "passed",
+    "tests": "349 passed with Playwright enabled",
+    "commands": ["python -m pytest -q tests/test_llm.py tests/test_ai_routing.py", "APPLYPILOT_RUN_PLAYWRIGHT=1 python scripts/agent_verify.py", "ruff check routing/client modules and tests --select F", "docker compose up -d --build --force-recreate applypilot", "GET /health and Docker task-context completion-limit diagnostics"],
+    "active_writing_settings": {
+      "tailor": {"model": "gpt-6-luna", "reasoning": "low", "requested_tokens": 2300, "headroom": 2048, "total_tokens": 4348},
+      "statement": {"model": "gpt-6-luna", "reasoning": "low", "requested_tokens_example": 2100, "headroom": 2048, "total_tokens_example": 4148},
+      "cover": {"model": "gpt-6-luna", "reasoning": "low", "requested_tokens": 1200, "headroom": 2048, "total_tokens": 3248}
+    },
+    "paid_inference": "No paid inference used for verification; writing quality is assessed by the user's small live document trial"
+  },
+  "pre_state": "ops/implementations/20261002-writing-reasoning-headroom/pre_state.json",
+  "post_state": "ops/implementations/20261002-writing-reasoning-headroom/post_state.json"
+}

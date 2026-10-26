@@ -1,0 +1,46 @@
+{
+  "implementation_id": "20261009-opportunity-insights-browser",
+  "status": "completed",
+  "phase": "deployed",
+  "owner": "ai-agent",
+  "updated_at": "2026-10-09",
+  "diagnosis": "Insights exports only current summary rows. Manual browser repeatedly inspects the entire page and synchronously captures screenshots; navigation churn pauses takeover. Form planner only maps supplied contact/reviewed values and cannot draft question-specific answers. Calendar link opens JSON when no reminder exists.",
+  "production_constraint": "Preserve existing candidate records and browser work; do not submit/reconcile production applications. Before deployment, the candidate had recorded job 28 as not submitted and a later session had stopped. Its resulting prepared status was preserved.",
+  "features": ["Durable compact opportunity identity and structured stage/change events including direct database/CLI writes", "Insights activity filters, changed values and candidate-recorded dated events", "Complete ZIP CSV pack / JSON exports including archived/deleted history and retained browser attempts", "CDP compositor frames, bounded screenshot fallback and no full DOM inspection in manual polling", "Asynchronous question drafting with exact evidence citations and saved-value shortcuts", "Document/element/value-bound insertion for unnamed, iframe, shadow-root and contenteditable fields", "Processed-action acknowledgement preserves failed insertion text", "Inline reminder date guidance and calendar download"],
+  "targeted_verification": {
+    "insights_command_center_lifecycle_reconciliation": "64 passed in 379.39 seconds; later legacy-baseline migration and browser/profile UI checks passed in focused runs",
+    "question_assistant": "5 passed in 53.02 seconds with Playwright enabled",
+    "browser_profile_recovery": "38 passed in the initial combined browser run; all browser/profile/recovery tests also passed in final full verification",
+    "synthetic_input_measurement": {"draft_pending_input_ms":31.0,"manual_full_inspections":0,"frame_transport":"cdp_screencast","scope":"Local fixture with a deliberately blocked draft model; not an employer-portal latency guarantee"}
+  },
+  "verification": {
+    "command": "$env:APPLYPILOT_RUN_PLAYWRIGHT='1'; .\\.ci311\\Scripts\\python.exe scripts/agent_verify.py",
+    "result": "passed",
+    "pytest": "543 passed, 1 skipped in 1417.57 seconds",
+    "new_tests": 13,
+    "ai_regression": "7/7 passed",
+    "ai_formal": "13/13 passed",
+    "static": "Compileall, focused Ruff, JavaScript syntax checks and scoped git diff --check passed",
+    "skip_note": "Existing Windows symlink-permission test skipped"
+  },
+  "deployment": {
+    "build": "docker compose build --quiet applypilot passed",
+    "recreation": "docker compose up -d --no-build --force-recreate applypilot passed",
+    "image": "sha256:fe44fe7dcd52361bf1e402aab57841f98ca158b6ef204b8af942e77751d3878f",
+    "health": {"ok": true, "multi_user": true},
+    "active_work_before_recreation": 0,
+    "authenticated_checks": "Insights, complete JSON/ZIP downloads, overview and new assets returned 200",
+    "unauthenticated_checks": "Insights and JSON/ZIP export endpoints returned 401",
+    "temporary_verification_session": "Created in-process and revoked in finally; token not logged",
+    "export_counts_at_verification": {"opportunities":21,"events":177,"browser_attempts":2,"reconciliations":1,"schedules":0},
+    "record_states_at_verification": {"active":6,"archived":9,"deleted":6},
+    "zip_integrity": "All six expected files present; manifest/CSV/JSON/database event counts match without pagination truncation",
+    "job28": {"apply_status":"prepared","applied_at":null,"unchanged_by_deployment":true,"note":"Candidate not-submitted reconciliation and original uncertain/later stopped attempts preserved; no application action performed by this implementation"},
+    "linux_runtime": {"chromium":"passed","cdp_screencast_frames":2,"unnamed_question_detection":"passed","text_insertion":"passed","scope":"Isolated in-memory synthetic page"},
+    "live_forms_model": {"provider":"openai","model":"gpt-6-luna","latency_ms":2574.88,"answer_characters":85,"verified_citations":1,"prompt_tokens":267,"completion_tokens":55,"scope":"Synthetic candidate facts only; no employer form or production application changed"}
+  },
+  "guide": "docs/OPPORTUNITY_INSIGHTS_AND_BROWSER.md",
+  "pre_state": "ops/implementations/20261009-opportunity-insights-browser/pre_state.json",
+  "post_state": "ops/implementations/20261009-opportunity-insights-browser/post_state.json",
+  "snapshot_note": "Native WSL Git metadata; prior user changes preserved and no commits created."
+}

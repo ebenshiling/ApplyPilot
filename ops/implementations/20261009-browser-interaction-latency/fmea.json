@@ -1,0 +1,14 @@
+{
+  "change_id":"20261009-browser-interaction-latency",
+  "scope":["dashboard","browser input","submission"],
+  "failure_modes":[
+    {"mode":"Input reordered or sent to a changed page","cause":"Parallel delivery or incorrect batching/barriers","effect":"Wrong answer or button activation","severity":10,"detection":"Ordered click/type/control and navigation browser tests","mitigation":"Single FIFO input stream, explicit control barriers and existing page-bound insertion/approval"},
+    {"mode":"Submission bypass","cause":"New mouse/key dispatch bypasses DOM guard","effect":"Unapproved employer submission","severity":10,"detection":"Final submission guard and single-use approval regressions","mitigation":"Native browser input keeps injected guard; never dispatch final form actions via an unguarded shortcut"},
+    {"mode":"Unresponsive clicks despite fast acknowledgement","cause":"Blocking focus/SQLite work or buffered frames after dispatch","effect":"Delayed forms/navigation","severity":8,"detection":"Measured processed input and actual displayed pixel changes under slow-read load","mitigation":"Prioritized input, deferred/coalesced read/audit work and bounded latest-frame delivery"},
+    {"mode":"Drag stuck or duplicate click","cause":"Missing pointer-up on cancel/close or replay of requests","effect":"Unintended selection/action","severity":8,"detection":"Drag, cancellation and double-click browser tests","mitigation":"Bounded validated mouse events, pointer capture and release; do not replay uncertain commands"},
+    {"mode":"Activity missing after performance optimization","cause":"Deferring audit without final flush","effect":"Incomplete analysis history","severity":7,"detection":"Audit ordering/flush/error tests","mitigation":"Keep sanitized input counts and processing metrics; flush before terminal/control transitions and shutdown"}
+  ],
+  "mitigation_status":"Implemented and verified by 552 passing tests, strict AI evaluations and live authenticated/deployed Linux checks",
+  "engineering_follow_ups":[],
+  "verification_notes":"Real pixel latency, native drag/double-click/typing/cancel, authentication/CSRF/ownership, audit isolation/flush and final approval guards covered. Production application states preserved."
+}

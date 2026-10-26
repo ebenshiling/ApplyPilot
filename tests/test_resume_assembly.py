@@ -24,7 +24,7 @@ def _base_profile() -> dict:
     }
 
 
-def test_assemble_resume_injects_non_empty_projects_and_education_fallback() -> None:
+def test_assemble_resume_does_not_turn_employment_into_invented_project_work() -> None:
     profile = _base_profile()
     data = {
         "title": "Data Analyst",
@@ -47,8 +47,8 @@ def test_assemble_resume_injects_non_empty_projects_and_education_fallback() -> 
 
     out = assemble_resume_text(data, profile)
 
-    assert "PROJECTS" in out
-    assert "Selected Data Analyst Project Work" in out
+    assert "PROJECTS" not in out
+    assert "Selected Data Analyst Project Work" not in out
     assert "Built KPI dashboards and reduced manual reporting by 40%" in out
     assert "[F1]" not in out
     assert "EDUCATION" in out

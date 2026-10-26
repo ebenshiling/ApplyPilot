@@ -1,0 +1,45 @@
+{
+  "last_run_exit_code": 1,
+  "roles": 3,
+  "role_examples": [
+    "Application Support Analyst",
+    "Data Analyst",
+    "IT Support Analyst"
+  ],
+  "locations": 9,
+  "location_examples": [
+    "Remote",
+    "London",
+    "UK",
+    "Manchester",
+    "Birmingham",
+    "Leeds",
+    "Bristol",
+    "Edinburgh"
+  ],
+  "boards": [
+    "indeed",
+    "linkedin",
+    "glassdoor",
+    "google"
+  ],
+  "results_per_site": 35,
+  "board_search_budget": 20,
+  "direct_target_budget": 20,
+  "workday_target_budget": 20,
+  "direct_sources_available": 42,
+  "direct_selection": 6,
+  "workday_portals_available": 48,
+  "saved_jobs": 1954,
+  "unscored_described_jobs": 1862,
+  "counts_by_source": {
+    "GOV.UK Find a job": 10,
+    "NHS Jobs": 3,
+    "Workday": 1836,
+    "glassdoor": 1,
+    "indeed": 25,
+    "linkedin": 79
+  },
+  "has_max_new_job_limit": false,
+  "has_run_processing_scope": false
+}

@@ -1,0 +1,36 @@
+{
+  "implementation_id": "20261007-assisted-browser",
+  "status": "completed",
+  "phase": "deployed",
+  "owner": "ai-agent",
+  "updated_at": "2026-10-07",
+  "verification": {
+    "command": "python scripts/agent_verify.py",
+    "result": "passed",
+    "browser_enabled": true,
+    "pytest": "438 passed in 1188.94 seconds",
+    "new_tests": 11,
+    "ai_regression": "7/7 passed",
+    "ai_formal": "13/13 passed",
+    "javascript": "node --check passed for assisted-browser.js and workspace.js",
+    "lint": "ruff check passed for assisted_browser.py",
+    "environment_recovery": "Installed existing declared cryptography and pypdf dependencies in the local verification environment; all six dependency-related failures then passed",
+    "container_smoke": "Headless Chromium, screenshot capture and default final-action guard passed in the built Docker image",
+    "live_inference": "None; all application/model tests use fixtures"
+  },
+  "deployment": {
+    "container": "applypilot-dashboard",
+    "build": "docker compose build --quiet applypilot passed",
+    "recreation": "docker compose up -d --no-build --force-recreate applypilot passed",
+    "health": {"ok": true, "multi_user": true}
+  },
+  "api_research": "Official Decisions and Agents API documentation checked; native hosted computer-use support and per-action approval boundary documented in docs/OPENAI_APPLICATION_AGENT_APIS.md. No provider adapter or paid API request enabled.",
+  "follow_ups": [
+    {"owner":"ai-agent","phase":"classifier evaluation","task":"Observation-only Decisions benchmark using synthetic page-state/confirmation fixtures"},
+    {"owner":"ai-agent","phase":"optional managed orchestration","task":"Agents API function adapter with durable tool-call deduplication and the existing candidate approval boundary"},
+    {"owner":"ai-agent","phase":"ATS coverage","task":"Evaluate custom widgets and per-employer adapters after first candidate-supervised applications"}
+  ],
+  "pre_state": "ops/implementations/20261007-assisted-browser/pre_state.json",
+  "post_state": "ops/implementations/20261007-assisted-browser/post_state.json",
+  "snapshot_note": "Working tree contains prior user changes; Windows git metadata may be unavailable on the UNC checkout. No commits were created."
+}

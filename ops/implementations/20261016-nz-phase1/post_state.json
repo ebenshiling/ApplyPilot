@@ -1,0 +1,26 @@
+{
+  "captured_at": "2026-10-16T15:22:29.391099+00:00",
+  "python": {
+    "version": "3.12.3",
+    "executable": "/usr/bin/python3"
+  },
+  "git": {
+    "head": "18f888806ca30665f6b0aff008b341681538a9ee",
+    "branch": "feat/nz-phase1-country-foundation",
+    "dirty": true
+  },
+  "repo": {
+    "root": "/mnt/c/Users/swazy/AppData/Local/Temp/opencode/applypilot-nz-phase1"
+  },
+  "key_files": {
+    "pyproject.toml": true,
+    "README.md": true,
+    "src/applypilot/view.py": true,
+    "src/applypilot/dashboard_server.py": true,
+    "tests": true
+  },
+  "env": {
+    "APPLYPILOT_DIR": "/mnt/c/Users/swazy/AppData/Local/Temp/opencode/applypilot-nz-phase1-test-data",
+    "APPLYPILOT_SEARCHES_PATH": null
+  }
+}

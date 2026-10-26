@@ -1,0 +1,52 @@
+{
+  "implementation_id":"20261007-decisions-observer",
+  "status":"completed",
+  "phase":"deployed",
+  "owner":"ai-agent",
+  "updated_at":"2026-10-07",
+  "verification":{
+    "command":"python scripts/agent_verify.py",
+    "result":"passed",
+    "pytest":"457 passed in 1254.78 seconds with browser verification enabled",
+    "ai_regression":"7/7 passed",
+    "ai_formal":"13/13 passed",
+    "post_calibration_checks":"34 passed in 323.20 seconds: observer, AI-preferences UI, assisted browser; includes final prompt and per-component metrics",
+    "new_tests":19,
+    "static":"compileall, ruff and node --check passed",
+    "offline_benchmark":"All nine baseline fixture labels matched, with zero provider calls",
+    "startup_test_adjustment":"Readiness wait separates slow Chromium/driver launch from the measured takeover latency; deliberately blocked classifier is released explicitly",
+    "diff_check":"Scoped changed-file check passed; repository-wide check reports pre-existing whitespace in unrelated search YAML files"
+  },
+  "live_evaluation":{
+    "scope":"Isolated disposable evaluation workspace with synthetic metadata only",
+    "requests":18,
+    "reported_input_tokens":11716,
+    "estimated_standard_usd":0.0011716,
+    "initial_page_accuracy":"5/9",
+    "refined_page_accuracy":"8/9 on the same calibration set",
+    "refined_navigation":"9/9",
+    "refined_confirmation":"9/9; zero false confirmations",
+    "refined_median_latency_ms":280.98,
+    "refined_input_tokens":6569,
+    "refined_estimated_standard_usd":0.0006569,
+    "remaining_case":"Email-only Next page classified unknown, confidence 0.29",
+    "independent_real_world_validation":false,
+    "records":["live_trial_v1.json","live_trial_v2.json"]
+  },
+  "deployment":{
+    "build":"docker compose build --quiet applypilot passed",
+    "recreation":"docker compose up -d --no-build --force-recreate applypilot passed",
+    "container":"applypilot-dashboard",
+    "health":{"ok":true,"multi_user":true},
+    "runtime_revision":"v2_explicit_page_boundaries",
+    "unauthenticated_report":"401, as expected",
+    "workspace_trial_default":"off; enable from Settings → AI preferences"
+  },
+  "follow_ups":[
+    {"owner":"ai-agent","phase":"independent classification validation","task":"Evaluate held-out, representative multi-page ATS metadata before allowing classifier-driven navigation"},
+    {"owner":"ai-agent","phase":"optional managed orchestration","task":"Evaluate Agents API function tools with the existing browser and enforced candidate approval"}
+  ],
+  "pre_state":"ops/implementations/20261007-decisions-observer/pre_state.json",
+  "post_state":"ops/implementations/20261007-decisions-observer/post_state.json",
+  "snapshot_note":"Prior user changes were preserved; Windows git metadata can be unavailable on this UNC checkout. No commits created."
+}

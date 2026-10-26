@@ -1,0 +1,10 @@
+{
+  "change_id":"20261016-nz-phase3",
+  "failure_modes":[
+    {"mode":"Wrong legal employer acquires accreditation","cause":"Brand, NZBN format or fuzzy name mistaken for confirmed hiring identity","effect":"Misleading employer status","severity":9,"detection":"Agency/subsidiary/name and NZBN conflict fixtures","mitigation":"No automatic merges; explicit corroborated hiring links and identity snapshots; ambiguous remains unknown"},
+    {"mode":"Not listed becomes not accredited","cause":"Public-list nonpublication ignored","effect":"False rejection","severity":9,"detection":"No-result fixtures","mitigation":"not_listed reduces only to unknown; expose official nonpublication explanation"},
+    {"mode":"Stale, conflicting or failed observation becomes current success","cause":"Latest-timestamp-wins or resetting checked_at on read","effect":"False verified claim","severity":9,"detection":"Future/stale/expiry/recheck/conflict/supersession fixtures","mitigation":"Immutable evidence, distinct observed/recorded/success timestamps; explicit resolution; official adverse cannot be silently overridden"},
+    {"mode":"Negated or unrelated visa text misclassifies recruitment","cause":"Keyword-only rule without applicability","effect":"Misleading overseas-support label","severity":8,"detection":"Negation, conditions, non-NZ boilerplate and conflicting quote cases","mitigation":"Literal sentence evidence with scope/hash/rule version; conservative unknown/conflicting; no technical score mutations"},
+    {"mode":"Manual evidence invokes prohibited official automation or trusts forged actor/artifact","cause":"Shared preview or client identity/path","effect":"Unauthorised retrieval or invalid audit","severity":10,"detection":"Network sentinels and actor/path/type/hash tests","mitigation":"Manual official links only; server-derived actor; owned bounded artifact bytes with digest verification; no external fetch or feed"}
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "implementation_id": "20261007-workspace-startup",
+  "status": "completed",
+  "phase": "deployed",
+  "owner": "ai-agent",
+  "updated_at": "2026-10-07",
+  "diagnosis": "Reproduced pre-fix: core started overview request while studios.js was held, before deferred renderers were ready. Production assets are present and use Cache-Control no-store; this is a bootstrap ordering race.",
+  "fix": "One-shot DOMContentLoaded initialization; resolve registered hash views only after dependency scripts execute; guard missing renderer recovery and optional Studio/Pipeline/NHS adapters.",
+  "verification": {
+    "result": "passed",
+    "command": "python scripts/agent_verify.py",
+    "browser_enabled": true,
+    "pytest": "427 passed in 1155.15 seconds",
+    "ai_regression": "7/7 passed",
+    "ai_formal": "13/13 passed",
+    "delayed_load": "Five scenarios passed, each with direct entry and repeated reload: Settings waiting for Studios/Pipeline, Portfolio waiting for Studios, Cover/Statement waiting for NHS planner; repeated initialization does not add overview requests",
+    "failed_assets": "All three failed-dependency/reload-recovery scenarios passed after guarding optional adapters",
+    "private_settings": "Existing private-settings regressions passed",
+    "javascript": "node --check passed for workspace.js, studios.js and nhs-planner.js",
+    "deployed_browser": "live_assets_browser.py passed: production JS/CSS with an unchanged source HTML shell and intercepted fixture-only API responses; three consecutive Settings loads/reloads with delayed Studios; zero page errors and zero password fields",
+    "live_inference": "None; no production credentials used or changed"
+  },
+  "deployment": {
+    "container": "applypilot-dashboard",
+    "build": "docker compose -f docker-compose.yml build --quiet applypilot passed",
+    "recreation": "docker compose -f docker-compose.yml up -d --no-build --force-recreate applypilot passed",
+    "health": {"ok": true, "multi_user": true},
+    "dependency_ready_bootstrap_and_private_preferences_verified": true,
+    "protected_input_hashes_unchanged": 13,
+    "jobs_before_after": [21, 21],
+    "documents_before_after": [4, 4],
+    "messages_before_after": [118, 118]
+  },
+  "fmea": "All four mitigations implemented and verified by deliberate delayed/failed asset browser fixtures.",
+  "snapshot_note": "Git metadata unavailable from Windows on the UNC checkout; snapshot dirty=false is not proof of a clean working tree.",
+  "pre_state": "ops/implementations/20261007-workspace-startup/pre_state.json",
+  "post_state": "ops/implementations/20261007-workspace-startup/post_state.json"
+}

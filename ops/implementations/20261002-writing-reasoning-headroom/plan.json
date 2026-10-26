@@ -1,0 +1,13 @@
+{
+  "implementation_id": "20261002-writing-reasoning-headroom",
+  "title": "Bounded reasoning headroom for document writing",
+  "status": "completed",
+  "steps": [
+    "Keep the user's per-task reasoning settings and add bounded total-completion headroom for Luna tailoring, statements and cover letters",
+    "Make headroom configurable per writing task and include it in immutable client keys/cache identities and diagnostics",
+    "Preserve small/non-reasoning and other-provider request limits; reject invalid configuration before inference",
+    "Test writing requests and total caps, run required verification, recreate the service and confirm active settings without paid AI calls"
+  ],
+  "defaults": {"low": 2048, "medium": 4096, "high": 8192, "xhigh": 16384, "max": 16384},
+  "note": "Headroom enlarges a bounded combined output/reasoning cap; it is not a provider guarantee of a separately reserved reasoning allowance."
+}

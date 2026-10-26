@@ -1,0 +1,13 @@
+{
+  "implementation_id": "20261002-inbox-identity-stability",
+  "title": "Stable email identities and inbox pagination/polling",
+  "status": "completed",
+  "diagnosis": "Confirmed legacy and native copies of the same acknowledgement/rejection differ only by URLs appended by the newer HTML parser; accepted legacy rejection resurfaced as an unreviewed native copy. Polling currently rebuilds identical list/pagination DOM every 15 seconds.",
+  "steps": [
+    "Add canonical duplicate pointers and provider/RFC identity aliases without deleting source evidence",
+    "Reconcile only unique full-content legacy/native matches, preserving decisions, analysis and true receipt metadata",
+    "Treat distinct native IDs and changed outcomes as distinct messages; prevent duplicate review or analysis",
+    "Avoid unchanged inbox DOM replacement, preserve expanded source messages and clamp stale page offsets",
+    "Verify identity/decision/ambiguity and browser stability scenarios; deploy and inspect only safe aggregate/identity metadata"
+  ]
+}

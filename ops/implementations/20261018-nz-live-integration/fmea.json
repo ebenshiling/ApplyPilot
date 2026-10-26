@@ -1,0 +1,12 @@
+{
+  "change_id": "20261018-nz-live-integration",
+  "scope": ["dashboard", "pipeline", "database", "applications", "deployment"],
+  "failure_modes": [
+    {"mode":"Existing uncommitted work overwritten","cause":"Copying a whole feature tree","effect":"Lost user changes","severity":9,"detection":"Per-file comparison to authorized checkpoint","mitigation":"Refuse conflicts, copy only NZ delta, archive originals"},
+    {"mode":"Migration or deploy damages user data","cause":"Changing a running database or volume","effect":"Lost workspace or inconsistent backup","severity":10,"detection":"Archive verification and additive migration tests","mitigation":"Stopped-data backup, unchanged volume mapping, retained old image, no destructive migration"},
+    {"mode":"NZ remains invisible","cause":"Old Docker image, disabled feature, or cached assets","effect":"User cannot use delivered work","severity":7,"detection":"Check served assets and authenticated country response in rebuilt container","mitigation":"Deployment-level enablement and browser smoke"},
+    {"mode":"Premature or duplicate real submission","cause":"Restoring browser workflows without approval/replay checks","effect":"Unreviewed employer application","severity":10,"detection":"Local HTTP browser fixtures assert no pre-approval POST, single-use approval, stale-context rejection and uncertainty handling","mitigation":"Retain existing review/approval flow and explicit user starts; do not launch applications during deployment"},
+    {"mode":"Unsupported discovery presented as working","cause":"Removing source-readiness checks with release locks","effect":"False coverage or bad vacancy data","severity":8,"detection":"Source-readiness and jurisdiction tests","mitigation":"Retain source capabilities, explicit selections, permission and sample checks; show actionable configuration needs"},
+    {"mode":"Country or factual evidence leaks across jobs","cause":"Broad feature activation","effect":"Wrong work-rights answers or invented facts","severity":9,"detection":"Existing canonical and country regression suites","mitigation":"Retain scoped evidence and actual document verification"}
+  ]
+}

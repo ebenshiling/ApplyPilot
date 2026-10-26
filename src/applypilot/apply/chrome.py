@@ -198,6 +198,8 @@ def launch_chrome(worker_id: int, port: int | None = None,
     Returns:
         subprocess.Popen handle for the Chrome process.
     """
+    from applypilot.apply.safety import require_live_execution
+    require_live_execution()
     if port is None:
         port = BASE_CDP_PORT + worker_id
 

@@ -8,8 +8,18 @@ resume.pdf
 
 # Runtime artifacts
 *.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+.connector-key
+.mail-vault.key
+.ai-settings.json
 applypilot-transfer*.zip
 docker-data/
+.release-backups/
 tailored_resumes/
 cover_letters/
 chrome-workers/
@@ -43,6 +53,7 @@ nul
 # OS
 .DS_Store
 Thumbs.db
+*:Zone.Identifier
 
 # Claude Code
 .claude/

@@ -1,0 +1,28 @@
+{
+  "mode":"live_synthetic_trial",
+  "model":"gpt-6-luna",
+  "prompt_revision":"v1_generic_category_descriptions",
+  "state":"completed",
+  "cases":9,
+  "correct_all_components":5,
+  "page_state_correct":5,
+  "navigation_correct":9,
+  "confirmation_correct":9,
+  "false_confirmations":0,
+  "failed_requests":0,
+  "median_latency_ms":277.07,
+  "reported_input_tokens":5147,
+  "estimated_standard_usd":0.0005147,
+  "page_results":[
+    {"case":"listing","expected":"listing","predicted":"review","confidence":0.13},
+    {"case":"login","expected":"login","predicted":"login","confidence":0.99},
+    {"case":"next_page","expected":"application","predicted":"login","confidence":0.58},
+    {"case":"missing_information","expected":"application","predicted":"application","confidence":0.98},
+    {"case":"security_check","expected":"security_check","predicted":"security_check","confidence":0.99},
+    {"case":"final_review","expected":"review","predicted":"review","confidence":0.87},
+    {"case":"new_receipt","expected":"confirmation","predicted":"confirmation","confidence":0.72},
+    {"case":"conditional_receipt","expected":"unknown","predicted":"application","confidence":0.24},
+    {"case":"old_receipt","expected":"review","predicted":"unknown","confidence":0.16}
+  ],
+  "scope":"Nine synthetic metadata cases with the service credential in a disposable evaluation workspace. No candidate records used. This small calibration set is not a real-world validation benchmark."
+}

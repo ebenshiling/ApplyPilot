@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -102,7 +103,7 @@ def _job_summaries(db_path: Path, *, query: dict[str, Any]) -> dict[str, Any]:
                tailor_status, cover_letter_status,
                applied_at, apply_status, apply_error
           FROM jobs
-         WHERE fit_score >= 5
+         WHERE fit_score >= 5 AND (country_code IS NULL OR country_code='GB')
          ORDER BY fit_score DESC, site, title
         """
     ).fetchall()
@@ -751,11 +752,26 @@ def _run_manual_job_match(app_dir: Path, payload: dict[str, Any]) -> dict[str, A
     tailored_dir.mkdir(parents=True, exist_ok=True)
 
     stem = naming.cv_filename(personal, ext="txt", username=username, job=job)
-    txt_path = tailored_dir / Path(stem).name
+    import uuid
+    txt_path = tailored_dir / (Path(stem).stem + "_v" + uuid.uuid4().hex[:12] + ".txt")
     txt_path.write_text(tailored_text, encoding="utf-8")
 
     report_path = tailored_dir / f"{txt_path.stem}_REPORT.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+    from applypilot.canonical import finalize,FactReviewRequired
+    from applypilot.database import init_db
+    try:
+        report["factual_finalisation"] = finalize(init_db(Path(app_dir)/"applypilot.db"),app_dir,txt_path,job,kind="resume")
+    except FactReviewRequired as exc:
+        result.update(tailored=False,tailor_status="needs_fact_review",tailored_text=tailored_text,draft_path=str(txt_path),message=str(exc))
+        report["status"] = "needs_fact_review"
+        report_path.write_text(json.dumps(report,indent=2),encoding="utf-8")
+        _append_job_match_history({"run_id":manual_id,"title":title,"org":org,"location":location,"score":score_value,"min_score":min_score,
+            "tailored":False,"tailor_status":"needs_fact_review","started_at":started_at,"ended_at":time.time(),"keywords":result.get("keywords") or "",
+            "reasoning":result.get("reasoning") or "","resume_text":resume_text,"job_text":job_text,"tailored_text":tailored_text,
+            "tailored_path":None,"draft_path":str(txt_path),"pdf_path":None,"report_path":str(report_path)},app_dir)
+        return result
 
     pdf_path: str | None = None
     try:
@@ -766,7 +782,10 @@ def _run_manual_job_match(app_dir: Path, payload: dict[str, Any]) -> dict[str, A
                 pdf_metadata=build_pdf_metadata("resume", personal=personal, job=job),
             )
         )
+        from applypilot.canonical import bind_pdf
+        bind_pdf(init_db(Path(app_dir)/"applypilot.db"),app_dir,txt_path,pdf_path,job)
     except Exception as e:
+        pdf_path = None
         result["pdf_error"] = str(e)
 
     result.update(
@@ -904,6 +923,9 @@ class _PipelineRunner:
         Returns (path_or_none, meta).
         """
         query = str(payload.get("search_query") or "").strip()
+        queries = payload.get("search_queries") or ([q.strip() for q in re.split(r"[,\n]+", query) if q.strip()] if query else [])
+        if not isinstance(queries, list) or len(queries) > 100 or any(not isinstance(q, str) or not 1 <= len(q.strip()) <= 160 for q in queries):
+            raise ValueError("Provide up to 100 role queries, each up to 160 characters")
         boards = self._split_csv(payload.get("jobspy_sites") or payload.get("boards"))
         smarte_sites = self._split_csv(payload.get("smarte_sites") or payload.get("smart_sites"))
 
@@ -917,7 +939,7 @@ class _PipelineRunner:
             hours_old = 0
 
         # If nothing is set, don't override the user's searches.yaml.
-        if not (query or boards or smarte_sites or results_per_site or hours_old):
+        if not ("_country_snapshot" in payload or queries or boards or smarte_sites or results_per_site or hours_old or payload.get("campaign_id") or any(k in payload for k in ("smart_target_budget", "board_search_budget", "workday_target_budget"))):
             return None, {}
 
         allowed_boards = {"indeed", "linkedin", "glassdoor", "zip_recruiter", "google"}
@@ -931,7 +953,7 @@ class _PipelineRunner:
         try:
             from applypilot.config import load_sites_config
 
-            sc = load_sites_config()
+            sc = load_sites_config(self._app_dir)
             entries = sc.get("sites") if isinstance(sc, dict) else []
             if isinstance(entries, list):
                 for s in entries:
@@ -962,9 +984,9 @@ class _PipelineRunner:
         # Base config: current user's searches.yaml.
         base: dict[str, Any] = {}
         try:
-            from applypilot.setup_workspace import read_searches_dict
+            from applypilot.pipeline_workspace import campaign_config
 
-            loaded = read_searches_dict(self._app_dir)
+            loaded = payload.get("_country_snapshot") if "_country_snapshot" in payload else campaign_config(self._app_dir, payload.get("campaign_id"))
             if isinstance(loaded, dict):
                 base = dict(loaded)
         except Exception:
@@ -973,20 +995,26 @@ class _PipelineRunner:
         merged: dict[str, Any] = dict(base)
 
         # Replace queries with a single tier-1 query.
-        if query:
-            merged["queries"] = [{"query": query, "tier": 1}]
+        if queries and not merged.get('_run_scope'):
+            merged["queries"] = [{"query": q.strip(), "tier": 1} for q in queries]
+        for key in ("smart_target_budget", "board_search_budget", "workday_target_budget"):
+            if key in payload and not merged.get('_run_scope'):
+                number = int(payload[key])
+                if not 0 <= number <= 10000:
+                    raise ValueError("Source budgets must be between 0 and 10000")
+                merged[key] = number
 
         # Replace JobSpy boards/sites.
-        if norm_boards:
+        if norm_boards and not merged.get('_run_scope'):
             merged["boards"] = list(norm_boards)
             merged["sites"] = list(norm_boards)
 
         # Optional Smart Extract site allow-list by human site name.
-        if norm_smarte_sites:
+        if norm_smarte_sites and not merged.get('_run_scope'):
             merged["smart_sites"] = list(norm_smarte_sites)
 
         # Replace crawl defaults.
-        if results_per_site or hours_old:
+        if (results_per_site or hours_old) and not merged.get('_run_scope'):
             d = merged.get("defaults")
             if not isinstance(d, dict):
                 d = {}
@@ -1037,6 +1065,7 @@ class _PipelineRunner:
             return None, {"search_override_error": str(e)}
 
         meta: dict[str, Any] = {
+            "country_context": payload.get("_country_context"),
             "search_query": query or None,
             "jobspy_sites": norm_boards or None,
             "smarte_sites": norm_smarte_sites or None,
@@ -1146,6 +1175,38 @@ class _PipelineRunner:
         stages = [str(s).strip().lower() for s in stages if str(s).strip()]
         if not stages:
             stages = ["all"]
+        if "apply" in stages:
+            from applypilot.apply.safety import require_live_execution, SubmissionContained
+            try:
+                require_live_execution()
+            except SubmissionContained as exc:
+                return False, {"error": "application_disabled", "detail": str(exc)}
+            if stages != ["apply"]:
+                return False, {"error": "Run application execution as a separate workflow"}
+        try:
+            from applypilot.pipeline_workspace import campaign_config
+            from applypilot.country_context import resolve_run, validate_request_jobs
+            if payload.get('scope_policy') is not None:
+                from applypilot.pipeline_workspace import preview
+                from applypilot.database import init_db as initialize
+                plan=preview(initialize(self._app_dir/'applypilot.db'),self._app_dir,payload)
+                if not plan.get('can_start'):raise ValueError(plan.get('start_problem') or 'No work is selected')
+                if plan.get('missing_inputs'):raise ValueError('Complete processing inputs before starting: '+', '.join(plan['missing_inputs']))
+                if payload.get('expected_preview_token')!=plan.get('preview_token'):raise ValueError('Search settings changed or were not reviewed. Preview the current scope before starting.')
+                effective=plan['config']
+            else:
+                effective = campaign_config(self._app_dir, payload.get("campaign_id"))
+            context = resolve_run(self._app_dir, effective, payload.get("country_code"), payload.get("campaign_id"), stages=stages)
+            from applypilot.database import init_db
+            validate_request_jobs(init_db(self._app_dir / "applypilot.db"), self._app_dir, "/api/center/pipeline/start", payload|{"stages":stages})
+            snapshot = context.config
+            if context.country_code:
+                snapshot["country_code"] = context.country_code
+            payload = dict(payload, _country_snapshot=snapshot, _country_context=context.public())
+            if context.country_code == "NZ" and any(k in payload for k in ("search_queries", "search_query", "boards", "smart_sites", "smart_target_budget", "board_search_budget", "workday_target_budget")):
+                raise ValueError("Save NZ discovery selections and budgets in the campaign before starting")
+        except (ValueError, TypeError) as exc:
+            return False, {"error": str(exc)}
 
         try:
             min_score = int(payload.get("min_score") or 7)
@@ -1166,11 +1227,19 @@ class _PipelineRunner:
         skip_smarte = self._coerce_bool(payload.get("discover_skip_smarte"))
 
         # Use -u to force unbuffered stdout so the dashboard can stream logs.
-        cmd: list[str] = [sys.executable, "-u", "-m", "applypilot", "run"]
-        if "all" not in stages:
+        applying = stages == ["apply"]
+        cmd: list[str] = [sys.executable, "-u", "-m", "applypilot", "apply" if applying else "run"]
+        if applying:
+            target = str(payload.get("application_target") or "").strip()
+            if not target:
+                return False, {"error": "application_target_required"}
+            cmd.extend(["--url", target, "--limit", "1", "--engine", "llm" if payload.get("engine") == "llm" else "claude"])
+            if payload.get("engine") == "llm" and self._coerce_bool(payload.get("submit")) and not dry_run:
+                cmd.append("--submit")
+        elif "all" not in stages:
             cmd.extend(stages)
         cmd.extend(["--min-score", str(min_score), "--workers", str(max(1, workers))])
-        if stream:
+        if stream and not applying:
             cmd.append("--stream")
         if dry_run:
             cmd.append("--dry-run")
@@ -1180,12 +1249,24 @@ class _PipelineRunner:
         env.update(env_overrides)
         env["APPLYPILOT_DIR"] = str(self._app_dir)
         env["APPLYPILOT_USER"] = str(self._app_dir.name or "")
+        env["APPLYPILOT_COUNTRY_CODE"] = context.country_code or ""
+        if applying:
+            env["APPLYPILOT_RECONCILE_STALE"] = "1"
+            env["APPLYPILOT_ATTEMPT_TOKEN"] = secrets.token_hex(12)
+        # Explicit targeted regeneration does not clear existing approved paths.
+        regen = payload.get("regenerate_ids")
+        if regen:
+            if not isinstance(regen, list) or len(regen) > 100 or any(not isinstance(i, int) or i <= 0 for i in regen):
+                return False, {"error": "invalid_regenerate_ids"}
+            env["APPLYPILOT_REGENERATE_IDS"] = ",".join(str(i) for i in regen)
+        else:
+            env.pop("APPLYPILOT_REGENERATE_IDS", None)
 
         with self._lock:
             if self._starting or (self._proc is not None and self._proc.poll() is None):
                 return False, {"error": "already_running"}
 
-            self._run_id = str(int(time.time()))
+            self._run_id = str(int(time.time()))+"-"+secrets.token_hex(4)
             self._started_at = time.time()
             self._ended_at = None
             self._exit_code = None
@@ -1208,11 +1289,48 @@ class _PipelineRunner:
             log_path = self._log_path
 
         # Write a per-run searches.yaml when overrides are provided.
-        searches_path, searches_meta = self._write_search_override_if_needed(
-            payload, run_id=run_id, log_dir=self._app_dir / "logs" / "dashboard_runs"
-        )
+        try:
+            searches_path, searches_meta = self._write_search_override_if_needed(
+                payload, run_id=run_id, log_dir=self._app_dir / "logs" / "dashboard_runs"
+            )
+            if not searches_path:
+                raise ValueError("Could not persist the captured country/search snapshot; no worker was started")
+            from applypilot.country_context import export_run_snapshot
+            from applypilot.setup_workspace import _atomic_write_bytes
+            import yaml
+            directory=self._app_dir/".country_runs"
+            if directory.is_symlink() or not directory.resolve().is_relative_to(self._app_dir.resolve()):
+                raise ValueError("Country snapshot directory is outside the owned workspace")
+            private_snapshot=directory/(run_id+".json")
+            captured_config=yaml.safe_load(Path(searches_path).read_text(encoding="utf-8")) or {}
+            _atomic_write_bytes(private_snapshot,json.dumps(export_run_snapshot(context,captured_config)).encode())
+            env["APPLYPILOT_COUNTRY_SNAPSHOT"]=str(private_snapshot)
+        except (ValueError, TypeError, OSError) as exc:
+            with self._lock:
+                self._starting = False
+                self._start_error = str(exc)
+            return False, {"error": str(exc)}
+        env["APPLYPILOT_RUN_ID"] = run_id
+        if payload.get("campaign_id"):
+            env["APPLYPILOT_CAMPAIGN_ID"] = str(payload["campaign_id"])
+        else:
+            env.pop("APPLYPILOT_CAMPAIGN_ID", None)
+        scope = payload.get("job_ids") or regen
+        if scope:
+            if not isinstance(scope, list) or len(scope) > 100 or any(not isinstance(i, int) or i <= 0 for i in scope):
+                with self._lock:
+                    self._starting = False
+                return False, {"error": "invalid_job_ids"}
+            env["APPLYPILOT_JOB_IDS"] = ",".join(str(i) for i in scope)
+        else:
+            env.pop("APPLYPILOT_JOB_IDS", None)
+        for field, flag in (("discover_skip_jobspy", "DISCOVER_SKIP_JOBSPY"), ("discover_skip_workday", "DISCOVER_SKIP_WORKDAY"), ("discover_skip_smarte", "DISCOVER_SKIP_SMARTE"), ("selected_only", "APPLYPILOT_SELECTED_ONLY"), ("selected_only", "APPLYPILOT_APPLY_SELECTED_ONLY")):
+            if field in payload:
+                env[flag] = "1" if self._coerce_bool(payload[field]) else "0"
         if searches_path:
             env["APPLYPILOT_SEARCHES_PATH"] = searches_path
+        else:
+            env.pop("APPLYPILOT_SEARCHES_PATH", None)
         if skip_jobspy:
             env["DISCOVER_SKIP_JOBSPY"] = "1"
         if skip_workday:
@@ -1388,6 +1506,13 @@ class _PipelineRunner:
                         rc = proc.wait(timeout=1)
                 except Exception:
                     rc = None
+                if applying and proc is not None and rc is not None:
+                    from applypilot.command_center import release_attempt
+
+                    try:
+                        release_attempt(get_connection(self._app_dir / "applypilot.db"), env["APPLYPILOT_ATTEMPT_TOKEN"])
+                    except sqlite3.Error:
+                        pass
                 with self._lock:
                     self._exit_code = int(rc) if rc is not None else self._exit_code
                     self._ended_at = time.time() if self._ended_at is None else self._ended_at
@@ -1415,8 +1540,10 @@ class _PipelineRunner:
 
         return True, {"run_id": run_id, "cmd": cmd, "log_path": log_path}
 
-    def stop(self) -> tuple[bool, dict[str, Any]]:
+    def stop(self, expected_run_id=None) -> tuple[bool, dict[str, Any]]:
         with self._lock:
+            if expected_run_id is not None and self._run_id != expected_run_id:
+                return False, {"error": "run_changed"}
             proc = self._proc
             if self._starting and proc is None:
                 self._cancel_requested = True
@@ -1503,7 +1630,10 @@ def _workspace_for_user(user: dict[str, Any] | None) -> Path:
 
 
 def _runner_for_user(user: dict[str, Any] | None) -> _PipelineRunner:
+    from applypilot import background
+
     if not _MULTI_USER_MODE or not user:
+        background.start(_PIPELINE)
         return _PIPELINE
     username = str(user.get("username") or "").strip().lower()
     if not username:
@@ -1512,7 +1642,9 @@ def _runner_for_user(user: dict[str, Any] | None) -> _PipelineRunner:
         r = _PIPELINES.get(username)
         if r is None:
             r = _PipelineRunner(_workspace_for_user(user))
+            r._hydrate_from_history()
             _PIPELINES[username] = r
+        background.start(r, authorized=lambda: any(u.get("username") == username and u.get("is_active", True) for u in list_users()))
         return r
 
 
@@ -1581,34 +1713,11 @@ def _ensure_dashboard(*, force: bool = False, app_dir: Path | None = None, db_pa
 
 
 def _regen_dashboard_async(*, app_dir: Path | None = None, db_path: Path | None = None) -> None:
-    ad = Path(app_dir or APP_DIR)
-    dbp = Path(db_path or (ad / "applypilot.db"))
-    cache_key = str(ad)
+    """Retired server hook: the native workspace reads live API data.
 
-    with _DASHBOARD_LOCK:
-        entry = _DASHBOARD_CACHE.get(cache_key, {})
-        if entry.get("regen_in_flight"):
-            return
-        entry["regen_in_flight"] = True
-        _DASHBOARD_CACHE[cache_key] = entry
-
-    def _run() -> None:
-        try:
-            new_path = generate_dashboard(quiet=True, app_dir=ad, db_path=dbp)
-            with _DASHBOARD_LOCK:
-                _DASHBOARD_CACHE[cache_key] = {
-                    "path": new_path,
-                    "db_stamp": _db_stamp(dbp),
-                    "code_stamp": _code_stamp(),
-                    "regen_in_flight": False,
-                }
-        finally:
-            with _DASHBOARD_LOCK:
-                e2 = _DASHBOARD_CACHE.get(cache_key, {})
-                e2["regen_in_flight"] = False
-                _DASHBOARD_CACHE[cache_key] = e2
-
-    threading.Thread(target=_run, name="dashboard-regen", daemon=True).start()
+    Legacy API callers keep this hook, but no longer render classic HTML.
+    Explicit standalone dashboard exports still use ``generate_dashboard``.
+    """
 
 
 def _now_iso() -> str:
@@ -1710,7 +1819,17 @@ def _mark_job_by_id(db_path: Path, job_id: int, status: str, reason: str | None 
     now = _now_iso()
     conn.execute("BEGIN IMMEDIATE")
     try:
+        row = conn.execute("SELECT rowid AS id,* FROM jobs WHERE rowid=?", (job_id,)).fetchone()
+        if not row or row["apply_status"] in {"in_progress", "running", "submitting"}:
+            conn.rollback()
+            return 0
         if status == "applied":
+            from applypilot.command_center import snapshot_document, event
+
+            document_id = snapshot_document(conn, db_path.parent, dict(row))
+            conn.execute("INSERT OR IGNORE INTO cc_job_meta(job_url) VALUES(?)", (row["url"],))
+            conn.execute("UPDATE cc_job_meta SET document_id=?,submission_method='manual',hiring_status='submitted' WHERE job_url=?", (document_id, row["url"]))
+            event(conn, row["url"], "submission", "Manually marked applied from classic dashboard", state="submitted", source="manual")
             cur = conn.execute(
                 """
                 UPDATE jobs
@@ -1744,11 +1863,12 @@ def _mark_job_by_id(db_path: Path, job_id: int, status: str, reason: str | None 
 
 def _block_job_by_id(db_path: Path, job_id: int, reason: str = "user_deleted") -> int:
     conn = get_connection(db_path)
-    row = conn.execute("SELECT url, application_url FROM jobs WHERE rowid = ?", (int(job_id),)).fetchone()
-    if not row:
-        return 0
     conn.execute("BEGIN IMMEDIATE")
     try:
+        row = conn.execute("SELECT url, application_url,apply_status FROM jobs WHERE rowid = ?", (int(job_id),)).fetchone()
+        if not row or row["apply_status"] in {"in_progress", "running", "submitting"}:
+            conn.rollback()
+            return 0
         add_blocked_url(str(row[0] or ""), reason, conn=conn)
         add_blocked_url(str(row[1] or ""), reason, conn=conn)
         cur = conn.execute(
@@ -2155,6 +2275,9 @@ class _Handler(BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length", "0") or "0")
         except Exception:
             n = 0
+        if n > 24 * 1024 * 1024:
+            self.close_connection = True
+            raise ValueError("Request exceeds 24 MB; upload large CVs one file at a time")
         raw = self.rfile.read(n) if n > 0 else b""
         if not raw:
             return {}
@@ -2178,6 +2301,17 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _active_app_dir(self, user: dict[str, Any] | None) -> Path:
         return _workspace_for_user(user)
+
+    def _browser_app_dir(self, user: dict[str, Any] | None) -> Path:
+        """An owned live session already has a workspace; do not migrate it per input."""
+        try:
+            self.connection.setsockopt(socket.IPPROTO_TCP,socket.TCP_NODELAY,1)
+        except (AttributeError,OSError):
+            pass
+        if not _MULTI_USER_MODE or not user:
+            return APP_DIR
+        from applypilot.multiuser import user_workspace
+        return user_workspace(str(user.get('username') or ''))
 
     def _origin_allowed(self) -> bool:
         """Best-effort same-origin check for POST requests."""
@@ -2253,20 +2387,9 @@ class _Handler(BaseHTTPRequestHandler):
             if _MULTI_USER_MODE and not user:
                 self._send(200, _login_page_html().encode("utf-8"), "text/html; charset=utf-8")
                 return
-            app_dir = self._active_app_dir(user)
-            db_path = app_dir / "applypilot.db"
-            # Serve a cached HTML file. Regeneration is triggered by DB writes.
-            html_path = _ensure_dashboard(app_dir=app_dir, db_path=db_path)
-            with open(html_path, "rb") as f:
-                body = f.read()
-            if _MULTI_USER_MODE and user:
-                try:
-                    text = body.decode("utf-8", errors="replace")
-                    text = _inject_multi_user_ui(text, user)
-                    body = text.encode("utf-8")
-                except Exception:
-                    pass
-            self._send(200, body, "text/html; charset=utf-8")
+            embedded = (parse_qs(parsed.query or "").get("embedded") or [""])[0]
+            destination = {"pipeline": "/workspace#pipeline", "setup": "/workspace#settings"}.get(embedded, "/workspace")
+            self._send(302, b"", "text/plain; charset=utf-8", headers={"Location": destination})
             return
 
         user = self._current_user()
@@ -2274,9 +2397,59 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(401, {"ok": False, "error": "unauthorized"})
             return
 
+        qs=parse_qs(parsed.query or '')
+        if path in {'/api/center/browser/stream','/api/center/browser/screenshot'} or (path=='/api/center/browser' and qs.get('session_id')):
+            from applypilot.command_api import get as browser_get
+            browser_get(self,path,parsed.query,self._browser_app_dir(user),None)
+            return
         app_dir = self._active_app_dir(user)
         db_path = app_dir / "applypilot.db"
         runner = _runner_for_user(user)
+
+        if path == "/workspace" and _MULTI_USER_MODE and not user:
+            self._send(200, _login_page_html().encode("utf-8"), "text/html; charset=utf-8")
+            return
+        if path.startswith("/api/") and not path.startswith("/api/center"):
+            try:
+                from applypilot.country_context import resolve, require_preparation
+                require_preparation(resolve(app_dir, country_code=parse_qs(parsed.query or "", keep_blank_values=True).get("country_code", [None])[0]).country_code)
+            except ValueError as exc:
+                self._send_json(400, {"ok": False, "error": str(exc)})
+                return
+        if path == "/api/center/stream":
+            from applypilot.database import workspace_connection
+
+            conn = workspace_connection(db_path)
+            qs = parse_qs(parsed.query or "")
+            try:
+                since = max(0, int(self.headers.get("Last-Event-ID") or (qs.get("since") or ["0"])[0]))
+            except ValueError:
+                self._send_json(400, {"ok": False, "error": "Invalid event cursor"})
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            try:
+                for _ in range(20):
+                    if _MULTI_USER_MODE and not self._current_user():
+                        break
+                    rows = conn.execute("SELECT * FROM cc_events WHERE id>? ORDER BY id LIMIT 100", (since,)).fetchall()
+                    for row in rows:
+                        since = row["id"]
+                        self.wfile.write(f"id: {since}\ndata: {json.dumps(dict(row))}\n\n".encode())
+                    self.wfile.write(b": heartbeat\n\n")
+                    self.wfile.flush()
+                    time.sleep(1)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            self.close_connection = True
+            return
+        from applypilot.command_api import get as center_get
+
+        if center_get(self, path, parsed.query or "", app_dir, runner=runner):
+            return
 
         if path == "/api/setup/status":
             try:
@@ -2346,11 +2519,13 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             try:
                 conn = get_connection(db_path)
-                row = conn.execute("SELECT full_description FROM jobs WHERE rowid = ?", (int(job_id),)).fetchone()
+                row = conn.execute("SELECT * FROM jobs WHERE rowid = ?", (int(job_id),)).fetchone()
                 if not row:
                     self._send_json(404, {"ok": False, "error": "not_found"})
                     return
-                text = str(row[0] or "")
+                from applypilot.country_context import check_job
+                check_job(dict(row), app_dir)
+                text = str(row["full_description"] or "")
                 # Keep payload bounded.
                 if len(text) > 60000:
                     text = text[:60000]
@@ -2488,7 +2663,11 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = (self.path or "").split("?", 1)[0]
-        data = self._read_json()
+        try:
+            data = self._read_json()
+        except ValueError as exc:
+            self._send_json(413, {"ok": False, "error": str(exc)})
+            return
 
         if _MULTI_USER_MODE and path.startswith("/api/") and not self._origin_allowed():
             self._send_json(403, {"ok": False, "error": "invalid_origin"})
@@ -2666,9 +2845,28 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(403, {"ok": False, "error": "csrf_failed"})
                 return
 
+        if path=='/api/center/browser/command':
+            from applypilot.command_api import post as browser_post
+            browser_post(self,path,data,self._browser_app_dir(user),None)
+            return
         app_dir = self._active_app_dir(user)
         db_path = app_dir / "applypilot.db"
         runner = _runner_for_user(user)
+
+        from applypilot.command_api import post as center_post
+
+        if not path.startswith("/api/center/"):
+            try:
+                from applypilot.country_context import validate_request_jobs, require_preparation, resolve
+                from applypilot.database import init_db
+                require_preparation(resolve(app_dir, country_code=data.get("country_code")).country_code)
+                validate_request_jobs(init_db(db_path), app_dir, path, data)
+            except (ValueError, TypeError) as exc:
+                self._send_json(400, {"ok": False, "error": str(exc)})
+                return
+
+        if center_post(self, path, data, app_dir, runner):
+            return
 
         if path == "/api/setup/profile":
             try:
@@ -2892,6 +3090,7 @@ class _Handler(BaseHTTPRequestHandler):
                         temperature=0.0,
                         required_keys=("statement",),
                         task_name="statement word-limit tightening",
+                        routing_task="statement",
                         repair_attempts=1,
                     )
                     statement2 = str(obj.get("statement") or "").strip()
@@ -3228,20 +3427,27 @@ def serve_dashboard(host: str = "127.0.0.1", port: int = 8765, *, multi_user: bo
     """Start the dashboard server (blocking). Returns the URL."""
     global _MULTI_USER_MODE
     _MULTI_USER_MODE = bool(multi_user)
+    from applypilot import background
+
+    background.enabled = True
 
     if _MULTI_USER_MODE:
         init_auth_db()
 
     # Ensure we can replay console output after restart.
     _PIPELINE._hydrate_from_history()
-    # Force-regenerate HTML at startup so UI changes are picked up.
     if not _MULTI_USER_MODE:
-        _ensure_dashboard(force=True, app_dir=APP_DIR, db_path=APP_DIR / "applypilot.db")
+        background.start(_PIPELINE)
+    else:
+        for user in list_users():
+            if user.get("is_active", True):
+                _runner_for_user(user)
     httpd = ThreadingHTTPServer((host, int(port)), _Handler)
     url = f"http://{host}:{int(port)}/"
     try:
         httpd.serve_forever()
     finally:
+        background.stop()
         try:
             httpd.server_close()
         except Exception:

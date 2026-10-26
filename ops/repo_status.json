@@ -1,23 +1,77 @@
 {
   "repo": "ApplyPilot",
-  "updated_at": "2026-02-26T00:00:00Z",
+  "updated_at": "2026-10-26",
   "current_state": {
     "dashboard": {
       "generator": "src/applypilot/view.py",
       "server": "src/applypilot/dashboard_server.py",
-      "notes": "Dashboard is self-contained HTML with embedded CSS/JS; live actions via dashboard-serve."
+      "notes": "Native workspace is served at /workspace. Lifecycle close/delete returns to Jobs; UK/NZ lists provide select-all-shown and bulk deletion with per-record cleanup, progress and partial-result reporting. NZ has role/location search and optional advanced imports. Country ownership, factual-document checks and final assisted-browser approval are retained.",
+      "command_center": "src/applypilot/command_center.py",
+      "ai_routing": "src/applypilot/ai_routing.py",
+      "command_api": "src/applypilot/command_api.py",
+      "workspace_assets": "src/applypilot/web",
+      "guide": "docs/COMMAND_CENTER.md"
     },
     "pipeline": {
-      "stages": ["discover", "enrich", "score", "tailor", "cover", "pdf"],
-      "notes": "Stages are run via `applypilot run` and can be driven from dashboard server."
+      "stages": ["discover", "enrich", "score", "tailor", "statement", "cover", "pdf"],
+      "notes": "Native discovery uses live draft-aware scope preview and exact-plan review. Default caps: 50 matching new jobs, 10 results per board/portal search, new-run-only enrichment/scoring; Workday/direct providers opt in. Shared cross-source budget and reserved run memberships prevent backlog processing. Campaign snapshot identity remains canonical; legacy CLI path is retained."
     },
     "tests": {
       "framework": "pytest",
       "notes": "Smoke tests live under tests/."
     }
   },
-  "active_implementation_id": "20260226-dashboard-panels-scroll",
+  "active_implementation_id": "20261026-github-sync",
   "history": [
+    {"implementation_id":"20261026-github-sync","title":"Publish all reviewed local project work from main to origin/main","status":"in_progress","updated_at":"2026-10-26"},
+    {"implementation_id":"20261026-discovery-scope","title":"Deployed bounded reviewed discovery and new-job-only processing; 902 tests and synthetic CLI execution passed","status":"completed_deployed","updated_at":"2026-10-26"},
+    {"implementation_id":"20261026-pipeline-snapshot-fix","title":"Deployed empty-campaign snapshot handoff fix; 869 tests and real Docker CLI startup passed","status":"completed_deployed","updated_at":"2026-10-26"},
+    {"implementation_id":"20261026-bulk-job-deletion","title":"Deployed return-to-Jobs lifecycle actions and select-all/bulk deletion; 852 tests and live cancellation checks passed","status":"completed_deployed","updated_at":"2026-10-26"},
+    {"implementation_id":"20261019-nz-search-first","title":"Deployed simple NZ role/location search, optional employer setup and bounded import status; browser verified","status":"completed_deployed","updated_at":"2026-10-19"},
+    {"implementation_id":"20261019-pipeline-performance","title":"Deployed faster Pipeline/workspace reads: about 18x faster Pipeline API, light polling, 820 tests verified","status":"completed_deployed","updated_at":"2026-10-19"},
+    {"implementation_id":"20261018-nz-live-integration","title":"Integrated and deployed NZ in current Docker app; released live application workflows; 805 tests and deployed UI verified","status":"completed_deployed","updated_at":"2026-10-18"},
+    {"implementation_id":"20261010-video-production","title":"Delivered a narrated four-minute 1080p native-workspace commercial walkthrough","status":"completed","updated_at":"2026-10-10"},
+    {"implementation_id":"20261010-workspace-video-preparation","title":"Installed brag-slim, retired served classic rendering and prepared the 1080p walkthrough","status":"completed","updated_at":"2026-10-10"},
+    {"implementation_id":"20261009-global-search-visual-insights","title":"Global location routing and explanatory interactive Insights visualizations","status":"completed","updated_at":"2026-10-09"},
+    {"implementation_id":"20261009-direct-source-recovery","title":"Reliable direct-source validation, saving and extraction preview recovery","status":"completed","updated_at":"2026-10-09"},
+    {"implementation_id":"20261009-browser-interaction-latency","title":"Measured low-latency mouse navigation and live browser feedback","status":"completed","updated_at":"2026-10-09"},
+    {"implementation_id":"20261009-opportunity-insights-browser","title":"Exportable opportunity activity and question-aware responsive assisted browser","status":"completed","updated_at":"2026-10-09"},
+    {"implementation_id":"20261008-submission-reconciliation","title":"Evidence-backed submission reconciliation and truthful dashboard counts","status":"completed","updated_at":"2026-10-09"},
+    {"implementation_id":"20261008-profile-browser-speed","title":"Complete application profile and responsive streamed browser controls","status":"completed","updated_at":"2026-10-08"},
+    {"implementation_id":"20261008-browser-recovery","title":"Recoverable browser errors and Kallidus cookie/Apply handoff","status":"completed","updated_at":"2026-10-08"},
+    {"implementation_id":"20261007-job-lifecycle","title":"Reasoned closure, generated-file deletion and compact history","status":"completed","updated_at":"2026-10-07"},
+    {"implementation_id":"20261007-packet-pdf-readiness","title":"Targeted packet PDF recovery and accurate assisted-apply readiness","status":"completed","updated_at":"2026-10-07"},
+    {"implementation_id":"20261007-decisions-observer","title":"Observation-only Decisions pilot, synthetic live benchmark and workspace reports","status":"completed","updated_at":"2026-10-07"},
+    {"implementation_id":"20261007-assisted-browser","title":"Visible semi-assisted application browser and OpenAI API assessment","status":"completed","updated_at":"2026-10-07"},
+    {"implementation_id":"20261007-workspace-startup","title":"Dependency-safe direct-refresh workspace startup","status":"completed","updated_at":"2026-10-07"},
+    {"implementation_id":"20261007-ai-settings-polish","title":"Polished AI preferences and private connection dialogs","status":"completed","updated_at":"2026-10-07"},
+    {"implementation_id":"20261005-assistant-response-recovery","title":"Interactive assistant recovery, credential origins and agent API comparison","status":"completed","updated_at":"2026-10-06"},
+    {"implementation_id":"20261005-discovery-provider-recovery","title":"JobSpy dependencies and provider-payment recovery","status":"completed","updated_at":"2026-10-05"},
+    {"implementation_id":"20261005-nhs-evidence-guidance","title":"NHS evidence planning for both writing Studios and collapsible workspace navigation","status":"completed","updated_at":"2026-10-05"},
+    {"implementation_id":"20261004-pipeline-upgrade","title":"Reliable native Pipeline workspace and configurable discovery","status":"completed","updated_at":"2026-10-04"},
+    {"implementation_id": "20261004-pipeline-audit", "title": "Pipeline reliability and configurable discovery audit", "status": "completed", "updated_at": "2026-10-04"},
+    {"implementation_id": "20261002-writing-reasoning-headroom", "title": "Bounded reasoning headroom for document writing", "status": "completed", "updated_at": "2026-10-02"},
+    {"implementation_id": "20261002-inbox-identity-stability", "title": "Stable email identities and inbox pagination/polling", "status": "completed", "updated_at": "2026-10-02"},
+    {"implementation_id": "20261002-smart-evidence-inbox", "title": "Filtered evidence inbox and GPT-6 Luna email analysis", "status": "completed", "updated_at": "2026-10-02"},
+    {"implementation_id": "20261002-task-ai-routing", "title": "Task-specific AI provider/model routing", "status": "completed", "updated_at": "2026-10-02"},
+    {
+      "implementation_id": "20261002-openai-luna-support",
+      "title": "GPT-6 and GPT-5.6 Luna client compatibility",
+      "status": "completed",
+      "updated_at": "2026-10-02"
+    },
+    {
+      "implementation_id": "20261002-cv-studio-preview-fix",
+      "title": "CV Studio selector and preview reliability",
+      "status": "completed",
+      "updated_at": "2026-10-02"
+    },
+    {
+      "implementation_id": "20261002-application-command-center",
+      "title": "Application command center and reliable CV Studio",
+      "status": "core_release_completed",
+      "updated_at": "2026-10-02"
+    },
     {
       "implementation_id": "20260226-dashboard-panels-scroll",
       "title": "Dashboard: collapsible + scrollable panels",

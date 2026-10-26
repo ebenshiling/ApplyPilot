@@ -1,0 +1,14 @@
+{
+  "change_id":"20261004-pipeline-upgrade",
+  "scope":["pipeline","dashboard","discovery","scoring","persistence"],
+  "failure_modes":[
+    {"mode":"Bulk imports overwrite sources or one invalid file aborts the batch","cause":"Unvalidated file conversion and name collisions","effect":"Lost CV content","severity":8,"occurrence":4,"detection":"Mixed-format/error/collision fixtures","mitigation":"Per-file outcomes, bounded parsing, collision-safe new variants, source revision history and explicit default selection"},
+    {"mode":"Edited writing draft is treated as approved or sent to another workspace","cause":"Shared filenames or implicit publication","effect":"Wrong application document","severity":9,"occurrence":3,"detection":"Draft/publish and workspace-isolation tests","mitigation":"Workspace-scoped versioned drafts, validation before explicit publication and preserved prior approved documents"},
+    {"mode":"Profile or portfolio UI drops unedited fields","cause":"Replacement payloads or incomplete structured editors","effect":"Missing professional evidence","severity":8,"occurrence":3,"detection":"Merge/CRUD/evidence regression tests","mitigation":"Partial merges, structured project editors and visible source-input revisions"},
+    {"mode":"Scope expands to archived or unselected jobs","cause":"Separate worker/count filters","effect":"Unwanted generation or application","severity":9,"occurrence":5,"detection":"Shared-scope regression fixtures","mitigation":"Central eligibility plus validated explicit job scope; submission remains separate"},
+    {"mode":"Run hangs or drops late work","cause":"No-progress loops or skipped dependencies","effect":"Incomplete artifacts and waste","severity":8,"occurrence":5,"detection":"Delayed-producer/no-progress streaming tests","mitigation":"Active upstream graph, bounded backoff, terminal stalled/cancelled states"},
+    {"mode":"Wrong or stale resume used","cause":"Lost routing or cache invalidation","effect":"Incorrect fit assessment/documents","severity":8,"occurrence":4,"detection":"Config round-trip and content-fingerprint tests","mitigation":"Lossless edits, route provenance, content hashes, explicit ambiguity override, preserved document history"},
+    {"mode":"Custom source leaks between workspaces or reaches local infrastructure","cause":"Global mutable catalog or unrestricted URL","effect":"Isolation failure","severity":9,"occurrence":3,"detection":"Workspace isolation and URL validation tests","mitigation":"Workspace-owned registry and public HTTP(S) source validation"},
+    {"mode":"Provider outage consumes unlimited budget or masks failure","cause":"Unbounded retries or discarded results","effect":"Cost and misleading success","severity":8,"occurrence":4,"detection":"Mocked outages and budget tests","mitigation":"Retryable score states, capped attempts, explicit second-opinion budget, measured usage and structured outcomes"}
+  ]
+}

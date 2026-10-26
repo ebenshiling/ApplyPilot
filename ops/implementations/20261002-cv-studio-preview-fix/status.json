@@ -1,0 +1,19 @@
+{
+  "implementation_id": "20261002-cv-studio-preview-fix",
+  "status": "completed",
+  "owner": "ai-agent",
+  "created_at": "2026-10-02",
+  "phases": [
+    {"name": "diagnosis", "status": "completed", "notes": "busy() writes textContent on select elements; options/value disappear before callbacks read the selection."},
+    {"name": "implementation", "status": "completed", "notes": "Loading helpers preserve select options/value; captured variant selection saves to the correct source; preview job/version survive tabs; explicit empty/loading/error states; legacy in-workspace CVs adopted once as untracked snapshots."},
+    {"name": "verification", "status": "completed", "notes": "Regression reproduced zero dropdown options before the fix. Browser checks now cover real job/version/variant selection, correct save target, preview errors/recovery, empty state, and selection persistence. API checks cover repeat legacy adoption and missing/outside-root files."}
+  ],
+  "verification": {
+    "commands": ["APPLYPILOT_RUN_PLAYWRIGHT=1 python scripts/agent_verify.py", "node --check src/applypilot/web/workspace.js", "ruff check changed command-center modules/tests --select F", "git diff --check -- intended files"],
+    "result": "passed",
+    "tests": "238 passed with Playwright enabled",
+    "ai_evaluations": "7 regression checks and 13 formal evaluation cases passed"
+  },
+  "pre_state": "ops/implementations/20261002-cv-studio-preview-fix/pre_state.json",
+  "post_state": "ops/implementations/20261002-cv-studio-preview-fix/post_state.json"
+}

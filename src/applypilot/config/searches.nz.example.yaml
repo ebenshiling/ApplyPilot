@@ -1,0 +1,61 @@
+# An opt-in campaign preset, not an assertion of provider access or candidate skills.
+id: nz-job-search
+name: New Zealand job discovery
+country_code: NZ
+country: New Zealand
+geography_enabled: true
+location_filter_mode: selected
+locations:
+  - {location: 'Auckland, New Zealand', city: Auckland, country: New Zealand, kind: city, remote: false}
+  - {location: 'Wellington, New Zealand', city: Wellington, country: New Zealand, kind: city, remote: false}
+  - {location: 'Christchurch, New Zealand', city: Christchurch, country: New Zealand, kind: city, remote: false}
+optional_locations: [Hamilton, Tauranga, Dunedin]
+career_categories:
+  software: [Software Engineering, Python and Django Development, React and TypeScript Development]
+  data_bi: [Data Analytics, Business Intelligence, Data Engineering]
+  support: [Application Support, Technical IT Support]
+queries:
+  - {query: Software Developer, tier: 1}
+  - {query: Python Developer, tier: 1}
+  - {query: Django Developer, tier: 1}
+  - {query: Full Stack Developer, tier: 1}
+  - {query: React Developer, tier: 1}
+  - {query: TypeScript Developer, tier: 2}
+  - {query: Application Developer, tier: 2}
+  - {query: Junior Software Engineer, tier: 2}
+  - {query: Backend Developer, tier: 2}
+  - {query: Data Analyst, tier: 1}
+  - {query: Business Intelligence Analyst, tier: 1}
+  - {query: Reporting Analyst, tier: 1}
+  - {query: Insights Analyst, tier: 2}
+  - {query: Junior Data Engineer, tier: 2}
+  - {query: Analytics Engineer, tier: 2}
+  - {query: Data Quality Analyst, tier: 2}
+  - {query: IT Support Analyst, tier: 1}
+  - {query: IT Technician, tier: 2}
+  - {query: Application Support Engineer, tier: 1}
+  - {query: Technical Support Engineer, tier: 1}
+  - {query: Systems Support Analyst, tier: 2}
+  - {query: Service Desk Analyst, tier: 1}
+boards: []
+sites: []
+smart_sites: []
+workday_employers: []
+smart_sources_disabled: true
+defaults: {country_indeed: new zealand, results_per_site: 50, hours_old: 168}
+board_search_budget: 12
+smart_target_budget: 12
+workday_target_budget: 6
+workday_max_tier: 2
+workday_location_filter: true
+exclude_titles: []
+skip_titles: []
+board_overrides: {}
+location_accept: []
+location_reject_non_remote: []
+location: {}
+resume_routing:
+  variants: {}
+  families: []
+  context_routing: {enabled: false}
+  blended_routes: {enabled: false}

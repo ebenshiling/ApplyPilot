@@ -10,15 +10,16 @@ import os
 import re
 import time
 from pathlib import Path
-from datetime import datetime, timezone
 
 from applypilot import naming
 from applypilot.config import COVER_LETTER_DIR, RESUME_PATH, load_profile
 from applypilot.role_routing import route_resume_for_job
-from applypilot.database import get_connection, get_jobs_by_stage
+from applypilot.database import get_connection
 from applypilot.llm import get_client
+from applypilot.ai_routing import routed_task
+from applypilot.country_context import preparation_task
 from applypilot.scoring.validator import (
-    BANNED_WORDS,
+    BANNED_WORDS as BANNED_WORDS,
     sanitize_text,
     validate_cover_letter,
 )
@@ -34,7 +35,7 @@ _ROLE_LETTER_PACKS: dict[str, dict[str, object]] = {
     "it_support": {
         "keywords": ("it support", "service desk", "helpdesk", "desktop support", "microsoft 365", "entra id"),
         "opening": "Open by stating direct alignment with first-line and second-line IT support, then mention higher education/commercial support context.",
-        "body_focus": "Use University of Derby and current SIKE support work to prove user support, onboarding, Microsoft 365, Entra ID, MFA, device, and service desk capability.",
+        "body_focus": "Use only the candidate's supplied support evidence. Do not invent employers, tools, achievements or public-sector experience.",
         "skills_focus": "Microsoft 365, Entra ID, Windows, macOS, MFA, DNS, VPN, service desk, ticket handling, incident escalation.",
         "motivation": "Close on reliable IT support, user service, and continued technical growth.",
     },
@@ -48,7 +49,7 @@ _ROLE_LETTER_PACKS: dict[str, dict[str, object]] = {
             "sql",
         ),
         "opening": "Open by stating direct alignment with application support, production systems, and incident resolution.",
-        "body_focus": "Use SIKE production application support first, then support experience from University of Derby or NHIA to reinforce troubleshooting, monitoring, SQL, APIs, and continuity.",
+        "body_focus": "Select evidenced application-support examples from the supplied candidate sources; retain their real employers and scope.",
         "skills_focus": "incident management, log analysis, SQL, PostgreSQL, APIs, monitoring, issue resolution, service continuity.",
         "motivation": "Close on stable service delivery, application reliability, and supporting business-critical platforms.",
     },
@@ -62,14 +63,14 @@ _ROLE_LETTER_PACKS: dict[str, dict[str, object]] = {
             "saas",
         ),
         "opening": "Open by stating alignment with systems analysis, technical support, and troubleshooting business-critical platforms.",
-        "body_focus": "Use SIKE systems/application investigations first, then University of Derby or NHIA examples to show incident investigation, workflow analysis, API/integration awareness, and stakeholder support.",
+        "body_focus": "Use only supplied systems/application investigation examples with their real attribution. Missing API or stakeholder experience remains unknown.",
         "skills_focus": "systems troubleshooting, SQL, APIs, integration support, root cause analysis, workflows, stakeholder communication.",
         "motivation": "Close on improving systems, supporting operational outcomes, and contributing to technical problem-solving.",
     },
     "public_it_support": {
         "keywords": ("nhs", "trust", "university", "council", "public sector", "service desk", "it support"),
         "opening": "Open by stating direct alignment with IT support in structured public-facing environments.",
-        "body_focus": "Use University of Derby support experience first, then current SIKE or NHIA examples to show support for large user groups, onboarding, Microsoft 365, and service continuity.",
+        "body_focus": "Use the candidate's actual evidenced support history. Public-sector employer names in the JD do not establish prior public-sector experience.",
         "skills_focus": "Microsoft 365, Entra ID, user support, onboarding, ticket handling, service desk, incident escalation.",
         "motivation": "Close on reliable user support, public service delivery, and contributing to a structured support team.",
     },
@@ -84,14 +85,14 @@ _ROLE_LETTER_PACKS: dict[str, dict[str, object]] = {
             "production support",
         ),
         "opening": "Open by stating direct alignment with application support in public-facing or service-critical environments.",
-        "body_focus": "Use SIKE production support first, then University of Derby or NHIA examples to show incident handling, access support, and continuity in structured organisations.",
+        "body_focus": "Select candidate-supplied production/access-support examples only; preserve actual employer/project attribution.",
         "skills_focus": "incident management, application troubleshooting, SQL, monitoring, user access, Microsoft 365, service continuity.",
         "motivation": "Close on supporting reliable public-facing services and helping teams maintain stable operational systems.",
     },
     "commercial_technical_support": {
         "keywords": ("saas", "product", "platform", "customer", "commercial", "technical support engineer", "api"),
         "opening": "Open by stating direct alignment with technical support for customer-facing or platform-based systems.",
-        "body_focus": "Use SIKE platform and investigation work first, then reinforce with broader support experience that shows troubleshooting, incident response, and operational reliability.",
+        "body_focus": "Select actual candidate platform/investigation evidence; do not infer incident response or SaaS experience from the target role.",
         "skills_focus": "technical troubleshooting, APIs, integration support, SQL, SaaS-style platforms, incident triage, root cause analysis.",
         "motivation": "Close on helping commercial teams deliver reliable technical support and stronger customer outcomes.",
     },
@@ -106,7 +107,7 @@ _ROLE_LETTER_PACKS: dict[str, dict[str, object]] = {
             "reporting",
         ),
         "opening": "Open by stating direct fit for reporting analyst work, naming reporting, KPI analysis, and turning operational or financial data into decisions. Avoid generic wording like 'aligns closely with this opportunity'.",
-        "body_focus": "Use the strongest reporting and dashboard evidence from SIKE first, then add one earlier analytics/reporting example from Derby, NHIA, or ECG.",
+        "body_focus": "Use the strongest supplied reporting/dashboard evidence with its original employer or project attribution. Do not add a fixed example employer.",
         "skills_focus": "Power BI, Excel, SQL, reporting, KPI tracking, data validation, dashboard development, stakeholder reporting.",
         "motivation": "Close on one concrete employer detail from the JD, such as financial reporting ownership, KPI visibility, or performance analysis. Avoid generic praise like 'forward-thinking team' or 'supportive team'.",
     },
@@ -145,13 +146,10 @@ _COVER_BANNED_SOFT_PHRASES: tuple[str, ...] = (
 _COVER_REWRITE_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\bI have experience with\b", "My experience includes"),
     (r"\bI have experience in\b", "My work includes"),
-    (r"\bI believe\b", "I know"),
     (r"\bI am particularly interested in this opportunity at\b", "I am drawn to"),
     (r"\bI am interested in this opportunity at\b", "I am drawn to"),
     (r"\bI am interested in joining\b", "I want to support"),
     (r"\bI am interested in\b", "I value"),
-    (r"\bI am keen to contribute to\b", "I can contribute to"),
-    (r"\bI am keen to contribute my skills to\b", "I can bring this experience to"),
 )
 
 _BROKEN_I_AM_PREFIXES: tuple[str, ...] = (
@@ -455,144 +453,12 @@ def _sanitize_cover_letter_text(text: str) -> str:
 
 
 def _polish_reporting_closer(letter: str, job: dict, plan: dict[str, object] | None = None) -> str:
-    role_pack_name = str((plan or {}).get("role_pack", {}).get("name") or "")
-    if role_pack_name not in {"data_reporting", "public_reporting"}:
-        return letter
-
-    text = str(letter or "").strip()
-    if not text:
-        return text
-
-    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
-    if len(paragraphs) < 2:
-        return text
-
-    name = ""
-    if paragraphs[-1] and len(paragraphs[-1].splitlines()) == 1 and len(paragraphs[-1].split()) >= 2:
-        name = paragraphs[-1].strip()
-    signoff_idx = len(paragraphs) - 1 if paragraphs and paragraphs[-1].strip().lower() == "best," else None
-    if signoff_idx is None and len(paragraphs) >= 2 and paragraphs[-1].count("\n") == 1:
-        first, second = [x.strip() for x in paragraphs[-1].split("\n", 1)]
-        if first.lower() == "best,":
-            name = second
-            signoff_idx = len(paragraphs) - 1
-    body_end = signoff_idx if signoff_idx is not None else len(paragraphs)
-    if body_end <= 1:
-        return text
-
-    closing = paragraphs[body_end - 1]
-    company_name = str((plan or {}).get("company_name") or _extract_company_name(job))
-    responsibilities = [str(x).strip() for x in ((plan or {}).get("responsibilities") or []) if str(x).strip()]
-    job_signals = _extract_job_signals(job)
-    anchor_source = responsibilities + job_signals
-    anchor = next((x for x in anchor_source if x), "")
-
-    if role_pack_name == "data_reporting":
-        sentence_1 = f"I am drawn to {company_name} because this role centres on turning operational and financial data into clear reporting that helps teams track performance and act quickly."
-        sentence_2 = "I can bring accurate KPI reporting, variance analysis, and dashboard delivery that gives senior stakeholders reliable visibility."
-    else:
-        sentence_1 = f"I want to support {company_name} because the role sits within Healthcare Analytics and contributes directly to timely, evidence-based decision-making."
-        sentence_2 = "I can bring reliable reporting, ad-hoc analysis, and dashboard development that support accurate outputs across the Analysis and Reporting function."
-
-    anchor_low = anchor.lower()
-    if role_pack_name == "public_reporting" and "epr" in anchor_low:
-        sentence_1 = f"I want to support {company_name} because the role contributes to Healthcare Analytics and the wider EPR programme through timely, evidence-based reporting."
-    elif role_pack_name == "data_reporting" and "timescales" in anchor_low:
-        sentence_2 = "I can bring accurate KPI reporting, variance analysis, and dashboard delivery that help reporting deadlines and quality standards stay on track."
-
-    paragraphs[body_end - 1] = sentence_1 + " " + sentence_2
-    rebuilt = "\n\n".join(paragraphs[:body_end])
-    if signoff_idx is not None:
-        rebuilt += "\n\nBest,"
-    if name:
-        rebuilt += f"\n{name}"
-    return rebuilt.strip()
+    # Role/JD keywords cannot establish new candidate capability claims.
+    return str(letter or "").strip()
 
 
 def _polish_support_closer(letter: str, job: dict, plan: dict[str, object] | None = None) -> str:
-    role_pack_name = str((plan or {}).get("role_pack", {}).get("name") or "")
-    if role_pack_name not in {
-        "it_support",
-        "application_support",
-        "technical_systems",
-        "public_it_support",
-        "public_application_support",
-        "commercial_technical_support",
-    }:
-        return letter
-
-    text = str(letter or "").strip()
-    if not text:
-        return text
-
-    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
-    if len(paragraphs) < 2:
-        return text
-
-    name = ""
-    if paragraphs[-1] and len(paragraphs[-1].splitlines()) == 1 and len(paragraphs[-1].split()) >= 2:
-        name = paragraphs[-1].strip()
-    signoff_idx = len(paragraphs) - 1 if paragraphs and paragraphs[-1].strip().lower() == "best," else None
-    if signoff_idx is None and len(paragraphs) >= 2 and paragraphs[-1].count("\n") == 1:
-        first, second = [x.strip() for x in paragraphs[-1].split("\n", 1)]
-        if first.lower() == "best,":
-            name = second
-            signoff_idx = len(paragraphs) - 1
-    body_end = signoff_idx if signoff_idx is not None else len(paragraphs)
-    if body_end <= 1:
-        return text
-
-    company_name = str((plan or {}).get("company_name") or _extract_company_name(job))
-    responsibilities = [str(x).strip() for x in ((plan or {}).get("responsibilities") or []) if str(x).strip()]
-    job_signals = _extract_job_signals(job)
-    anchor = " ".join(responsibilities + job_signals).lower()
-
-    close_map = {
-        "it_support": (
-            f"I am drawn to {company_name} because the role focuses on dependable user support, onboarding, and resolving day-to-day technical issues quickly.",
-            "I can bring calm ticket handling, clear communication, and practical Microsoft 365 support that keeps users productive.",
-        ),
-        "application_support": (
-            f"I am drawn to {company_name} because the role focuses on stable application support, incident resolution, and keeping critical services running.",
-            "I can bring careful troubleshooting, SQL-based investigation, and dependable follow-through that helps services stay available.",
-        ),
-        "technical_systems": (
-            f"I am drawn to {company_name} because the role combines systems analysis with technical troubleshooting for business-critical platforms.",
-            "I can bring structured investigation, stakeholder communication, and practical problem-solving that improves system reliability.",
-        ),
-        "public_it_support": (
-            f"I want to support {company_name} because the role contributes directly to reliable user support in a structured public-facing environment.",
-            "I can bring responsive ticket handling, onboarding support, and clear communication that helps staff stay productive.",
-        ),
-        "public_application_support": (
-            f"I want to support {company_name} because the role helps maintain reliable public-facing services and stable operational systems.",
-            "I can bring disciplined incident handling, access support, and troubleshooting that keep essential services running smoothly.",
-        ),
-        "commercial_technical_support": (
-            f"I am drawn to {company_name} because the role supports customer-facing systems where fast investigation and reliable technical support matter.",
-            "I can bring structured troubleshooting, API-aware investigation, and clear communication that improve customer and platform outcomes.",
-        ),
-    }
-    sentence_1, sentence_2 = close_map[role_pack_name]
-
-    if "microsoft 365" in anchor and role_pack_name in {"it_support", "public_it_support"}:
-        sentence_2 = "I can bring responsive Microsoft 365 support, clear ticket handling, and practical user guidance that keeps staff productive."
-    elif "incident" in anchor and role_pack_name in {
-        "application_support",
-        "public_application_support",
-        "commercial_technical_support",
-    }:
-        sentence_2 = "I can bring disciplined incident handling, structured troubleshooting, and dependable follow-through that keep services stable."
-    elif "api" in anchor and role_pack_name in {"technical_systems", "commercial_technical_support"}:
-        sentence_2 = "I can bring structured troubleshooting, API-aware investigation, and clear communication that resolve issues efficiently."
-
-    paragraphs[body_end - 1] = sentence_1 + " " + sentence_2
-    rebuilt = "\n\n".join(paragraphs[:body_end])
-    if signoff_idx is not None:
-        rebuilt += "\n\nBest,"
-    if name:
-        rebuilt += f"\n{name}"
-    return rebuilt.strip()
+    return str(letter or "").strip()
 
 
 def _extract_resume_paragraph_evidence(resume_text: str, *, max_items: int = 12) -> list[str]:
@@ -942,7 +808,9 @@ Best,
 # ── Core Generation ──────────────────────────────────────────────────────
 
 
-def generate_cover_letter(resume_text: str, job: dict, profile: dict, max_retries: int = 3) -> str:
+@routed_task("cover")
+@preparation_task
+def generate_cover_letter(resume_text: str, job: dict, profile: dict, max_retries: int = 3, *, options: dict | None = None) -> str:
     """Generate a cover letter with fresh context on each retry + auto-sanitize.
 
     Same design as tailor_resume: fresh conversation per attempt, issues noted
@@ -959,7 +827,7 @@ def generate_cover_letter(resume_text: str, job: dict, profile: dict, max_retrie
     """
     job_text = (
         f"TITLE: {job['title']}\n"
-        f"COMPANY: {job['site']}\n"
+        f"COMPANY: {job.get('company') or job['site']}\n"
         f"LOCATION: {job.get('location', 'N/A')}\n\n"
         f"DESCRIPTION:\n{(job.get('full_description') or '')[:6000]}"
     )
@@ -978,6 +846,15 @@ def generate_cover_letter(resume_text: str, job: dict, profile: dict, max_retrie
         recent_openings=recent_openings,
         plan=plan,
     )
+    from applypilot.document_policy import prompt as country_document_policy
+    cl_prompt_base += country_document_policy(job,"cover")
+    minimum = int((options or {}).get("min_words", 180))
+    maximum = int((options or {}).get("max_words", 250))
+    if options:
+        cl_prompt_base = cl_prompt_base.replace("180-250", f"{minimum}-{maximum}")
+        cl_prompt_base += "\nWRITING PREFERENCES (style only; never invent facts):\n" + str(options.get("instructions") or "")[:1500]
+    from applypilot.nhs_writing import prompt_context
+    cl_prompt_base += prompt_context(job.get("_nhs_plan") or {})
     name = _sign_off_name(profile)
 
     # Keyword bank derived from JD + (tailored) resume.
@@ -1013,8 +890,9 @@ def generate_cover_letter(resume_text: str, job: dict, profile: dict, max_retrie
         messages[-1]["content"] += (
             "\n\nHard requirements:\n"
             "- Exactly 5 short paragraphs\n"
-            "- 180-250 words\n"
-            "- Include at least 2 concrete numbers from the resume\n"
+            f"- {minimum}-{maximum} words\n"
+            + ("- Use only exact numbers supplied in the resume; invent none\n" if options else "- Include at least 2 concrete numbers from the resume\n")
+            +
             "- Mention at least 1 specific detail from the target job description\n"
             "- End with a closing line (e.g. Best,) then your name on its own line\n"
             "- Output plain text only\n"
@@ -1023,7 +901,7 @@ def generate_cover_letter(resume_text: str, job: dict, profile: dict, max_retrie
 
         # Gemini can spend output budget on hidden thinking and truncate visible text.
         thinking_budget = 0 if (client.provider or "").lower() == "gemini" else None
-        letter = client.chat(messages, max_tokens=1200, temperature=0.7, thinking_budget=thinking_budget)
+        letter = client.chat(messages, max_tokens=max(1200, maximum * 3), temperature=0.7, thinking_budget=thinking_budget)
         letter = sanitize_text(letter)  # auto-fix em dashes, smart quotes
         letter = _sanitize_cover_letter_text(letter)
         letter = _polish_reporting_closer(letter, job, plan)
@@ -1048,7 +926,11 @@ def generate_cover_letter(resume_text: str, job: dict, profile: dict, max_retrie
             )
             continue
 
-        validation = validate_cover_letter(letter, profile=profile, resume_text=resume_text)
+        validation = validate_cover_letter(letter, profile=profile, resume_text=resume_text, min_words=minimum, max_words=maximum) if options else validate_cover_letter(letter, profile=profile, resume_text=resume_text)
+        cap = (job.get("_nhs_plan") or {}).get("max_characters", 0)
+        if cap and len(letter) > cap:
+            validation["errors"].append(f"Application field limit exceeded: maximum {cap} characters")
+            validation["passed"] = False
         if validation["passed"]:
             return letter
 
@@ -1102,7 +984,8 @@ def run_cover_letters(min_score: int = 7, limit: int = 0) -> dict:
         {"generated": int, "errors": int, "elapsed": float}
     """
     profile = load_profile()
-    default_resume_text = RESUME_PATH.read_text(encoding="utf-8")
+    from applypilot.country_context import current
+    default_resume_text = "" if current() and current().country_code=="NZ" else RESUME_PATH.read_text(encoding="utf-8")
     conn = get_connection()
     selected_only = _selected_only_enabled()
 
@@ -1129,7 +1012,8 @@ def run_cover_letters(min_score: int = 7, limit: int = 0) -> dict:
     if limit > 0:
         query += " LIMIT ?"
         params.append(limit)
-    jobs = conn.execute(query, tuple(params)).fetchall()
+    from applypilot.eligibility import candidates
+    jobs = candidates(conn, "cover", min_score, limit=limit)
 
     if not jobs:
         if selected_only:
@@ -1183,9 +1067,19 @@ def run_cover_letters(min_score: int = 7, limit: int = 0) -> dict:
             if not validation["passed"]:
                 raise RuntimeError("Cover letter failed validation: " + "; ".join(validation["errors"][:3]))
 
-            cl_path = COVER_LETTER_DIR / f"{prefix}_CL.txt"
+            import uuid
+            cl_path = COVER_LETTER_DIR / f"{prefix}_v{uuid.uuid4().hex[:12]}_CL.txt"
             cl_path.write_text(letter, encoding="utf-8")
             report_path = cl_path.with_name(cl_path.stem + "_REPORT.json")
+            report_path.write_text(json.dumps(diagnostics, indent=2), encoding="utf-8")
+
+            from applypilot.canonical import finalize,FactReviewRequired
+            from applypilot.country_context import workspace_for_connection
+            try:
+                diagnostics["factual_finalisation"] = finalize(conn,workspace_for_connection(conn),cl_path,job,kind="cover")
+                final_status, final_error = "approved", ""
+            except FactReviewRequired as exc:
+                final_status, final_error = "needs_fact_review", str(exc)
             report_path.write_text(json.dumps(diagnostics, indent=2), encoding="utf-8")
 
             # Generate PDF (best-effort)
@@ -1193,13 +1087,18 @@ def run_cover_letters(min_score: int = 7, limit: int = 0) -> dict:
             try:
                 from applypilot.scoring.pdf import build_pdf_metadata, convert_to_pdf
 
+                if final_status != "approved":
+                    raise FactReviewRequired(final_error)
                 pdf_path = str(
                     convert_to_pdf(
                         cl_path,
                         pdf_metadata=build_pdf_metadata("cover_letter", personal=profile.get("personal", {}), job=job),
                     )
                 )
+                from applypilot.canonical import bind_pdf
+                bind_pdf(conn,workspace_for_connection(conn),cl_path,pdf_path,job,kind="cover")
             except Exception:
+                pdf_path = None
                 log.debug("PDF generation failed for %s", cl_path, exc_info=True)
 
             result = {
@@ -1209,8 +1108,8 @@ def run_cover_letters(min_score: int = 7, limit: int = 0) -> dict:
                 "report_path": str(report_path),
                 "title": job["title"],
                 "site": job["site"],
-                "status": "approved",
-                "failure_detail": "",
+                "status": final_status,
+                "failure_detail": final_error,
                 "diagnostics": diagnostics,
             }
             results.append(result)
@@ -1240,38 +1139,10 @@ def run_cover_letters(min_score: int = 7, limit: int = 0) -> dict:
             error_count += 1
             results.append(result)
             log.error("%d/%d [ERROR] %s -- %s", completed, len(jobs), job["title"][:40], e)
+        from applypilot.pipeline_store import persist_document
+        persist_document(conn, "cover", result)
 
-    # Persist to DB: increment attempt counter for ALL, save path only for successes
-    now = datetime.now(timezone.utc).isoformat()
-    saved = 0
-    for r in results:
-        if r.get("path"):
-            conn.execute(
-                "UPDATE jobs SET cover_letter_path=?, cover_letter_at=?, cover_letter_status=?, cover_letter_failure_detail=?, cover_letter_report_path=?, cover_letter_diagnostics=?, "
-                "cover_attempts=COALESCE(cover_attempts,0)+1 WHERE url=?",
-                (
-                    r["path"],
-                    now,
-                    r.get("status") or "approved",
-                    None,
-                    r.get("report_path"),
-                    json.dumps(r.get("diagnostics") or {}, ensure_ascii=False),
-                    r["url"],
-                ),
-            )
-            saved += 1
-        else:
-            conn.execute(
-                "UPDATE jobs SET cover_attempts=COALESCE(cover_attempts,0)+1, cover_letter_path=NULL, cover_letter_status=?, cover_letter_failure_detail=?, cover_letter_report_path=?, cover_letter_diagnostics=? WHERE url=?",
-                (
-                    r.get("status") or "failed",
-                    str(r.get("failure_detail") or r.get("error") or "")[:1200] or None,
-                    r.get("report_path"),
-                    json.dumps(r.get("diagnostics") or {}, ensure_ascii=False),
-                    r["url"],
-                ),
-            )
-    conn.commit()
+    saved = sum(bool(r.get("path")) for r in results)
 
     elapsed = time.time() - t0
     log.info("Cover letters done in %.1fs: %d generated, %d errors", elapsed, saved, error_count)

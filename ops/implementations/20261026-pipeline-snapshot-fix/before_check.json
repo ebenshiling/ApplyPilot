@@ -1,0 +1,15 @@
+{
+  "recent_snapshot_checks": [
+    {
+      "matches": {
+        "workspace": true,
+        "country": true,
+        "campaign": false,
+        "configuration": true
+      },
+      "captured_campaign_is_empty_string": true,
+      "worker_campaign_is_none": true,
+      "restore_passed": false
+    }
+  ]
+}

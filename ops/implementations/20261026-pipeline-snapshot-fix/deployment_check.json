@@ -1,0 +1,16 @@
+{
+  "real_dashboard_runner_and_cli_subprocess": true,
+  "stages": [
+    "discover",
+    "enrich",
+    "score"
+  ],
+  "mode": "isolated_no_network_dry_run",
+  "worker_exit_code": 0,
+  "empty_campaign_canonicalized_to_none": true,
+  "snapshot_error": false,
+  "provider_network_attempts": 0,
+  "fixture_jobs_created": 0,
+  "live_search_settings_modified": false,
+  "live_jobs_modified": false
+}

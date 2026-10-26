@@ -1,0 +1,13 @@
+{
+  "real_cli_discover_enrich_score_completed": true,
+  "source_and_model_adapters": "synthetic only",
+  "worker_exit_code": 0,
+  "maximum_new_jobs": 2,
+  "new_jobs_saved": 2,
+  "new_jobs_scored": 2,
+  "model_fixture_calls": 2,
+  "existing_backlog_unscored": 100,
+  "unwanted_new_titles_stored": 0,
+  "real_provider_network_attempts": 0,
+  "live_user_jobs_modified": false
+}

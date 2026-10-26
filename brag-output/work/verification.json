@@ -1,0 +1,16 @@
+{
+  "file": "brag-output/brag.mp4",
+  "bytes": 48226269,
+  "sha256": "3a458005c314421fe131582ab2f1edd8dce0da8a1eb73e1ac52d31d57658adb2",
+  "browser_playback": {
+    "width": 1920,
+    "height": 1080,
+    "duration": 240,
+    "error": null
+  },
+  "scene_count": 16,
+  "sampled_frames": 32,
+  "full_decode": "passed during render",
+  "video": "H.264, 1920x1080, 30 fps",
+  "audio": "AAC stereo, narration and original synthesized music"
+}

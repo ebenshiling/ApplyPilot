@@ -120,8 +120,11 @@ def test_dashboard_playwright_clickthrough(monkeypatch: pytest.MonkeyPatch, tmp_
             page.fill("#reg-email", "adminui@example.com")
             page.fill("#reg-pass", "password123")
             page.click('button:has-text("Create account")')
-            page.wait_for_selector("#setup-panel", timeout=15000)
-            page.wait_for_selector("#ap-logout-btn", timeout=10000)
+            page.locator('.rail [data-view="settings"]').click()
+            page.wait_for_selector("#native-profile-save")
+            page.wait_for_selector("#logout")
+            assert page.url.startswith(base + "/workspace")
+            assert page.locator('a[href^="/dashboard"], #classic-frame').count() == 0
 
             bob = _opener_with_cookies()
             st, reg_bob = _http_json(
@@ -180,69 +183,60 @@ def test_dashboard_playwright_clickthrough(monkeypatch: pytest.MonkeyPatch, tmp_
             conn.commit()
 
             page.reload(wait_until="domcontentloaded")
-            page.wait_for_selector('select:has(option[value="data analyst"])', timeout=10000)
-            page.select_option('select:has(option[value="data analyst"])', "data analyst")
-            page.once("dialog", lambda d: d.accept())
-            page.click('button:has-text("Delete role")')
-            page.wait_for_timeout(1200)
-            assert page.locator(".job-card[data-id]").count() == 1
+            page.locator('.rail [data-view="jobs"]').click()
+            page.wait_for_selector('#job-search')
+            page.fill('#job-search', 'Data Analyst')
+            pw.expect(page.locator('.cards > .card')).to_have_count(2)
+            page.locator('.card button[data-action="pick"]').first.click()
+            pw.expect(page.locator('.card button[data-action="unpick"]')).to_have_count(1)
 
+            page.locator('.rail [data-view="settings"]').click()
             summary = page.locator("summary", has_text="User Admin").first
-            promote_btn = page.locator(f'button[data-id="{bob_id}"][data-act="promote"]:visible').first
-            if promote_btn.count() == 0:
-                summary.click()
-                page.wait_for_timeout(200)
-
-            promote_btn = page.locator(f'button[data-id="{bob_id}"][data-act="promote"]:visible').first
+            summary.click()
+            promote_btn = page.locator(f'button[data-admin-id="{bob_id}"][data-admin-action="promote"]').first
             promote_btn.click()
-            page.wait_for_selector(f'button[data-id="{bob_id}"][data-act="demote"]:visible', timeout=10000)
-            page.locator(f'button[data-id="{bob_id}"][data-act="demote"]:visible').first.click()
-            page.wait_for_selector(f'button[data-id="{bob_id}"][data-act="promote"]:visible', timeout=10000)
-            page.locator(f'button[data-id="{bob_id}"][data-act="disable"]:visible').first.click()
-            page.wait_for_selector(f'button[data-id="{bob_id}"][data-act="enable"]:visible', timeout=10000)
-            page.locator(f'button[data-id="{bob_id}"][data-act="enable"]:visible').first.click()
-            page.wait_for_selector(f'button[data-id="{bob_id}"][data-act="disable"]:visible', timeout=10000)
+            page.locator(f'button[data-admin-id="{bob_id}"][data-admin-action="demote"]').click()
+            page.locator(f'button[data-admin-id="{bob_id}"][data-admin-action="promote"]').wait_for()
+            page.locator(f'button[data-admin-id="{bob_id}"][data-admin-action="disable"]').click()
+            page.locator(f'button[data-admin-id="{bob_id}"][data-admin-action="enable"]').click()
+            page.locator(f'button[data-admin-id="{bob_id}"][data-admin-action="disable"]').wait_for()
+            assert page.locator('#admin-audit article').count() >= 4
 
-            page.fill("#search-smart-sites", "NHS Jobs, Reed")
-            page.click('button:has-text("Generate YAML")')
-            page.wait_for_selector("#setup-searches", timeout=10000)
-            yaml_text = page.input_value("#setup-searches")
-            assert "smart_sites:" in yaml_text
-            assert "NHS Jobs" in yaml_text
-            assert "Reed" in yaml_text
+            page.fill('[data-profile-group="personal"][data-profile-key="city"]', 'Manchester')
+            with page.expect_response(lambda r: r.url.endswith('/api/setup/profile') and r.request.method == 'POST') as saved:
+                page.click('#native-profile-save')
+            assert saved.value.ok
+            pw.expect(page.locator('#save-state')).to_have_text('Saved')
 
-            page.click('button:has-text("Save searches.yaml")')
-            page.wait_for_timeout(600)
+            page.locator('.rail [data-view="pipeline"]').click()
+            page.get_by_text('Searches & resume rules', exact=True).click()
+            page.click('#native-add-query')
+            page.locator('[data-query-row] input').last.fill('Data Analyst')
+            with page.expect_response(lambda r: r.url.endswith('/pipeline/config/save') and r.request.method == 'POST') as saved_config:
+                page.click('#native-config-save')
+            assert saved_config.value.ok, saved_config.value.text()
+            pw.expect(page.locator('#native-config-save')).to_be_enabled()
+            page.get_by_text('Sources & extraction previews', exact=True).click()
+            page.locator('[data-source-choice]').evaluate_all('(inputs) => inputs.forEach(input => input.checked = ["NHS Jobs", "Reed"].includes(input.dataset.sourceChoice))')
+            with page.expect_response(lambda r: r.url.endswith('/pipeline/config/save') and r.request.method == 'POST') as saved_sources:
+                page.click('#native-source-selection')
+            assert saved_sources.value.ok, saved_sources.value.text()
             setup_read = context.request.get(f"{base}/api/setup/read")
             assert setup_read.ok
             smart_sites = (setup_read.json().get("searches") or {}).get("smart_sites") or []
             assert "NHS Jobs" in smart_sites
             assert "Reed" in smart_sites
 
-            page.check("#pipe-dry-run")
-            page.check("#pipe-skip-jobspy")
-            page.check("#pipe-skip-workday")
-            page.check("#pipe-skip-smarte")
-            page.fill("#pipe-search-query", "Data Analyst")
-            page.fill("#pipe-jobspy-sites", "indeed")
-            page.fill("#pipe-smarte-sites", "NHS Jobs, Reed")
-            page.click("button[onclick*=\"pipelineRun(['discover'])\"]")
+            page.fill('#native-queries', 'Data Analyst')
+            with page.expect_response(lambda r: r.url.endswith('/pipeline/preview') and r.request.method == 'POST') as preview:
+                page.click('#native-preview')
+            assert preview.value.ok
+            assert json.loads(preview.value.request.post_data)['search_queries'] == ['Data Analyst']
+            assert page.locator('#native-preview-content').inner_text()
 
-            latest = None
-            for _ in range(100):
-                hist = context.request.get(f"{base}/api/pipeline/history?limit=1")
-                if hist.ok:
-                    runs = hist.json().get("runs") or []
-                    if runs:
-                        latest = runs[0]
-                        break
-                time.sleep(0.1)
-
-            assert latest is not None
-            assert latest.get("search_query") == "Data Analyst"
-            got_smart = latest.get("smarte_sites") or []
-            assert "NHS Jobs" in got_smart
-            assert "Reed" in got_smart
+            page.click('#logout')
+            page.wait_for_selector('#login-ident')
+            assert context.request.get(f'{base}/api/center').status == 401
 
             browser.close()
     finally:

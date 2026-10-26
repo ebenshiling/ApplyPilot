@@ -9,12 +9,14 @@ import json
 import logging
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from applypilot.config import RESUME_PATH
 from applypilot.role_routing import route_resume_for_job
-from applypilot.database import get_connection, get_jobs_by_stage
+from applypilot.database import get_connection
 from applypilot.llm import chat_json
+from applypilot.ai_routing import routed_task
+from applypilot.country_context import preparation_task
 
 log = logging.getLogger(__name__)
 
@@ -149,6 +151,8 @@ def _parse_score_response(response: str) -> dict:
     return {"score": score, "keywords": keywords, "reasoning": reasoning, "confidence": confidence}
 
 
+@routed_task("score")
+@preparation_task
 def score_job(resume_text: str, job: dict) -> dict:
     """Score a single job against the resume.
 
@@ -159,6 +163,12 @@ def score_job(resume_text: str, job: dict) -> dict:
     Returns:
         {"score": int, "keywords": str, "reasoning": str}
     """
+    if job.get("country_code")=="NZ":
+        from applypilot.preparation import technical_job
+        if not job.get("_technical_resume_frozen"):
+            raise ValueError("NZ scoring requires a verified, captured technical source")
+        technical_key=job["_technical_resume_key"]
+        job=technical_job(job)
     job_text = (
         f"TITLE: {job['title']}\n"
         f"COMPANY: {job.get('company') or job.get('site') or 'N/A'}\n"
@@ -167,16 +177,44 @@ def score_job(resume_text: str, job: dict) -> dict:
     )
 
     messages = [
-        {"role": "system", "content": SCORE_PROMPT},
+        {"role": "system", "content": SCORE_PROMPT+("\nNZ technical-only assessment: use verified technical skills, genuine projects/qualifications and role seniority. Location, salary, employer accreditation, sponsorship/recruitment wording and candidate immigration rights must not change this technical score." if job.get("_technical_only") else "")},
         {"role": "user", "content": f"RESUME:\n{resume_text}\n\n---\n\nJOB POSTING:\n{job_text}"},
     ]
+    from applypilot.ai_routing import route_info
+    request_info=route_info("score")
 
     try:
         response = chat_json(messages, max_tokens=768, temperature=0.0)
-        return _parse_score_response(response)
+        result = _parse_score_response(response)
+        from applypilot.ai_routing import route_info
+        info = route_info("score")
+        try:
+            from applypilot.llm import get_client
+            info["model"] = get_client().last_model
+        except (ValueError, RuntimeError, AttributeError):
+            pass
+        output=result | {"provider": info.get("provider"), "model": info.get("model")}
+        from applypilot.operations import current as current_operation
+        operation=current_operation()
+        receipt=(operation or {}).get("receipts",{}).get("score")
+        if receipt:output.update(provider=receipt["provider"],model=receipt["model"])
+        if job.get("_technical_only"):
+            from applypilot.preparation import technical_fingerprint
+            output["input_fingerprint"]=technical_fingerprint(job,resume_text,technical_key,request_info)
+        return output
     except Exception as e:
         log.error("LLM error scoring job '%s': %s", job.get("title", "?"), e)
-        return {"score": 0, "keywords": "", "reasoning": f"LLM error: {e}", "confidence": 0.0}
+        from applypilot.llm import ProviderAccessError
+        return {"score": 0, "keywords": "", "reasoning": str(e) if isinstance(e, ProviderAccessError) else "Scoring request unavailable or returned invalid output",
+                "confidence": 0.0, "error_category": getattr(e, "category", None), "provider_blocked": isinstance(e, ProviderAccessError)}
+
+
+def _country_where(conn=None):
+    from applypilot.country_context import current
+    from applypilot.discovery_scope import processing_where
+    base="1=1" if conn is not None and "country_code" not in {r[1] for r in conn.execute("PRAGMA table_info(jobs)")} else "country_code='NZ'" if current() and current().country_code=="NZ" else "(country_code IS NULL OR country_code='GB')"
+    scope=processing_where()
+    return base+(' AND '+scope if scope else '')
 
 
 def _repair_zero_scores(conn) -> int:
@@ -184,7 +222,7 @@ def _repair_zero_scores(conn) -> int:
     rows = conn.execute(
         "SELECT url, score_reasoning FROM jobs "
         "WHERE fit_score = 0 AND score_reasoning IS NOT NULL "
-        "AND score_reasoning LIKE '%\"score\"%'"
+        "AND score_reasoning LIKE '%\"score\"%' AND "+_country_where(conn)
     ).fetchall()
 
     repaired = 0
@@ -213,10 +251,13 @@ def run_score_repair() -> dict:
     candidates = conn.execute(
         "SELECT COUNT(*) FROM jobs "
         "WHERE fit_score = 0 AND score_reasoning IS NOT NULL "
-        "AND score_reasoning LIKE '%\"score\"%'"
+        "AND score_reasoning LIKE '%\"score\"%' AND "+_country_where(conn)
     ).fetchone()[0]
 
     recovered = _repair_zero_scores(conn)
+    # Legacy provider failures used score=0; recover them as explicit retries.
+    conn.execute("UPDATE jobs SET fit_score=NULL,score_status='retryable',score_attempts=0,score_retry_at=NULL WHERE applied_at IS NULL AND fit_score=0 AND (score_reasoning LIKE '%LLM error:%' OR score_reasoning IS NULL) AND "+_country_where())
+    conn.commit()
     remaining_zero = conn.execute("SELECT COUNT(*) FROM jobs WHERE fit_score = 0").fetchone()[0]
 
     return {
@@ -236,17 +277,24 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     Returns:
         {"scored": int, "errors": int, "recovered": int, "elapsed": float, "distribution": list}
     """
-    base_resume_text = RESUME_PATH.read_text(encoding="utf-8")
+    from applypilot.country_context import current as current_country
+    nz=bool(current_country() and current_country().country_code=="NZ")
+    base_resume_text = "" if nz else RESUME_PATH.read_text(encoding="utf-8")
     conn = get_connection()
+    from applypilot.pipeline_workspace import invalidate_scores
+    invalidate_scores(conn, RESUME_PATH.parent)
     recovered = _repair_zero_scores(conn)
+    conn.execute("UPDATE jobs SET fit_score=NULL,score_status='retryable',score_attempts=0,score_retry_at=NULL WHERE applied_at IS NULL AND fit_score=0 AND (score_reasoning LIKE '%LLM error:%' OR score_reasoning IS NULL) AND "+_country_where())
+    conn.commit()
 
     if rescore:
-        query = "SELECT * FROM jobs WHERE full_description IS NOT NULL"
+        query = "SELECT * FROM jobs WHERE full_description IS NOT NULL AND "+_country_where()
         if limit > 0:
             query += f" LIMIT {limit}"
         jobs = conn.execute(query).fetchall()
     else:
-        jobs = get_jobs_by_stage(conn=conn, stage="pending_score", limit=limit)
+        from applypilot.eligibility import candidates
+        jobs = candidates(conn, "score", limit=limit)
 
     if not jobs:
         log.info("No unscored jobs with descriptions found.")
@@ -261,16 +309,34 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     t0 = time.time()
     completed = 0
     errors = 0
+    deferred = 0
     results: list[dict] = []
 
-    for job in jobs:
+    for job_index, job in enumerate(jobs):
+        routed = None
         # Deterministic multi-role support: choose the best base resume variant.
         try:
             routed = route_resume_for_job(job)
+            if routed.ambiguous:
+                conn.execute("UPDATE jobs SET score_status='needs_route',score_error=?,resume_route=? WHERE url=?",
+                             (routed.reason, json.dumps(routed.public()), job["url"]))
+                conn.commit()
+                errors += 1
+                continue
             resume_text = routed.text.strip() or base_resume_text
         except Exception:
-            resume_text = base_resume_text
+            conn.execute("UPDATE jobs SET score_status='needs_route',score_error='Resume route unavailable; review mapping' WHERE url=?", (job["url"],))
+            conn.commit()
+            errors += 1
+            continue
 
+        from applypilot.professional import enrich_evidence
+        from applypilot.setup_workspace import read_profile
+
+        profile_snapshot=read_profile(RESUME_PATH.parent)
+        if not nz:resume_text, _ = enrich_evidence(resume_text, profile_snapshot, job)
+        from applypilot.role_routing import score_fingerprint
+        input_hash=score_fingerprint(job,RESUME_PATH.parent,profile_snapshot=profile_snapshot,route_snapshot=routed,fresh=True)
         result = score_job(resume_text, job)
         result["url"] = job["url"]
         completed += 1
@@ -278,29 +344,45 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
         if result["score"] == 0:
             errors += 1
 
+        from applypilot.role_routing import score_fingerprint
+        now = datetime.now(timezone.utc)
+        good = result["score"] > 0
+        attempt = int(job.get("score_attempts") or 0) + 1
+        retry = (now + timedelta(seconds=900 if result.get("provider_blocked") else min(3600, 30 * 2 ** min(attempt - 1, 7)))).isoformat()
+        conn.execute("UPDATE jobs SET fit_score=?,score_confidence=?,score_reasoning=?,scored_at=?,score_status=?,score_error=?,score_retry_at=?,score_attempts=?,score_fingerprint=?,resume_route=? WHERE url=?",
+                     (result["score"] if good else None, float(result.get("confidence") or 0),
+                      f"{result['keywords']}\n{result['reasoning']}" if good else job.get("score_reasoning"),
+                      now.isoformat() if good else job.get("scored_at"), "completed" if good else "provider_blocked" if result.get("provider_blocked") else "retryable" if attempt < 5 else "failed",
+                      None if good else result["reasoning"], None if good else retry,
+                       0 if good else attempt, result.get("input_fingerprint",input_hash) if good else job.get("score_fingerprint"),
+                      json.dumps(routed.public()) if routed is not None else None, job["url"]))
+        conn.commit()
+
         results.append(result)
+        if good:
+            conn.execute("UPDATE jobs SET score_provider=?,score_model=? WHERE url=?", (result.get("provider"), result.get("model"), job["url"]))
+            conn.commit()
 
         log.info(
-            "[%d/%d] score=%d  %s",
+            "[%d/%d] fit=%s  %s",
             completed,
             len(jobs),
-            result["score"],
+            result["score"] if result["score"] else "unavailable",
             job.get("title", "?")[:60],
         )
-
-    # Write scores to DB
-    now = datetime.now(timezone.utc).isoformat()
-    for r in results:
-        conn.execute(
-            "UPDATE jobs SET fit_score = ?, score_confidence = ?, score_reasoning = ?, scored_at = ? WHERE url = ?",
-            (r["score"], float(r.get("confidence") or 0.0), f"{r['keywords']}\n{r['reasoning']}", now, r["url"]),
-        )
-    conn.commit()
+        if result.get("provider_blocked"):
+            remaining = jobs[job_index+1:]
+            for pending in remaining:
+                conn.execute("UPDATE jobs SET score_status='provider_blocked',score_error=?,score_retry_at=? WHERE url=?",
+                             (result["reasoning"], retry, pending["url"]))
+            conn.commit()
+            deferred = len(remaining)
+            log.warning("Scoring paused: provider account/configuration failure; %d jobs deferred without another request. %s", deferred, result["reasoning"])
+            break
 
     elapsed = time.time() - t0
-    log.info(
-        "Done: %d scored in %.1fs (%.1f jobs/sec)", len(results), elapsed, len(results) / elapsed if elapsed > 0 else 0
-    )
+    succeeded = sum(r["score"] > 0 for r in results)
+    log.info("Done: %d successfully scored, %d errors, %d deferred in %.1fs", succeeded, errors, deferred, elapsed)
 
     # Score distribution
     dist = conn.execute("""
@@ -311,7 +393,9 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     distribution = [(row[0], row[1]) for row in dist]
 
     return {
-        "scored": len(results),
+        "scored": succeeded,
+        "attempted": completed,
+        "deferred": deferred,
         "errors": errors,
         "recovered": recovered,
         "elapsed": elapsed,

@@ -1,0 +1,42 @@
+{
+  "implementation_id":"20261009-browser-interaction-latency",
+  "status":"completed",
+  "phase":"deployed",
+  "owner":"ai-agent",
+  "updated_at":"2026-10-09",
+  "scope":"Manual mouse navigation, form entry and visual feedback in the shared assisted browser",
+  "preflight":"No active production browser at diagnosis; preserve any later candidate work when deploying",
+  "diagnosis":"Native MJPEG image buffering delayed a static changed frame until a later frame/heartbeat; focus sweeps and per-input commits blocked the worker. Authenticated handlers also ran workspace/schema and pipeline setup on every browser request.",
+  "baseline":{"click_to_visible_ms":[1393.28,1432.03,1397.27,1393.51,1396.74,1438.4,1420.72,1473.82],"mean_ms":1418.22,"max_ms":1473.82,"scope":"Real UI clicks and visible pixel changes; ten iframes and simulated 200 ms focus reader","authenticated_lookup_mean_ms":233.12},
+  "targeted_verification":{"browser_profile_question_recovery":"48 passed in 487.81 seconds; all also passed in final full verification","interaction_tests":"9 passed in 116.14 seconds before final clean-shutdown adjustment; all passed in full verification","click_to_visible_ms":[179.37,149.29,168.07,165.83,179.31,165.18,165.01,165.52],"mean_ms":167.2,"max_ms":179.37,"mean_reduction_percent":88.21,"earlier_focused_mean_ms":162.16},
+  "verification": {
+    "command":"$env:APPLYPILOT_RUN_PLAYWRIGHT='1'; .\\.ci311\\Scripts\\python.exe scripts/agent_verify.py",
+    "result":"passed",
+    "pytest":"552 passed, 1 skipped in 1681.20 seconds",
+    "new_tests":9,
+    "ai_regression":"7/7 passed",
+    "ai_formal":"13/13 passed",
+    "static":"Compileall, focused Ruff, JavaScript syntax checks and scoped git diff --check passed",
+    "skip_note":"Existing Windows symlink-permission test skipped"
+  },
+  "features":["Schema/runner-free authenticated live-browser hot routes", "Immediate complete-JPEG decoding with one in-flight decode and latest-frame backpressure", "Native press/move/release/cancel, hover, drag, double-click and modifier input", "FIFO delivery separate from processed-action waits", "Event-driven focused-field metadata and foreground popup activation", "Up to 30 fps compositor updates without periodic synchronous capture on healthy static streams", "Off-thread grouped audit counts with per-batch timing and final flush", "Separate queue, dispatch and visible-frame feedback measurements"],
+  "deployment": {
+    "build":"docker compose build --quiet applypilot passed",
+    "recreation":"docker compose up -d --no-build --force-recreate applypilot passed",
+    "image":"sha256:3182c311bebb8b1840d4087bb9f3f45a0e0f7e891a2e8246d4e29db3685391ce",
+    "health":{"ok":true,"multi_user":true},
+    "active_work_before_recreation":0,
+    "authenticated_lookup_roundtrip_ms":[17.31,2.72,1.69,2.6,1.65,1.85,1.46,1.47],
+    "authenticated_lookup_mean_ms":3.84,
+    "baseline_authenticated_lookup_mean_ms":233.12,
+    "lookup_scope":"Same deliberately nonexistent-session lookup; authenticated 404 and unauthenticated 401 confirmed; no application action",
+    "assets":"New decoder, native mouse controls and canvas styles served successfully",
+    "temporary_verification_session":"Created in-process and revoked in finally; token not logged",
+    "linux_runtime":{"native_mouse":"passed","canceled_press_does_not_click":"passed","unapproved_final_click_guard":"passed","chromium_frames":"passed","target_fps":30,"scope":"Isolated in-memory synthetic page"},
+    "production_job28":{"apply_status":"applied","applied_at":"2026-10-09T10:22:20.844976+00:00","preserved_from_preflight":true,"note":"Candidate completed this application before deployment; this implementation performed no application action"}
+  },
+  "guide":"docs/BROWSER_INTERACTION_LATENCY.md",
+  "pre_state":"ops/implementations/20261009-browser-interaction-latency/pre_state.json",
+  "post_state":"ops/implementations/20261009-browser-interaction-latency/post_state.json",
+  "snapshot_note":"Prior user changes preserved; native WSL Git metadata captured; no commits created."
+}

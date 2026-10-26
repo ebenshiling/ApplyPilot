@@ -1,0 +1,9 @@
+{
+  "implementation_id":"20261016-nz-phase7",
+  "authorization":"Remaining approved phases; user explicitly chose fixture-only candidate development",
+  "baseline":"Verified Phases 2–6; no live target adapter activated",
+  "scope":"P7.1-P7.7 offline migration, interleaved country journey, factual/approval invariants, bounded usage, backup/rollback and explicit release-gate assessment",
+  "steps":["Rehearse additive migration twice against old synthetic schema and protected artifact/config hashes","Exercise complete NZ manual preparation/evidence/review/tracking and country rollback with three fixture sources","Verify submit authority is non-replayable across restart/import and real targets remain unsupported/manual","Run required full verification and local browser checks; record skips and source/adapter acceptance gaps","Review FMEA and publish a release decision that stays blocked without actual candidate/source/ATS/owner evidence"],
+  "external_release_dependencies":["Actual candidate masters and canonical evidence reconciliation (deferred by user)","Written/permitted source set and actual read-only live reliability evidence","Named live ATS permission and tested network/DOM semantics before any managed live activation","Product-owner release approval"],
+  "excluded":["Invented live-source acceptance","Real employer submissions","Production/staging database changes","Automatic feature enablement/deployment/push"]
+}

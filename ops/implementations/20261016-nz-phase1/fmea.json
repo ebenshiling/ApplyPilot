@@ -1,0 +1,17 @@
+{
+  "change_id": "20261016-nz-phase1",
+  "scope": ["country context", "persistence", "dashboard API", "UK sponsorship", "application submission"],
+  "verification_result": "Required agent_verify passed: 620 tests passed, 59 skipped; strict offline AI checks 7/7 and dataset 13/13",
+  "follow_ups": [
+    {"owner":"future authorised Phase 6","item":"Implement verified fresh actor/page/packet-bound approval and a mediated actuator before re-enabling ANY live application tooling","current_mitigation":"All known live executors and direct actuators remain nonconfigurably contained"},
+    {"owner":"future authorised Phases 2-5","item":"NZ discovery, accreditation, factual reconciliation, complete scoped policy consumption and analytics","current_mitigation":"NZ is default-off and only foundation preference operations are permitted even when enabled"}
+  ],
+  "failure_modes": [
+    {"mode":"NZ settings or tab changes affect UK running work","cause":"Global mutable context or shallow configuration inheritance","effect":"Wrong rights, CV or country processing","severity":9,"detection":"Immutable snapshot, task isolation and country mismatch tests","mitigation":"Context-local immutable snapshots; explicit persisted-job precedence; scoped preference revisions"},
+    {"mode":"Unknown/NZ vacancy receives UK sponsorship evidence","cause":"Unconditional UK annotator or legacy fallback","effect":"Misleading employer/sponsorship classification","severity":9,"detection":"UK/NZ/invalid/unassigned annotation tests with lookup sentinel","mitigation":"Guard annotation itself and enrichment caller; unresolved country yields no UK lookup"},
+    {"mode":"Unapproved external submission","cause":"Legacy CLI, scheduler, browser input, raw tools or direct helper bypass","effect":"Irreversible unintended application","severity":10,"detection":"Entry-point/direct-helper negative tests proving no browser/process/action starts","mitigation":"Nonconfigurable fail-closed containment of live application executors until later approval hardening"},
+    {"mode":"Historical data or preferences overwritten","cause":"Migration backfill or root profile/config writes","effect":"Loss of UK history or approved content","severity":9,"detection":"Idempotent old-schema migration and protected row/file hash tests","mitigation":"Additive nullable jurisdiction and separate country preference table; no bulk backfill or canonical-history edits"},
+    {"mode":"NZ flag enables incomplete production workflow","cause":"Flag mistaken for readiness","effect":"Unsupported country policies or unsafe preparation","severity":8,"detection":"Disabled/default and enabled-foundation-only tests","mitigation":"Flag only exposes foundation; NZ discovery/application-ready generation remains explicitly unavailable in Phase 1"},
+    {"mode":"Tests touch real workspace or services","cause":"Default home paths or inherited credentials","effect":"Production-like data changes or external side effects","severity":10,"detection":"Explicit isolated env and synthetic fixtures","mitigation":"Temporary workspace paths, cleared provider credentials and disabled live submission; no production startup"}
+  ]
+}

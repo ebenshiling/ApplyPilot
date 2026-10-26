@@ -1,0 +1,8 @@
+{
+  "implementation_id":"20261019-nz-search-first",
+  "goal":"Give NZ a clear Search → Review jobs → Prepare → Apply journey and remove the misleading disabled/busy discovery dead end.",
+  "steps":["Reproduce source readiness and disabled-button behavior in the deployed account","Add role/location job-board search links that work without employer, CV or source setup and clearly identify external results","Move manual vacancy entry and source administration into optional sections; retain existing country and factual services","Add bounded, non-restarting automatic-import status handling with clear idle/running/completed/partial/failed/interrupted states","Verify browser navigation, error/retry/double-click behavior, native import status, UK isolation and existing tests; rebuild and deploy"],
+  "scope":"Search links are ordinary external board search pages, not scraped/imported vacancy results. Existing direct/Workday imports retain source readiness and explicit campaign selection. No new board scraper or asserted access rights.",
+  "data_policy":"Search does not fetch boards, call AI, create employers or modify candidate data/configuration. Manual save and advanced campaign edits remain explicit user actions.",
+  "rollback":"Retain previous image and source artifact; preserve live data volumes."
+}

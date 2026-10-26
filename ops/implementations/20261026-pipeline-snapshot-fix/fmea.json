@@ -1,0 +1,10 @@
+{
+  "change_id":"20261026-pipeline-snapshot-fix",
+  "scope":["pipeline","worker_startup","country_snapshot"],
+  "failure_modes":[
+    {"mode":"Empty campaign still differs between parent and subprocess","cause":"UI empty string versus CLI None","effect":"Pipeline aborts before discovery","severity":8,"detection":"Actual runner-to-CLI subprocess regression","mitigation":"One canonical optional campaign identifier used in resolution, export and restore"},
+    {"mode":"Real operation mismatch accepted","cause":"Overly broad relaxation of snapshot validation","effect":"Wrong owner/country/configuration used by worker","severity":10,"detection":"Negative owner/country/named-campaign/configuration hash cases","mitigation":"Normalize only optional text identifiers; retain all snapshot comparisons and no fallback"},
+    {"mode":"Existing captured runs stop working","cause":"Changing snapshot format or requiring regeneration","effect":"Old retry/diagnostic artifacts rejected","severity":7,"detection":"Restore version-1 empty-string manifests","mitigation":"Keep version 1; normalize legacy absent identifiers when comparing"},
+    {"mode":"Verification launches live scraping or paid AI","cause":"Exercising the user's failing command directly","effect":"Unrequested network work or user-data changes","severity":8,"detection":"Socket-blocked isolated CLI dry run","mitigation":"Synthetic workspace/provider values, real bootstrap and handoff, dry-run flag and denied sockets"}
+  ]
+}

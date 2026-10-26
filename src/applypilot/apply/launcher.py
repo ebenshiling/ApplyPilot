@@ -78,6 +78,8 @@ if platform.system() != "Windows":
 
 def _make_mcp_config(cdp_port: int) -> dict:
     """Build MCP config dict for a specific CDP port."""
+    from applypilot.apply.safety import require_live_execution
+    require_live_execution()
     return {
         "mcpServers": {
             "playwright": {
@@ -155,6 +157,8 @@ def acquire_job(target_url: str | None = None, min_score: int = 7, worker_id: in
                     FROM jobs
                     WHERE (url = ? OR application_url = ? OR application_url LIKE ? OR url LIKE ?)
                       AND tailored_resume_path IS NOT NULL
+                      AND applied_at IS NULL
+                      AND COALESCE(apply_status,'') != 'submission_uncertain'
                       AND {target_status_clause}
                     LIMIT 1
                     """,
@@ -163,7 +167,9 @@ def acquire_job(target_url: str | None = None, min_score: int = 7, worker_id: in
             else:
                 blocked_sites, blocked_patterns = _load_blocked()
                 where_parts: list[str] = [
+                    "country_code='NZ'" if os.environ.get("APPLYPILOT_COUNTRY_CODE") == "NZ" else "(country_code IS NULL OR country_code='GB')",
                     "tailored_resume_path IS NOT NULL",
+                    "applied_at IS NULL",
                     (
                         f"(apply_status = 'selected' OR {stale_clause})"
                         if selected_only
@@ -189,7 +195,7 @@ def acquire_job(target_url: str | None = None, min_score: int = 7, worker_id: in
                            fit_score, location, full_description, cover_letter_path
                     FROM jobs
                     WHERE {where_sql}
-                    ORDER BY fit_score DESC, url
+                    ORDER BY COALESCE((SELECT priority FROM cc_job_meta WHERE job_url=jobs.url),0) DESC,fit_score DESC, url
                     LIMIT 1
                     """,
                     tuple(params),
@@ -198,6 +204,27 @@ def acquire_job(target_url: str | None = None, min_score: int = 7, worker_id: in
             if not row:
                 conn.rollback()
                 return None
+            from applypilot.country_context import check_job, workspace_for_connection
+            row = conn.execute("SELECT * FROM jobs WHERE url=?", (row["url"],)).fetchone()
+            check_job(dict(row), workspace_for_connection(conn), preparation=True)
+            previous = conn.execute("SELECT apply_status FROM jobs WHERE url=?", (row["url"],)).fetchone()
+            if previous and previous[0] == "in_progress" and os.environ.get("APPLYPILOT_RECONCILE_STALE") == "1":
+                conn.execute("UPDATE jobs SET apply_status='submission_uncertain',apply_error='Interrupted worker; reconcile employer confirmation before retrying',agent_id=NULL WHERE url=?", (row["url"],))
+                conn.commit()
+                if target_url:
+                    return None
+                continue
+
+            from applypilot.command_center import blocked, snapshot_document, preference_exclusions
+
+            company_row = conn.execute("SELECT company FROM jobs WHERE url=?", (row["url"],)).fetchone()
+            hidden = conn.execute("SELECT visibility FROM cc_job_meta WHERE job_url=?", (row["url"],)).fetchone()
+            if blocked(conn, row["url"], company_row[0] if company_row else None) or (hidden and hidden[0] != "active") or preference_exclusions(conn, dict(row)):
+                conn.execute("UPDATE jobs SET apply_status='skipped',apply_error='Blocked or archived by user' WHERE url=?", (row["url"],))
+                conn.commit()
+                if target_url:
+                    return None
+                continue
 
             if skip_titles:
                 title = str(row["title"] or "")
@@ -230,6 +257,9 @@ def acquire_job(target_url: str | None = None, min_score: int = 7, worker_id: in
                 return None
 
             now = datetime.now(timezone.utc).isoformat()
+            document_id = snapshot_document(conn, config.APP_DIR, dict(row))
+            conn.execute("INSERT OR IGNORE INTO cc_job_meta(job_url) VALUES(?)", (row["url"],))
+            conn.execute("UPDATE cc_job_meta SET document_id=? WHERE job_url=?", (document_id, row["url"]))
             conn.execute(
                 """
                 UPDATE jobs SET apply_status = 'in_progress',
@@ -237,7 +267,7 @@ def acquire_job(target_url: str | None = None, min_score: int = 7, worker_id: in
                                last_attempted_at = ?
                 WHERE url = ?
             """,
-                (f"worker-{worker_id}", now, row["url"]),
+                (f"worker-{worker_id}" + (":" + os.environ["APPLYPILOT_ATTEMPT_TOKEN"] if os.environ.get("APPLYPILOT_ATTEMPT_TOKEN") else ""), now, row["url"]),
             )
             conn.commit()
 
@@ -258,6 +288,11 @@ def mark_result(
     """Update a job's apply status in the database."""
     conn = get_connection()
     now = datetime.now(timezone.utc).isoformat()
+    if status == "failed":
+        from applypilot.command_center import classify_failure
+
+        if classify_failure(error or "")["category"] == "uncertain":
+            status = "submission_uncertain"
     if status == "applied":
         conn.execute(
             """
@@ -321,6 +356,8 @@ def gen_prompt(target_url: str, min_score: int = 7, model: str = "sonnet", worke
     Returns:
         Path to the generated prompt file, or None if no job found.
     """
+    from applypilot.apply.safety import require_live_execution
+    require_live_execution()
     job = acquire_job(target_url=target_url, min_score=min_score, worker_id=worker_id)
     if not job:
         return None
@@ -363,6 +400,15 @@ def mark_job(url: str, status: str, reason: str | None = None) -> int:
     now = datetime.now(timezone.utc).isoformat()
 
     raw = (url or "").strip()
+    from applypilot.country_context import check_job, workspace_for_connection
+    if raw.isdigit():
+        targets = conn.execute("SELECT * FROM jobs WHERE rowid=?", (int(raw),)).fetchall()
+    else:
+        base_check = raw.split("?")[0].split("#")[0].rstrip("/")
+        targets = conn.execute("SELECT * FROM jobs WHERE url=? OR application_url=? OR url LIKE ? OR application_url LIKE ?",
+                               (raw, raw, "%" + base_check + "%", "%" + base_check + "%")).fetchall() if base_check else []
+    for target in targets:
+        check_job(dict(target), workspace_for_connection(conn), preparation=True)
     # Allow marking by SQLite rowid (dashboard/CLI job ID)
     if raw.isdigit():
         job_id = int(raw)
@@ -509,9 +555,11 @@ def reset_failed() -> int:
     cursor = conn.execute("""
         UPDATE jobs SET apply_status = NULL, apply_error = NULL,
                        apply_attempts = 0, agent_id = NULL
-        WHERE apply_status = 'failed'
+        WHERE (apply_status = 'failed'
           OR (apply_status IS NOT NULL AND apply_status != 'applied'
-              AND apply_status != 'in_progress')
+              AND apply_status != 'in_progress'))
+          AND COALESCE(apply_status,'') != 'submission_uncertain'
+          AND (country_code IS NULL OR country_code='GB')
     """)
     conn.commit()
     return cursor.rowcount
@@ -530,6 +578,8 @@ def run_job(job: dict, port: int, worker_id: int = 0, model: str = "sonnet", dry
         'applied', 'expired', 'captcha', 'login_issue',
         'failed:reason', or 'skipped'.
     """
+    from applypilot.apply.safety import require_live_execution
+    require_live_execution()
     # Read tailored resume text
     resume_path = job.get("tailored_resume_path")
     txt_path = Path(resume_path).with_suffix(".txt") if resume_path else None
@@ -672,6 +722,15 @@ def run_job(job: dict, port: int, worker_id: int = 0, model: str = "sonnet", dry
                                 ws = get_state(worker_id)
                                 cur_actions = ws.actions if ws else 0
                                 update_state(worker_id, actions=cur_actions + 1, last_action=desc[:35])
+                                if not dry_run:
+                                    from applypilot.command_center import event
+
+                                    stage = {"browser_navigate": "opening_form", "browser_fill_form": "filling_details", "browser_type": "filling_details", "browser_file_upload": "uploading_resume"}.get(name, "browser_activity")
+                                    conn = get_connection()
+                                    # Tool names are evidence; submitted values/URLs can contain private data.
+                                    event(conn, job["url"], "progress", f"Claude browser tool: {name}", state=stage, source="claude-worker")
+                                    conn.execute("UPDATE jobs SET last_attempted_at=? WHERE url=? AND apply_status='in_progress'", (datetime.now(timezone.utc).isoformat(), job["url"]))
+                                    conn.commit()
                     elif msg_type == "result":
                         stats = {
                             "input_tokens": msg.get("usage", {}).get("input_tokens", 0),
@@ -819,6 +878,8 @@ def worker_loop(
     Returns:
         Tuple of (applied_count, failed_count).
     """
+    from applypilot.apply.safety import require_live_execution
+    require_live_execution()
     applied = 0
     failed = 0
     continuous = limit == 0
@@ -925,6 +986,8 @@ def main(
         poll_interval: Seconds between DB polls when queue is empty.
         workers: Number of parallel workers (default 1).
     """
+    from applypilot.apply.safety import require_live_execution
+    require_live_execution()
     global POLL_INTERVAL
     POLL_INTERVAL = poll_interval
     _stop_event.clear()

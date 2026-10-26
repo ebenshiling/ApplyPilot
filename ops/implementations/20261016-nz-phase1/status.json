@@ -1,0 +1,42 @@
+{
+  "implementation_id": "20261016-nz-phase1",
+  "status": "completed",
+  "phase": "verified_for_local_commit",
+  "branch": "feat/nz-phase1-country-foundation",
+  "baseline_commit": "18f8888",
+  "verification": [
+    {"command":"python scripts/agent_verify.py","result":"passed","python":"3.11.9 (existing .ci311 Windows environment)","pytest":{"passed":620,"skipped":59,"seconds":221.32},"strict_ai_regression":{"checks":7,"failed":0},"strict_ai_dataset":{"cases":13,"passed":13}},
+    {"scope":"tests/test_country_foundation.py and tests/test_submission_containment.py","result":"78 focused cases passed within the final full suite; local-only Playwright country UI case explicitly enabled","separate_final_invocation":false},
+    {"command":"node --check src/applypilot/web/workspace.js","result":"passed"}
+  ],
+  "verification_history": [
+    "Initial baseline pytest run timed out at 120 seconds; no passing baseline suite is claimed.",
+    "Initial focused implementation tests: 53 passed.",
+    "Early regression runs exposed two browser-start expectation changes plus an unintended hot-route schema initialization regression; the latter was fixed and expectation tests now assert containment while preserving packet/ownership checks.",
+    "Several broad runs timed out in HTTPX SSL context creation reading certificates through the UNC dependency path. Faulthandler identified the location. An existing LOCAL certifi bundle was selected using SSL_CERT_FILE; verification remained enabled and no dependency/application TLS setting changed.",
+    "First completed broad verification: 594 passed, 59 skipped, 1 failed (reconciliation test expected older error text). The test now verifies containment and unchanged uncertain state.",
+    "Intermediate required verification passed: 612 passed, 59 skipped, both strict AI gates passed.",
+    "New local UI test initially lacked an imported fixture and then used an unsupported option-element disabled assertion; fixture import and DOM-property assertion were corrected. Actual local country switching/preference isolation passed.",
+    "Final hardening covers failed snapshot persistence, private diagnostic values, direct actuator quarantine and explicit unknown-country sponsorship.",
+    "Pre-commit review additionally prevented a failed enrichment country read from reusing a prior UK job's row. Its synthetic two-job regression passes; final required verification passed as recorded above."
+  ],
+  "test_environment": {
+    "PYTHONPATH":"isolated worktree/src, overriding the original editable installation",
+    "APPLYPILOT_DIR":"dedicated temporary test workspace outside repository",
+    "APPLYPILOT_MULTI_ROOT":"dedicated temporary multi-user test workspace outside repository",
+    "provider_credentials":"cleared; no live provider/application validation",
+    "APPLYPILOT_RUN_PLAYWRIGHT":"0 (legacy employer-browser integration suites not executed)",
+    "APPLYPILOT_RUN_COUNTRY_UI":"1 (new local-only country foundation UI exercised)",
+    "SSL_CERT_FILE":"existing local Python313 certifi CA bundle; TLS verification not disabled"
+  },
+  "database_changes":["Nullable jobs.country_code with GB/NZ/NULL constraint", "Additive cc_country_profiles table; no historical backfill"],
+  "safety":"All known live application executors/actuators contained; complete universal mediated approval is NOT implemented or claimed",
+  "known_limitations":["NZ foundation settings only; no NZ discovery, documents, accreditation or applications", "Legacy NULL countries retain deterministic compatibility rather than inferred adoption", "Scoped preference values/policy identifiers are foundations, not complete replacement UK/NZ policy consumers", "Historical analytics partitioning and comprehensive factual finalisation remain later phases", "Original main working tree/deployed behaviour is unchanged; this is an undeployed feature branch", "Windows pre-state Git probe was unavailable and annotated; native WSL Git is used for final Git evidence"],
+  "handoff":"docs/NZ_PHASE1_HANDOFF.md",
+  "pre_state":"ops/implementations/20261016-nz-phase1/pre_state.json",
+  "post_state":"ops/implementations/20261016-nz-phase1/post_state.json",
+  "production_data_access": false,
+  "dependencies_installed": false,
+  "deployed": false,
+  "phase_2_started": false
+}

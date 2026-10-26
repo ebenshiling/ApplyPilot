@@ -197,6 +197,10 @@ def load_profile() -> dict:
 def load_search_config() -> dict:
     """Load search configuration from ~/.applypilot/searches.yaml."""
     import yaml
+    from applypilot.country_context import current
+    context = current()
+    if context and context.workspace == str(APP_DIR.resolve()):
+        return context.config
 
     # Optional override: allow per-run / per-session search config.
     override = (os.environ.get("APPLYPILOT_SEARCHES_PATH", "") or "").strip()
@@ -214,14 +218,14 @@ def load_search_config() -> dict:
     return yaml.safe_load(SEARCH_CONFIG_PATH.read_text(encoding="utf-8")) or {}
 
 
-def load_sites_config() -> dict:
+def load_sites_config(app_dir: Path | None = None, *, include_all=False) -> dict:
     """Load sites.yaml configuration (sites list, manual_ats, blocked, etc.)."""
     import yaml
 
     path = CONFIG_DIR / "sites.yaml"
-    if not path.exists():
-        return {}
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    from applypilot.source_registry import catalog
+    base = yaml.safe_load(path.read_text(encoding="utf-8")) or {} if path.exists() else {}
+    return catalog(app_dir or APP_DIR, base, include_all=include_all)
 
 
 def is_manual_ats(url: str | None) -> bool:
@@ -324,7 +328,7 @@ def get_tier() -> int:
     """
     load_env()
 
-    has_llm = any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL"))
+    has_llm = any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "LLM_URL"))
     if not has_llm:
         return 1
 
@@ -357,7 +361,7 @@ def check_tier(required: int, feature: str) -> None:
     _console = Console(stderr=True)
 
     missing: list[str] = []
-    if required >= 2 and not any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL")):
+    if required >= 2 and not any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "LLM_URL")):
         missing.append("LLM API key - run [bold]applypilot init[/bold] or set GEMINI_API_KEY")
     if required >= 3:
         if not shutil.which("claude"):

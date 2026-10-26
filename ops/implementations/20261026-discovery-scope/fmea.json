@@ -1,0 +1,12 @@
+{
+  "change_id":"20261026-discovery-scope",
+  "scope":["discovery","pipeline","configuration","dashboard"],
+  "failure_modes":[
+    {"mode":"Draft preview differs from executed configuration","cause":"Editor changes ignored until saved or separate merge logic","effect":"Unexpected collection scope","severity":9,"detection":"Draft/config/launch parity and stale preview-token tests","mitigation":"Shared effective run config and preview fingerprint; exact-plan review; capture the same normalized config"},
+    {"mode":"Total cap exceeded across sources or workers","cause":"Per-source limits only or concurrent inserts","effect":"Large unwanted job collection","severity":9,"detection":"Cross-provider and parallel storage tests","mitigation":"Shared context-local budget, serialized storage batches and count only real new inserts; stop further source work at cap"},
+    {"mode":"Unrelated Workday/board jobs stored","cause":"Provider keyword search not an exact title filter","effect":"Irrelevant backlog and paid scoring","severity":8,"detection":"Representative adviser/coordinator versus support/data title fixtures","mitigation":"Explicit matching-title filter before storage and Workday details; preview explains matching rules"},
+    {"mode":"Existing backlog scored implicitly","cause":"Workspace-wide pending queues","effect":"Unexpected model calls","severity":9,"detection":"Run membership queue and scoring-repair/invalidation tests","mitigation":"Default new-run membership using reserved cc_campaign_jobs namespace; explicit bounded matching-saved mode"},
+    {"mode":"Zero selections or zero budgets interpreted as all","cause":"Legacy defaults","effect":"Unexpected providers/locations/work","severity":8,"detection":"Empty source/role and positive-budget validation tests","mitigation":"Explicit bounded dashboard run policy; reject empty/unbounded scoped plans; retain old CLI path separately"},
+    {"mode":"Cancellation or deployment replays live work","cause":"Automatic retry or inherited active worker","effect":"Further unwanted requests","severity":9,"detection":"Idle preflight and stopped-process checks","mitigation":"No automatic restart; only user-confirmed plans launch, no live searches in verification"}
+  ]
+}

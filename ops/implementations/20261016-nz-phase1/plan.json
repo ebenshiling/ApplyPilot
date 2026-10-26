@@ -1,0 +1,17 @@
+{
+  "implementation_id": "20261016-nz-phase1",
+  "scope": "Approved Phase 1 only: country foundation and fail-closed submission containment",
+  "baseline_commit": "18f8888",
+  "isolation": "Separate feature worktree; user authorised a local checkpoint of the existing application baseline. Original main worktree is not edited.",
+  "steps": [
+    "Capture isolated pre-state and baseline tests without credentials or real user workspaces",
+    "Add strict immutable country context, additive country preferences and nullable job jurisdiction",
+    "Bind country context to API/CLI/run boundaries; keep NZ disabled by default and its unfinished preparation unavailable",
+    "Guard every UK sponsorship annotation entry point against NZ and unresolved country",
+    "Disable live application workers and direct submit helpers pending verified universal approval; retain document preparation and manual tracking",
+    "Add meaningful focused tests and run applicable existing regression and required verification checks",
+    "Record actual results, handoff/rollback limitations, review and commit Phase 1 independently"
+  ],
+  "excluded": ["NZ search campaigns/providers", "NZ accreditation service", "CV import or factual history rewrite", "complete country writing policies", "live external applications", "production/staging migrations", "deployment"],
+  "verification": "Existing Python environment with explicit PYTHONPATH to this worktree, temporary APPLYPILOT_DIR/MULTI_ROOT, empty provider credentials, synthetic fixtures only"
+}

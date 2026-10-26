@@ -1,0 +1,6 @@
+{
+  "source_archive": "/home/swazy364/code/ApplyPilot/.release-backups/20261019-pipeline-performance/deployed-source.tar.gz",
+  "previous_image": "applypilot-applypilot:pipeline-pre-performance-20261019",
+  "live_data_modified": false,
+  "rollback": "Restore the previous image/source; preserve current data volumes."
+}

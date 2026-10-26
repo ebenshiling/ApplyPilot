@@ -342,6 +342,9 @@ def test_job_match_endpoint_scores_and_generates_tailored_cv(
         assert job["title"] == "Data Analyst"
         return {"score": 8, "keywords": "sql, power bi", "reasoning": "Strong fit.", "confidence": 0.91}
 
+    from document_fixtures import attest_text,text_pdf
+    attest_text(init_db(db_path),tmp_path,"ADA EXAMPLE\nDATA ANALYST\nSUMMARY\n- Tailored summary\n")
+
     def _fake_tailor_resume(resume_text: str, job: dict, profile: dict) -> tuple[str, dict]:
         assert profile.get("personal", {}).get("full_name") == "Ada Example"
         return (
@@ -351,8 +354,7 @@ def test_job_match_endpoint_scores_and_generates_tailored_cv(
 
     def _fake_convert_to_pdf(text_path, output_path=None, html_only=False, pdf_metadata=None):
         out = output_path or Path(text_path).with_suffix(".pdf")
-        Path(out).write_bytes(b"%PDF-1.4\n%stub\n")
-        return Path(out)
+        return text_pdf(out,Path(text_path).read_text(encoding="utf-8"))
 
     monkeypatch.setattr("applypilot.dashboard_server._regen_dashboard_async", lambda *args, **kwargs: None)
     monkeypatch.setattr("applypilot.config.check_tier", lambda *args, **kwargs: None)
@@ -614,6 +616,8 @@ def test_job_match_history_supports_bulk_style_update_and_delete(
             {"score": 9, "keywords": "sql, leadership", "reasoning": "Very strong match.", "confidence": 0.95},
         ]
     )
+    from document_fixtures import attest_text,text_pdf
+    attest_text(init_db(db_path),tmp_path,"ADA EXAMPLE\nSUMMARY\n- Tailored for Data Analyst\n- Tailored for Analytics Lead\n")
 
     def _fake_score_job(*args, **kwargs):
         return next(scores)
@@ -626,8 +630,7 @@ def test_job_match_history_supports_bulk_style_update_and_delete(
 
     def _fake_convert_to_pdf(text_path, output_path=None, html_only=False, pdf_metadata=None):
         out = output_path or Path(text_path).with_suffix(".pdf")
-        Path(out).write_bytes(b"%PDF-1.4\n%stub\n")
-        return Path(out)
+        return text_pdf(out,Path(text_path).read_text(encoding="utf-8"))
 
     monkeypatch.setattr("applypilot.scoring.scorer.score_job", _fake_score_job)
     monkeypatch.setattr("applypilot.scoring.tailor.tailor_resume", _fake_tailor_resume)

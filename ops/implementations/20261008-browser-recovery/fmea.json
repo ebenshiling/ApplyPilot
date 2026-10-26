@@ -1,0 +1,10 @@
+{
+  "change_id":"20261008-browser-recovery",
+  "scope":["assisted browser","navigation","diagnostics"],
+  "failure_modes":[
+    {"mode":"Transient screenshot/frame error closes a usable browser","cause":"Inspection/capture outside exception boundary; errors from queue.Empty branch escape sibling handler","effect":"User loses application handoff","severity":8,"detection":"Transient navigation, screenshot and iframe tests","mitigation":"Recover in the session loop; preserve last image and manual controls; categorized diagnostics"},
+    {"mode":"Listing Apply is mistaken for final submission","cause":"ASP.NET submit controls and duplicate buttons","effect":"Wrong approval or application progression","severity":10,"detection":"Postback listing and final-review guard tests","mitigation":"Require listing evidence and no applicant fields for entry; only scoped non-final entry authorization; preserve final single-use approval"},
+    {"mode":"Header Login or hidden inputs trigger wrong page classification","cause":"Unfiltered generic DOM controls","effect":"Unnecessary manual handoff or unsafe fill","severity":8,"detection":"Real advert metadata and synthetic auth fixtures","mitigation":"Exclude non-applicant fields; explicit login-page evidence; listing entry preferred over header controls"},
+    {"mode":"Errors reveal credentials or account data","cause":"Raw browser/provider exception text","effect":"Private data in logs","severity":9,"detection":"Sanitized diagnostic tests","mitigation":"Known error categories and exception type only; no raw page values, tokens or stack request text"}
+  ]
+}

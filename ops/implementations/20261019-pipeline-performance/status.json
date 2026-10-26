@@ -1,0 +1,22 @@
+{
+  "implementation_id":"20261019-pipeline-performance",
+  "status":"completed_deployed",
+  "phase":"verified_faster_deployed_workspace",
+  "verification":[
+    {"command":"python scripts/agent_verify.py","result":"passed","compile":"passed","pytest_passed":820,"pytest_skipped":62,"pytest_seconds":474.16,"strict_ai":"7/7","formal_dataset":"13/13","country_ui":"local-only Chromium enabled; employer/provider requests disabled"},
+    {"command":"node --check src/applypilot/web/pipeline.js","result":"passed"},
+    {"command":"git diff --check 18f888806ca30665f6b0aff008b341681538a9ee","result":"passed"},
+    {"command":"docker compose build --quiet applypilot; docker compose up -d --no-build applypilot","result":"passed","note":"Executed as separate dependent commands under PowerShell."},
+    {"suite":"Authenticated deployed Chromium smoke","result":"passed","report":"deployment_check.json","pipeline_controls_visible_seconds":0.8426,"pipeline_catalog_requests":1,"pipeline_progress_requests":2,"unsaved_controls_preserved":true,"uk_records_preserved":98,"javascript_errors":0},
+    {"suite":"Authenticated API timing and cProfile comparison","result":"passed","before":"performance_before.json","after":"performance_after.json","pipeline_before_seconds":[9.2426,9.8891],"pipeline_after_seconds":[0.4739,0.5811],"progress_seconds":[0.2320,0.2269],"nz_preparation_seconds":[0.0395,0.0410]},
+    {"suite":"Three deployed Chromium Pipeline navigations","result":"passed","report":"browser_performance.json","controls_seconds":[0.8451,0.8265,0.8161],"all_observed_api_responses":200,"long_tasks":0}
+  ],
+  "mitigations_verified":["defensive copies","request-bound expiry","owner/country/thread isolation","fresh execution reads","queue equivalence","schema/file replacement detection","serialized WAL/cold initialization","light polling","late-response guards"],
+  "candidate_data_modified":false,
+  "schema_migrations_added":false,
+  "live_applications_submitted":false,
+  "verification_sessions":"temporary sessions revoked after checks",
+  "backup":"backup.json",
+  "handoff":"docs/PIPELINE_PERFORMANCE.md",
+  "commit_push":"not requested or performed"
+}

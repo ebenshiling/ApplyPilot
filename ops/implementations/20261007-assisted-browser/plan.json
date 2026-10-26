@@ -1,0 +1,6 @@
+{
+  "implementation_id": "20261007-assisted-browser",
+  "title": "Visible semi-assisted application browser",
+  "steps": ["Add workspace-isolated browser sessions with authenticated screenshot/input endpoints", "Reuse verified-value forms planner and reviewed document snapshots with bounded multi-page navigation", "Add takeover, page-bound final approval and confirmation evidence", "Integrate workspace UI and verify with local synthetic application portals"],
+  "owner": "ai-agent"
+}

@@ -1,0 +1,35 @@
+{
+  "implementation_id":"20261008-profile-browser-speed",
+  "status":"completed",
+  "phase":"deployed",
+  "owner":"ai-agent",
+  "updated_at":"2026-10-08",
+  "diagnosis":"Personal UI exposed only a small contact subset. Browser used separate requests per keystroke, schema initialization per command/poll, full inspection per input and 750ms serialized screenshot polling.",
+  "features":["Complete application identity/contact/address fields and optional equality-monitoring answers", "Legacy profile aliases and validated deep merges preserved", "Local saved-value matching including native selects and labelled radio groups", "Local-only demographic/date/nationality matching; no inferred answers or automatic consent", "Authenticated continuous JPEG frames targeting up to 12 fps", "Ordered bounded/coalesced input batches and flush-before-controls", "In-memory authorized browser hot routes with no database schema initialization", "Throttled manual inspection and stable workspace controls"],
+  "verification":{
+    "command":"python scripts/agent_verify.py",
+    "result":"passed",
+    "pytest":"517 passed, 1 skipped in 1327.90 seconds with browser verification enabled",
+    "new_tests":12,
+    "targeted":"27 passed covering profile/browser speed, private AI settings and assisted browser",
+    "ai_regression":"7/7 passed",
+    "ai_formal":"13/13 passed",
+    "static":"ruff, compileall, node --check and scoped diff --check passed",
+    "synthetic_input_measurement":{"events":4,"request_ack_ms":11.94,"input_processed_ms":125.0,"schema_initializations":0,"scope":"Local fixture, not a measured before/after production latency comparison"},
+    "browser_ui":"Complete profile roundtrip; live stream naturalWidth=1280; fast typing produces fewer than eight batches and zero per-character text requests",
+    "runtime":"Expanded values, ordered batch parser and authenticated stream rejection verified"
+  },
+  "deployment":{
+    "standard_build":"Docker Hub anonymous-token TLS handshake timeout",
+    "fallback":"Cached-image source overlay with no new dependencies or permanent Docker configuration changes",
+    "image":"fb668c32e0e4",
+    "recreation":"docker compose up -d --no-build --force-recreate applypilot passed",
+    "health":{"ok":true,"multi_user":true},
+    "active_applications_before":0,
+    "existing_profile":"Preserved; no production profile fields populated or altered by this implementation"
+  },
+  "guide":"docs/APPLICATION_PROFILE_AND_BROWSER.md",
+  "pre_state":"ops/implementations/20261008-profile-browser-speed/pre_state.json",
+  "post_state":"ops/implementations/20261008-profile-browser-speed/post_state.json",
+  "snapshot_note":"Prior user changes preserved; no commits created."
+}

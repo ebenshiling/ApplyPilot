@@ -1,0 +1,13 @@
+{
+  "change_id": "20261008-submission-reconciliation",
+  "scope": ["submission", "reconciliation", "dashboard"],
+  "failure_modes": [
+    {"mode":"Duplicate application","cause":"Clearing uncertainty without a checked employer outcome","effect":"Repeated employer submission","severity":10,"detection":"Evidence, status and stale-attempt tests","mitigation":"Explicit checked outcome/source/detail; unknown stays locked; no automatic retry; ordinary failure cannot clear uncertainty"},
+    {"mode":"Reconcile another or newer attempt","cause":"Stale UI or workspace mismatch","effect":"Incorrect application outcome","severity":10,"detection":"Workspace/stale token tests","mitigation":"Workspace job ownership and attempt fingerprint inside an immediate transaction"},
+    {"mode":"Invent hiring outcome or lose timeline","cause":"Blind reset/mark applied","effect":"Incorrect employer history","severity":9,"detection":"Submitted-date, history and no-submit tests","mitigation":"Preserve old events and docs; record evidence/source/reference; confirmed-not-submitted never creates applied_at"},
+    {"mode":"Missing receipt evidence after browser closes","cause":"No durable last-view capture","effect":"Candidate cannot inspect attempt","severity":8,"detection":"Attempt evidence and output-error tests","mitigation":"Store approved attempt/current-view evidence in the owned session folder; display saved image if present; evidence alone never auto-resolves"},
+    {"mode":"Misleading current opportunities or lost outcome totals","cause":"Combining retired snapshots with live records or excluding retired outcomes","effect":"Closing jobs does not reduce current counts or historical submissions disappear","severity":6,"detection":"Lifecycle metric assertions and authenticated production overview checks","mitigation":"Distinct active, archived, deleted and all-found metrics; all-time hiring metrics include retained snapshots"}
+  ],
+  "mitigation_status": "Implemented and verified; no engineering mitigation follow-up remains",
+  "production_follow_up": {"owner":"candidate","phase":"employer-outcome verification","detail":"Job 28 remains uncertain until checked portal/receipt/employer evidence establishes its outcome"}
+}

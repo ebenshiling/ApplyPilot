@@ -1,0 +1,15 @@
+{
+  "implementation_id": "20261002-smart-evidence-inbox",
+  "title": "Filtered evidence inbox and GPT-6 Luna email analysis",
+  "status": "completed",
+  "model": {"provider": "openai", "model": "gpt-6-luna", "reasoning_effort": "none"},
+  "steps": [
+    "Add category/provenance/analysis/date metadata and sender-ignore rules without deleting legacy messages or hiring records",
+    "Classify job alerts, promotions, application correspondence and unknown messages with conservative rule evidence",
+    "Preserve provider message IDs and true receipt timestamps, and keep repeated syncs idempotent",
+    "Add explicit, cached, budgeted Luna analysis with literal source evidence, candidate validation, time-zone/date verification and concurrency guards",
+    "Add paged category filters, dismiss/ignore/restore, review placeholders, suggested dates and explicit reviewed updates",
+    "Verify migrations, false-positive cases, rejected hallucinations, date handling, races and browser workflows; deploy and inspect safe counts/configuration"
+  ],
+  "verification": ["python -m pytest -q tests/test_evidence_inbox.py", "APPLYPILOT_RUN_PLAYWRIGHT=1 python scripts/agent_verify.py", "Docker configured email route and /health checks"]
+}

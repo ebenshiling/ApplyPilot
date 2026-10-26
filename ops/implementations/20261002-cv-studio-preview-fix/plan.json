@@ -1,0 +1,14 @@
+{
+  "implementation_id": "20261002-cv-studio-preview-fix",
+  "title": "CV Studio selector and preview reliability",
+  "status": "completed",
+  "scope": ["workspace UI", "legacy CV preview compatibility", "browser regression checks"],
+  "steps": [
+    "Reproduce select options being destroyed by busy() before loading job/variant values",
+    "Keep select content/value intact, capture selected values before async work, and avoid marking selection changes as unsaved edits",
+    "Render explicit preview empty/loading/error states and preserve job/version selection across CV tabs",
+    "Adopt readable in-workspace legacy CVs into version history without replacing existing files or job/profile data",
+    "Verify actual job/version/variant selection in Playwright, failed/empty previews, and required agent verification"
+  ],
+  "verification": ["APPLYPILOT_RUN_PLAYWRIGHT=1 python -m pytest -q tests/test_command_center.py", "node --check src/applypilot/web/workspace.js", "python scripts/agent_verify.py"]
+}
